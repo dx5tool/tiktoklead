@@ -2,6 +2,6 @@
 <item>
   <version>2.0.0.0</version>
   <url>https://raw.githubusercontent.com/dx5tool/tiktoklead/main/test1.zip</url>
-  <changelog>https://github.com/ravibpatel/AutoUpdater.NET/releases</changelog>
-  <mandatory>false</mandatory>
+  <changelog>https://raw.githubusercontent.com/dx5tool/tiktoklead/main/releases.txt</changelog>
+  <mandatory>true</mandatory>
 </item>
