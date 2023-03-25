@@ -1,1 +1,1 @@
-# Xem thêm thông tin tại https://TopShopee.com
+# Xem thêm thông tin tại TopShopee.com
