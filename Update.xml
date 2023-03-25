@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <item>
-  <version>2.1.6.0</version>
+  <version>1.1.6.0</version>
   <url>https://raw.githubusercontent.com/dx5tool/tiktoklead/main/test1.zip</url>
   <changelog>https://raw.githubusercontent.com/dx5tool/tiktoklead/main/releases.txt</changelog>
   <mandatory>true</mandatory>
