@@ -1,1 +1,3 @@
-# Cập nhật Mới.
+# Cập nhật Mới:
+1. Bổ sung Thay đổi IP Hàng loạt
+2. Bô sung thay đổi Tên ổ Đĩa Hàng loạt
