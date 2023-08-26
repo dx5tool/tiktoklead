@@ -1,3 +1,1 @@
-# Cập nhật thêm Tùy chọn trang tìm kiếm Bắt đầu (Min Page).
-# Cập nhật thêm Tùy chọn Tìm kiếm theo Bán chạy nhất.
 # Fix một số lỗi do sàn Thay đổi cấu trúc.
