@@ -3,5 +3,5 @@
   <version>5.0.7.0</version>
   <url>https://raw.githubusercontent.com/dx5tool/tiktoklead/main/SeoShopee_Update.zip</url>
   <changelog>https://raw.githubusercontent.com/dx5tool/tiktoklead/main/SeoShopee_releases.txt</changelog>
-  <mandatory>true</mandatory>
+  <mandatory>false</mandatory>
 </item>
