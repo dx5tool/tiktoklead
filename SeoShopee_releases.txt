@@ -1,3 +1,1 @@
-# Fix lỗi Tăng View chậm.
-# Fix lỗi Check acc Die.
 # Fix một số lỗi do sàn Thay đổi cấu trúc.
