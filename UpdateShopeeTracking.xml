@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <item>
-  <version>3.4.1.0</version>
+  <version>3.5.0.0</version>
   <url>https://raw.githubusercontent.com/dx5tool/tiktoklead/main/ShopeeTracking_Update.zip</url>
   <changelog>https://raw.githubusercontent.com/dx5tool/tiktoklead/main/ShopeeTracking_releases.txt</changelog>
   <mandatory>true</mandatory>
