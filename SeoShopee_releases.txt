@@ -1,1 +1,5 @@
 # Fix một số lỗi do sàn Thay đổi cấu trúc.
+# LƯU Ý:
+- NẾU PHIÊN BẢN HIỆN TẠI BẠN ĐANG DÙNG ỔN ĐỊNH --> THÌ KHÔNG CẦN UPDATE --> ẤN BỎ QUA (SKIP)
+- NẾU PHIÊN BẢN HIỆN TẠI BẠN ĐANG DÙNG ỔN ĐỊNH --> THÌ KHÔNG CẦN UPDATE --> ẤN BỎ QUA (SKIP)
+- NẾU PHIÊN BẢN HIỆN TẠI BẠN ĐANG DÙNG ỔN ĐỊNH --> THÌ KHÔNG CẦN UPDATE --> ẤN BỎ QUA (SKIP)
