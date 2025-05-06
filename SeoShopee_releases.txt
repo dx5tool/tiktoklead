@@ -1,4 +1,2 @@
 # Nếu lỗi --> VUI LÒNG CHAT VỚI ADMIN (SHOPEE TOOL) ĐỂ LẤY BẢN MỚI.
 # Fix một số lỗi do sàn Thay đổi cấu trúc.
-# LƯU Ý:
-- NẾU PHIÊN BẢN HIỆN TẠI BẠN ĐANG DÙNG ỔN ĐỊNH --> THÌ KHÔNG CẦN UPDATE --> ẤN BỎ QUA (SKIP)
