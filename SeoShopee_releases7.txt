@@ -1,2 +1,3 @@
 # Nếu lỗi --> VUI LÒNG CHAT VỚI ADMIN (SHOPEE TOOL) ĐỂ LẤY BẢN MỚI.
+# Zalo admin: 0966.111.500
 # Fix một số lỗi do sàn Thay đổi cấu trúc.
