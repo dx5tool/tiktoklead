@@ -15,7 +15,7 @@ import { AssistantsView } from "./components/AssistantsView";
 import { WarmDialog } from "./components/WarmDialog";
 import { useAsk } from "./components/Ask";
 import { CommandPalette, type Command } from "./components/CommandPalette";
-import { ProfileTable, isOpenHere } from "./components/ProfileTable";
+import { isOpenHere } from "./components/ProfileTable";
 import { Proxies } from "./components/Proxies";
 import { Trash } from "./components/Trash";
 import { Users } from "./components/Users";
@@ -23,14 +23,18 @@ import { ServerSetup } from "./components/ServerSetup";
 import { Enrol } from "./components/Enrol";
 import { Signup } from "./components/Signup";
 import { Settings } from "./components/Settings";
-import { Sidebar, type View } from "./components/Sidebar";
+import { type View } from "./components/Sidebar";
 import { ShareDialog } from "./components/ShareDialog";
 import { CsvImport } from "./components/CsvImport";
 import { AntidetectImport } from "./components/AntidetectImport";
-import { Icon, IconButton } from "./components/Icon";
 import { useTheme } from "./theme";
 import { exitSharing } from "./consistency";
-import { isSuggested } from "./status";
+import { AppBackground } from "./components/simprint/AppBackground";
+import { SimprintSidebar } from "./components/simprint/SimprintSidebar";
+import { SimprintHeader } from "./components/simprint/SimprintHeader";
+import { SimprintProfileTable } from "./components/simprint/SimprintProfileTable";
+import { SimprintProfileGrid } from "./components/simprint/SimprintProfileGrid";
+import { SimprintBulkBar } from "./components/simprint/SimprintBulkBar";
 
 /** What the browser build the agent asks for changes, for the bar that offers
  *  it. One sentence for every build told a Mac being offered 0.3.8 about a
@@ -131,6 +135,21 @@ export function App() {
   const [tag, setTag] = useState("");
   // The stage filter (5.5): "" is every stage, "\u0000none" is no stage.
   const [stage, setStage] = useState("");
+  const [viewMode, setViewMode] = useState<"table" | "grid">(() => {
+    try {
+      return (localStorage.getItem("fury.view_mode") as "table" | "grid") || "table";
+    } catch {
+      return "table";
+    }
+  });
+  const handleViewModeChange = (mode: "table" | "grid") => {
+    setViewMode(mode);
+    try {
+      localStorage.setItem("fury.view_mode", mode);
+    } catch {
+      /* ignore */
+    }
+  };
   const [selected, setSelected] = useState<Set<string>>(new Set());
   /** `undefined` closed, `null` making new ones, a profile means copying it. */
   const [bulk, setBulk] = useState<Profile | null | undefined>(undefined);
@@ -537,6 +556,140 @@ export function App() {
       setBusy(false);
     }
   };
+  const onCloseMany = async () => {
+    setBusy(true);
+    for (const p of closable) await api.stop(p.id, p.origin);
+    await refreshProfiles();
+    setBusy(false);
+  };
+
+  const handleUploadSelected = async () => {
+    const team = projects.filter((p) => p.origin === "team");
+    let target = active?.origin === "team" ? active.id : null;
+    if (!target) {
+      const wanted = chosen[0].project_name?.trim() || t("share.autoProject");
+      target =
+        team.find((p) => p.name === wanted)?.id ??
+        (await api.createProjectIn(wanted, "team")).id;
+    }
+    const go = await ask({
+      title: t("up.send"),
+      detail: t("up.confirm", {
+        n: String(chosen.length),
+        project: projects.find((p) => p.id === target)?.name ?? "",
+      }),
+      confirmLabel: t("up.send"),
+    });
+    if (go === null) return;
+    setBusy(true);
+    let proxyMoved = false;
+    try {
+      for (const p of chosen) {
+        const r = await api.uploadProfile(p.id, target);
+        proxyMoved = proxyMoved || r.proxy_moved;
+      }
+      setError(
+        t("up.done", { name: chosen[0].name }) +
+          (proxyMoved ? " " + t("up.proxyMoved") : ""),
+      );
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+      await refreshProfiles();
+    }
+  };
+
+  const handleDeleteSelected = async () => {
+    const go = await ask({
+      title: t("bar.deleteSelected", { n: chosen.length }),
+      detail: t("bar.confirmDeleteMany", { n: chosen.length }),
+      confirmLabel: t("ui.delete"),
+      danger: true,
+    });
+    if (go === null) return;
+    setBusy(true);
+    for (const p of chosen) await api.deleteProfile(p.id, p.origin);
+    setSelected(new Set());
+    await load();
+    await refreshProfiles();
+    setBusy(false);
+  };
+
+  const handleMoveSelected = async (to: string) => {
+    setBusy(true);
+    try {
+      await api.moveProfiles(
+        chosen.map((p) => p.id),
+        to === "\u0000none" ? null : to,
+        chosen[0].origin,
+      );
+      setSelected(new Set());
+      await load();
+      await refreshProfiles();
+    } catch (err) {
+      setError(say(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleAssignProxySelected = async (v: string) => {
+    const used = new Set(profiles.map((p) => p.proxy?.id).filter(Boolean));
+    const free = (proxyList ?? []).filter((x) => !used.has(x.id));
+    const assign = async (pairs: [Profile, string | null][]) => {
+      setBusy(true);
+      setError(null);
+      let failed = 0;
+      for (const [p, id] of pairs) {
+        try {
+          await api.saveProfile(
+            local ? { ...p, proxy_id: id ?? "", proxy: null } : { ...p, proxy: id ? { id } : null },
+            p.origin,
+          );
+        } catch {
+          failed++;
+        }
+      }
+      setSelected(new Set());
+      await refreshProfiles();
+      setBusy(false);
+      setNotice({
+        text: failed > 0 ? t("bar.proxySetFailed", { n: pairs.length - failed, f: failed }) : t("bar.proxySet", { n: pairs.length }),
+        forProfile: null,
+      });
+    };
+    if (v === "\u0000each") {
+      void assign(chosen.map((p, i) => [p, free[i].id] as [Profile, string]));
+    } else if (v === "\u0000none") {
+      void assign(chosen.map((p) => [p, null] as [Profile, null]));
+    } else {
+      void assign(chosen.map((p) => [p, v] as [Profile, string]));
+    }
+  };
+
+  const handleMirrorSelected = async () => {
+    setMirrorNote(null);
+    try {
+      const r = await api.mirrorStart(chosen.map((p) => p.id), mirror?.typing ?? true);
+      setMirror(r.status.active ? r.status : null);
+      if (r.refused.length > 0) {
+        setMirrorNote(
+          r.refused
+            .map((x) => {
+              const name = profiles.find((p) => p.id === x.id)?.name ?? x.id;
+              return x.reason === "open_without_cdp"
+                ? t("mir.refusedOpen", { name })
+                : `${name}: ${say({ code: x.code, message: x.reason })}`;
+            })
+            .join(" "),
+        );
+      }
+      await refreshProfiles();
+    } catch (e) {
+      setMirrorNote(say(e));
+    }
+  };
 
   const onStop = async (profile: Profile) => {
     setBusy(true);
@@ -614,9 +767,10 @@ export function App() {
   const dl = shell?.core_download ?? null;
 
   return (
-    <div className="app">
+    <div className="app relative overflow-hidden flex h-screen w-screen bg-[#090d16] text-slate-100">
+      <AppBackground />
       {askDialog}
-      <Sidebar
+      <SimprintSidebar
         projects={projects}
         active={active}
         shell={shell}
@@ -747,10 +901,10 @@ export function App() {
           await load();
         }}
       />
-      <main className="main">
-        <header className="head">
-          <h1>
-            {view === "trash"
+      <main className="main flex-1 flex flex-col h-screen overflow-hidden relative min-w-0">
+        <SimprintHeader
+          title={
+            view === "trash"
               ? t("trash.title")
               : view === "proxies"
                 ? t("nav.proxies")
@@ -762,15 +916,34 @@ export function App() {
                   ? t("nav.users")
                   : view === "sharedWithMe"
                     ? t("nav.sharedWithMe")
-                    : (active?.name ?? t("nav.profiles"))}
-          </h1>
-          {view === "profiles" && (
-            <span className="muted">{t("app.profileCount", { n: profiles.length })}</span>
+                    : (active?.name ?? t("nav.profiles"))
+          }
+          totalCount={view === "sharedWithMe" ? shared.length : profiles.length}
+          runningCount={profiles.filter((p) => p.running).length}
+          viewMode={viewMode}
+          onViewModeChange={handleViewModeChange}
+          query={query}
+          onQueryChange={setQuery}
+          tags={tags}
+          selectedTag={tag}
+          onTagChange={setTag}
+          stages={stages}
+          selectedStage={stage}
+          onStageChange={setStage}
+          openOnly={openOnly}
+          onOpenOnlyChange={setOpenOnly}
+          importsHere={importsHere}
+          onOpenBulk={() => setBulk(null)}
+          onOpenCsv={() => setCsv(true)}
+          onOpenGologin={() => setGologin(true)}
+          onRefresh={() => refreshProfiles()}
+          stageCounts={Object.fromEntries(
+            stages.map((st) => [
+              st,
+              profiles.filter((p) => (p.status ?? "").trim().toLowerCase() === st).length,
+            ])
           )}
-          {view === "sharedWithMe" && (
-            <span className="muted">{t("app.profileCount", { n: shared.length })}</span>
-          )}
-        </header>
+        />
 
         {!shell.agent_ready && (
           <div className="notice warnBar" role="status">
@@ -1049,375 +1222,6 @@ export function App() {
           </div>
         )}
 
-        {view === "profiles" && (
-          <div className="toolbar">
-            {/* No "New profile" here. It is the first thing in the sidebar,
-                permanently, and a second copy of the primary action a few
-                pixels away is two places to look for one decision.
-
-                Making MANY is a different decision and does belong here: it is
-                the one people reach for after the first few profiles, and it
-                acts on the project this toolbar is already filtering. */}
-            <button onClick={() => setBulk(null)}>{t("bp.button")}</button>
-            {/* Into this computer only: a team profile's proxy carries sealed
-                credentials on the server -- see CsvImport. Shown whenever the
-                profiles would land here: local mode, a local project, or no
-                project on a connected shell. It used to follow the shell's
-                mode alone, so a connected shell never showed it, even inside
-                a local project (reported 10.10.2026: "where is the import"). */}
-            {importsHere && <button className="ghost" onClick={() => setCsv(true)}>{t("csv.button")}</button>}
-            {importsHere && <button className="ghost" onClick={() => setGologin(true)}>{t("gl.button")}</button>}
-            <input
-              className="search"
-              placeholder={t("bar.search")}
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-            />
-            {tags.length > 0 && (
-              <select style={{ width: "auto" }} value={tag} onChange={(e) => setTag(e.target.value)}>
-                <option value="">{t("bar.allTags")}</option>
-                <option value={"\u0000none"}>{t("bar.untagged")}</option>
-                {tags.map((x) => (
-                  <option key={x} value={x}>
-                    {x}
-                  </option>
-                ))}
-              </select>
-            )}
-            {stages.length > 0 && (
-              <select style={{ width: "auto" }} value={stage} onChange={(e) => setStage(e.target.value)}>
-                <option value="">{t("bar.allStages")}</option>
-                <option value={"\u0000none"}>{t("bar.noStage")}</option>
-                {stages.map((x) => (
-                  <option key={x} value={x}>
-                    {isSuggested(x) ? t(`status.${x}` as never) : x} ({profiles.filter((p) => (p.status ?? "").trim().toLowerCase() === x).length})
-                  </option>
-                ))}
-              </select>
-            )}
-            <label className="row" style={{ gap: 6, whiteSpace: "nowrap" }}>
-              <input
-                type="checkbox"
-                style={{ width: 14, height: 14, accentColor: "var(--accent)" }}
-                checked={openOnly}
-                onChange={(e) => setOpenOnly(e.target.checked)}
-              />
-              <span className="muted small">
-                {t("bar.openOnly", { n: profiles.filter((p) => p.running).length })}
-              </span>
-            </label>
-            <div className="spacer" />
-            <IconButton
-              icon="refresh"
-              label={t("bar.refresh")}
-              onClick={() => void refreshProfiles()}
-            />
-            {/* Its own line, always: it appears and disappears with the
-                selection, and a block that reflows the filters above it every
-                time a checkbox is ticked is the "visual mess" this replaced. */}
-            {chosen.length > 0 && (
-              <div className="bulk">
-                <span className="muted small">
-                  {t("bar.selected", { n: chosen.length })}
-                </span>
-                {openable.length > 0 && (
-                  <button disabled={busy} onClick={openMany}>
-                    {t("bar.openSelected", { n: openable.length })}
-                  </button>
-                )}
-                {/* Only what is on the server can be given away, so the button
-                    appears only when every selected row is. A local profile
-                    exists nowhere the other person can reach, and offering to
-                    share it would end in an error that reads like a fault
-                    rather than like an explanation. */}
-                {/* Shown for local rows too, disabled, with the reason on it.
-                    Hiding it was worse: a profile on this machine cannot be
-                    given away until it is on a server, and with no button there
-                    was nothing on screen to say so -- the question "how do I
-                    give somebody this profile" had no answer anywhere in the
-                    window. A greyed control that explains itself teaches the
-                    order of the two steps. */}
-                {/* Enabled for anything. A local profile is copied to the
-                    server on the way, by the dialog, without being asked --
-                    "why can't I just share it and have it appear for them" is
-                    the right question and the answer was four steps of our
-                    bookkeeping. */}
-                {!local && chosen.length > 0 && (
-                  <button className="ghost" disabled={busy} onClick={() => setSharing(chosen)}>
-                    <Icon name="share" /> {t("row.share")}
-                  </button>
-                )}
-                {/* The other direction, and the one that makes sharing reachable
-                    for a profile that started here. Offered only for local rows,
-                    and only when there is a server to send them to. */}
-                {!local && chosen.length > 0 && chosen.every((p) => p.origin === "local") && (
-                  <IconButton
-                    icon="upload"
-                    label={t("up.send")}
-                    disabled={busy}
-                    onClick={async () => {
-                      // Into the project being viewed, or the only one there
-                      // is. No picker: Ask has no list, and adding one for this
-                      // would be a screen of its own -- while choosing a
-                      // project is already what the sidebar is for.
-                      // A folder is bookkeeping, and asking somebody to choose
-                      // one before they may do the thing they asked for is
-                      // making them do ours. The one being viewed if there is
-                      // one, otherwise a server project named after the folder
-                      // these came from, made once and reused.
-                      const team = projects.filter((p) => p.origin === "team");
-                      let target = active?.origin === "team" ? active.id : null;
-                      if (!target) {
-                        const wanted = chosen[0].project_name?.trim() || t("share.autoProject");
-                        target =
-                          team.find((p) => p.name === wanted)?.id ??
-                          (await api.createProjectIn(wanted, "team")).id;
-                      }
-                      const go = await ask({
-                        title: t("up.send"),
-                        detail: t("up.confirm", {
-                          n: String(chosen.length),
-                          project: projects.find((p) => p.id === target)?.name ?? "",
-                        }),
-                        confirmLabel: t("up.send"),
-                      });
-                      if (go === null) return;
-                      setBusy(true);
-                      let proxyMoved = false;
-                      try {
-                        for (const p of chosen) {
-                          const r = await api.uploadProfile(p.id, target);
-                          proxyMoved = proxyMoved || r.proxy_moved;
-                        }
-                        setError(
-                          t("up.done", { name: chosen[0].name }) +
-                            (proxyMoved ? " " + t("up.proxyMoved") : ""),
-                        );
-                      } catch (e) {
-                        setError((e as Error).message);
-                      } finally {
-                        setBusy(false);
-                        await refreshProfiles();
-                      }
-                    }}
-                  />
-                )}
-                {closable.length > 0 && (
-                  <IconButton
-                    icon="close"
-                    label={t("bar.closeSelected", { n: closable.length })}
-                    disabled={busy}
-                    onClick={async () => {
-                      setBusy(true);
-                      for (const p of closable) await api.stop(p.id, p.origin);
-                      await refreshProfiles();
-                      setBusy(false);
-                    }}
-                  />
-                )}
-                <IconButton
-                  icon="trash"
-                  danger
-                  label={t("bar.deleteSelected", { n: chosen.length })}
-                  title={
-                    closable.length > 0
-                      ? t("row.closeFirst")
-                      : t("bar.deleteSelected", { n: chosen.length })
-                  }
-                  disabled={busy || closable.length > 0}
-                  onClick={async () => {
-                    const go = await ask({
-                      title: t("bar.deleteSelected", { n: chosen.length }),
-                      detail: t("bar.confirmDeleteMany", { n: chosen.length }),
-                      confirmLabel: t("ui.delete"),
-                      danger: true,
-                    });
-                    if (go === null) return;
-                    setBusy(true);
-                    for (const p of chosen) await api.deleteProfile(p.id, p.origin);
-                    setSelected(new Set());
-                    await load();
-                    await refreshProfiles();
-                    setBusy(false);
-                  }}
-                />
-                {/* Filing, into folders of the SAME side as the selection.
-                    A local profile goes in a local folder and a team one in a
-                    team project; offering the other list is what produced
-                    "not found" from a server asked about a profile it had never
-                    seen. Hiding it altogether was the over-correction: it left
-                    somebody who just wants their own profiles sorted into
-                    Personal and Work with no way to do it. */}
-                {(() => {
-                  const side = chosen.every((p) => p.origin === "local")
-                    ? "local"
-                    : chosen.every((p) => p.origin === "team")
-                      ? "team"
-                      : null;
-                  const filable = side ? projects.filter((p) => p.origin === side) : [];
-                  return filable.length > 0 && (
-                  <select
-                    style={{ width: "auto" }}
-                    value=""
-                    disabled={busy}
-                    onChange={async (e) => {
-                      const to = e.target.value;
-                      if (to === "") return;
-                      setBusy(true);
-                      try {
-                        // "\u0000none" rather than "" for out-of-every-project:
-                        // an empty value is the placeholder, and the two must
-                        // not be the same string or picking one does nothing.
-                        await api.moveProfiles(
-                          chosen.map((p) => p.id),
-                          to === "\u0000none" ? null : to,
-                          chosen[0].origin,
-                        );
-                        setSelected(new Set());
-                        await load();
-                        await refreshProfiles();
-                      } catch (err) {
-                        setError(say(err));
-                      } finally {
-                        setBusy(false);
-                      }
-                    }}
-                  >
-                    <option value="">{t("bar.moveTo")}</option>
-                    {filable.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.name}
-                      </option>
-                    ))}
-                    {/* Out of every folder is a local idea: on a server a
-                        profile always belongs to a project, because the project
-                        is what carries access to it. */}
-                    {side === "local" && (
-                      <option value={"\u0000none"}>{t("bar.moveOut")}</option>
-                    )}
-                  </select>
-                  );
-                })()}
-                {/* Proxy for the whole selection (5.7). Offered when every
-                    chosen row is on the side the proxy list describes: the
-                    list is this machine's in local mode and the server's
-                    otherwise, and a local profile cannot point at a server
-                    proxy. "Each its own" hands out proxies nobody uses yet,
-                    one per profile — the answer to the household warning in
-                    the proxy column. */}
-                {(() => {
-                  const side = local ? "local" : "team";
-                  if (!proxyList || proxyList.length === 0 || !chosen.every((p) => p.origin === side)) return null;
-                  const used = new Set(profiles.map((p) => p.proxy?.id).filter(Boolean));
-                  const free = proxyList.filter((x) => !used.has(x.id));
-                  const assign = async (pairs: [Profile, string | null][]) => {
-                    setBusy(true);
-                    setError(null);
-                    let failed = 0;
-                    for (const [p, id] of pairs) {
-                      try {
-                        // The agent takes the id and refuses a partial proxy
-                        // object; the server path reads `proxy.id`. Each side
-                        // gets the shape it reads.
-                        await api.saveProfile(
-                          local ? { ...p, proxy_id: id ?? "", proxy: null } : { ...p, proxy: id ? { id } : null },
-                          p.origin,
-                        );
-                      } catch {
-                        failed++;
-                      }
-                    }
-                    setSelected(new Set());
-                    await refreshProfiles();
-                    setBusy(false);
-                    setNotice({ text: failed > 0 ? t("bar.proxySetFailed", { n: pairs.length - failed, f: failed }) : t("bar.proxySet", { n: pairs.length }), forProfile: null });
-                  };
-                  return (
-                    <select
-                      style={{ width: "auto" }}
-                      value=""
-                      disabled={busy}
-                      onChange={(e) => {
-                        const v = e.target.value;
-                        if (v === "") return;
-                        if (v === "\u0000each") {
-                          void assign(chosen.map((p, i) => [p, free[i].id] as [Profile, string]));
-                        } else if (v === "\u0000none") {
-                          void assign(chosen.map((p) => [p, null] as [Profile, null]));
-                        } else {
-                          void assign(chosen.map((p) => [p, v] as [Profile, string]));
-                        }
-                      }}
-                    >
-                      <option value="">{t("bar.proxyTo")}</option>
-                      <option value={"\u0000each"} disabled={free.length < chosen.length}>
-                        {t("bar.proxyEach", { n: free.length })}
-                      </option>
-                      {proxyList.map((x) => (
-                        <option key={x.id} value={x.id}>
-                          {x.name} · {x.last_country ?? x.host}{used.has(x.id) ? ` · ${t("px.usedByN", { n: profiles.filter((p) => p.proxy?.id === x.id).length })}` : ""}
-                        </option>
-                      ))}
-                      {/* A team profile must have a proxy: the server refuses one without. */}
-                      {local && <option value={"\u0000none"}>{t("bar.proxyNone")}</option>}
-                    </select>
-                  );
-                })()}
-                {/* One profile, not many. Copying acts on a single source and
-                    cookies belong to a single jar, so offering either for a
-                    multi-selection would mean guessing which one was meant. */}
-                {chosen.length >= 1 && local && (
-                  <button disabled={busy} title={t("warm.why")} onClick={() => setWarmFor(chosen)}>
-                    {t("warm.button", { n: chosen.length })}
-                  </button>
-                )}
-                {chosen.length >= 2 && local && (
-                  <button
-                    className="primary"
-                    disabled={busy}
-                    title={t("mir.hint")}
-                    onClick={async () => {
-                      setMirrorNote(null);
-                      try {
-                        const r = await api.mirrorStart(chosen.map((p) => p.id), mirror?.typing ?? true);
-                        setMirror(r.status.active ? r.status : null);
-                        if (r.refused.length > 0) {
-                          setMirrorNote(
-                            r.refused
-                              .map((x) => {
-                                const name = profiles.find((p) => p.id === x.id)?.name ?? x.id;
-                                return x.reason === "open_without_cdp" ? t("mir.refusedOpen", { name }) : `${name}: ${say({ code: x.code, message: x.reason })}`;
-                              })
-                              .join(" "),
-                          );
-                        }
-                        await refreshProfiles();
-                      } catch (e) {
-                        setMirrorNote(say(e));
-                      }
-                    }}
-                  >
-                    {t("mir.start", { n: chosen.length })}
-                  </button>
-                )}
-                {chosen.length === 1 && (
-                  <>
-                    <IconButton icon="copy" label={t("bp.clone")} onClick={() => setBulk(chosen[0])} />
-                    <IconButton
-                      icon="cookie"
-                      label={t("ck.cookies")}
-                      onClick={() => setCookiesFor(chosen[0])}
-                    />
-                  </>
-                )}
-                <button className="ghost" onClick={() => setSelected(new Set())}>
-                  {t("bar.clearSelection")}
-                </button>
-              </div>
-            )}
-
-          </div>
-        )}
 
         {/* No project selected is not the same as a project with no profiles,
             and saying the latter to someone who has been granted nothing sends
@@ -1450,11 +1254,11 @@ export function App() {
             somebody else, and two people can both have a "Shop DE". The column
             that shows a project shows who lent it instead. */}
         {view === "sharedWithMe" && (
-          <div className="tableWrap">
+          <div className="tableWrap flex-1 overflow-auto">
             {shared.length === 0 ? (
               <p className="muted" style={{ padding: "var(--s-3)" }}>{t("shared.empty")}</p>
-            ) : (
-              <ProfileTable
+            ) : viewMode === "table" ? (
+              <SimprintProfileTable
                 profiles={shared}
                 showProject
                 selected={new Set()}
@@ -1468,53 +1272,116 @@ export function App() {
                 onLaunch={onLaunch}
                 onStop={onStop}
               />
+            ) : (
+              <SimprintProfileGrid
+                profiles={shared}
+                selected={new Set()}
+                onToggle={() => {}}
+                me={me}
+                thisMachine={shell.machine_name}
+                local={false}
+                busy={busy}
+                launching={launching}
+                onLaunch={onLaunch}
+                onStop={onStop}
+              />
             )}
           </div>
         )}
 
         {view === "profiles" && (
-          <div className="tableWrap">
-            <ProfileTable
-              profiles={shown}
-              showProject={active === null}
-              selected={selected}
-              onToggle={toggle}
-              onToggleAll={toggleAll}
-              me={me}
-              thisMachine={shell.machine_name}
-              local={local}
-              busy={busy}
-              launching={launching}
-              onLaunch={onLaunch}
-              onStop={onStop}
-              onEdit={setEditing}
-              onExtensions={setExtFor}
-              onShare={local ? undefined : (p) => setSharing([p])}
-              onNetwork={setNetFor}
-              onClone={(p) => setBulk(p)}
-              personas={personaIds}
-              sharing={exitCounts}
-              /* Offered always, and gated per row rather than per mode.
-                 It used to be handed over only in local mode, so connecting to
-                 a server removed the delete button from EVERY row -- including
-                 the local ones now shown beside the server's, which the server
-                 has no say over at all. The table shows it when the row's own
-                 permissions allow it, and a local row carries all of them. */
-              onDelete={
-                (async (p) => {
-                      const go = await ask({
-                        title: t("row.delete"),
-                        detail: t("row.confirmDelete", { name: p.name }),
-                        confirmLabel: t("ui.delete"),
-                        danger: true,
-                      });
-                      if (go === null) return;
-                      await api.deleteProfile(p.id, p.origin);
-                      await refreshProfiles();
-                })
-              }
-            />
+          <div className="tableWrap flex-1 overflow-auto">
+            {viewMode === "table" ? (
+              <SimprintProfileTable
+                profiles={shown}
+                showProject={active === null}
+                selected={selected}
+                onToggle={toggle}
+                onToggleAll={toggleAll}
+                me={me}
+                thisMachine={shell.machine_name}
+                local={local}
+                busy={busy}
+                launching={launching}
+                onLaunch={onLaunch}
+                onStop={onStop}
+                onEdit={setEditing}
+                onExtensions={setExtFor}
+                onShare={local ? undefined : (p) => setSharing([p])}
+                onNetwork={setNetFor}
+                onClone={(p) => setBulk(p)}
+                personas={personaIds}
+                sharing={exitCounts}
+                onDelete={async (p) => {
+                  const go = await ask({
+                    title: t("row.delete"),
+                    detail: t("row.confirmDelete", { name: p.name }),
+                    confirmLabel: t("ui.delete"),
+                    danger: true,
+                  });
+                  if (go === null) return;
+                  await api.deleteProfile(p.id, p.origin);
+                  await refreshProfiles();
+                }}
+                onCookies={setCookiesFor}
+              />
+            ) : (
+              <SimprintProfileGrid
+                profiles={shown}
+                selected={selected}
+                onToggle={toggle}
+                me={me}
+                thisMachine={shell.machine_name}
+                local={local}
+                busy={busy}
+                launching={launching}
+                onLaunch={onLaunch}
+                onStop={onStop}
+                onEdit={setEditing}
+                onExtensions={setExtFor}
+                onShare={local ? undefined : (p) => setSharing([p])}
+                onNetwork={setNetFor}
+                onClone={(p) => setBulk(p)}
+                personas={personaIds}
+                sharing={exitCounts}
+                onDelete={async (p) => {
+                  const go = await ask({
+                    title: t("row.delete"),
+                    detail: t("row.confirmDelete", { name: p.name }),
+                    confirmLabel: t("ui.delete"),
+                    danger: true,
+                  });
+                  if (go === null) return;
+                  await api.deleteProfile(p.id, p.origin);
+                  await refreshProfiles();
+                }}
+                onCookies={setCookiesFor}
+              />
+            )}
           </div>
+        )}
+
+        {chosen.length > 0 && (
+          <SimprintBulkBar
+            chosen={chosen}
+            busy={busy}
+            local={local}
+            projects={projects}
+            proxyList={proxyList}
+            profiles={profiles}
+            openMany={openMany}
+            onCloseMany={onCloseMany}
+            onShare={() => setSharing(chosen)}
+            onUpload={handleUploadSelected}
+            onDeleteMany={handleDeleteSelected}
+            onMoveTo={handleMoveSelected}
+            onAssignProxy={handleAssignProxySelected}
+            onWarm={() => setWarmFor(chosen)}
+            onMirror={handleMirrorSelected}
+            onClone={(p) => setBulk(p)}
+            onCookies={(p) => setCookiesFor(p)}
+            onClear={() => setSelected(new Set())}
+          />
         )}
 
         {sharing && (

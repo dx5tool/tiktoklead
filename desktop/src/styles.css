@@ -1,3 +1,6 @@
+@import "tailwindcss";
+@import "./theme/simprint-tokens.css";
+
 /* Fury — design tokens and the shell.
  *
  * This is an operator's tool that stays open all day, so the rules are density,

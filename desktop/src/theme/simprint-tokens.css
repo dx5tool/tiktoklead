@@ -1,0 +1,220 @@
+/* Simprint Design System Tokens */
+:root {
+  --simprint-bg: #090d16;
+  --simprint-surface: #111827;
+  --simprint-card: #161f30;
+  --simprint-card-hover: #1e293b;
+  --simprint-border: #1e293b;
+  --simprint-border-subtle: rgba(255, 255, 255, 0.08);
+  --simprint-border-glow: rgba(6, 182, 212, 0.3);
+
+  --simprint-cyan: #06b6d4;
+  --simprint-cyan-glow: rgba(6, 182, 212, 0.25);
+  --simprint-blue: #0284c7;
+  --simprint-emerald: #10b981;
+  --simprint-emerald-glow: rgba(16, 185, 129, 0.25);
+  --simprint-amber: #f59e0b;
+  --simprint-amber-glow: rgba(245, 158, 11, 0.25);
+  --simprint-rose: #f43f5e;
+  --simprint-rose-glow: rgba(244, 63, 94, 0.25);
+
+  --simprint-btn-gradient: linear-gradient(135deg, #06b6d4 0%, #2563eb 100%);
+  --simprint-btn-gradient-hover: linear-gradient(135deg, #22d3ee 0%, #3b82f6 100%);
+
+  /* Overriding Fury base variables for consistent dark studio theme */
+  --bg: #090d16;
+  --surface: #111827;
+  --raised: #161f30;
+  --hover: #1e293b;
+  --line: #1e293b;
+  --line-strong: #334155;
+  --accent: #06b6d4;
+  --accent-hover: #22d3ee;
+  --accent-dim: rgba(6, 182, 212, 0.15);
+  --ok: #10b981;
+  --warn: #f59e0b;
+}
+
+/* Glassmorphism utility classes */
+.simprint-glass {
+  background: rgba(17, 24, 39, 0.75);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.simprint-glass-dock {
+  background: rgba(15, 23, 42, 0.92);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 1px solid rgba(51, 65, 85, 0.8);
+}
+
+.simprint-card-glow:hover {
+  border-color: rgba(6, 182, 212, 0.4);
+  box-shadow: 0 0 20px rgba(6, 182, 212, 0.12);
+}
+
+/* Custom scrollbar styling for Simprint tables and containers */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #334155;
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #475569;
+}
+
+/* Modal & Dialog Studio Styling */
+.scrim {
+  background: rgba(0, 0, 0, 0.75) !important;
+  backdrop-filter: blur(8px) !important;
+  -webkit-backdrop-filter: blur(8px) !important;
+  z-index: 50 !important;
+}
+
+.modal {
+  border: 1px solid #1e293b !important;
+  border-radius: 18px !important;
+  background: #111827 !important;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.75), 0 0 0 1px rgba(255, 255, 255, 0.06), 0 0 30px rgba(6, 182, 212, 0.08) !important;
+}
+
+.modalHead {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  padding: 18px 24px 14px !important;
+}
+
+.modalHead h2 {
+  color: #f8fafc !important;
+  font-weight: 700 !important;
+  font-size: 18px !important;
+  letter-spacing: -0.01em;
+}
+
+.tabs {
+  border-bottom: 1px solid #1e293b !important;
+  padding: 0 24px !important;
+}
+
+.tab {
+  color: #94a3b8 !important;
+  font-weight: 500 !important;
+  font-size: 13px !important;
+  border-bottom: 2px solid transparent !important;
+  transition: all 0.15s ease-in-out;
+}
+
+.tab:hover:not(:disabled) {
+  color: #e2e8f0 !important;
+  border-bottom-color: #334155 !important;
+}
+
+.tab[aria-selected="true"] {
+  color: #22d3ee !important;
+  border-bottom-color: #06b6d4 !important;
+  text-shadow: 0 0 12px rgba(6, 182, 212, 0.4);
+}
+
+.modalFoot {
+  border-top: 1px solid #1e293b !important;
+  padding: 14px 24px !important;
+  background: rgba(9, 13, 22, 0.6) !important;
+}
+
+/* Fingerprint Inspector Preview Terminal */
+.overview {
+  background: #090d16 !important;
+  border-left: 1px solid #1e293b !important;
+  padding: 20px 18px !important;
+}
+
+.overview h3 {
+  color: #06b6d4 !important;
+  font-size: 11px !important;
+  font-weight: 700 !important;
+  letter-spacing: 0.1em !important;
+  text-transform: uppercase !important;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.overview h3::before {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #06b6d4;
+  box-shadow: 0 0 6px #06b6d4;
+}
+
+.kv dt {
+  color: #64748b !important;
+  font-family: var(--mono) !important;
+  font-size: 11px !important;
+}
+
+.kv dd {
+  color: #10b981 !important;
+  font-family: var(--mono) !important;
+  font-size: 11.5px !important;
+  text-shadow: 0 0 8px rgba(16, 185, 129, 0.2);
+}
+
+/* Form inputs & buttons polish */
+input[type="text"],
+input[type="password"],
+input[type="number"],
+select,
+textarea {
+  border-radius: 10px !important;
+  border: 1px solid #1e293b !important;
+  background: #0b0f19 !important;
+  color: #f1f5f9 !important;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+input[type="text"]:focus,
+input[type="password"]:focus,
+input[type="number"]:focus,
+select:focus,
+textarea:focus {
+  border-color: #06b6d4 !important;
+  box-shadow: 0 0 0 2px rgba(6, 182, 212, 0.2) !important;
+  outline: none !important;
+}
+
+button.primary {
+  background: var(--simprint-btn-gradient) !important;
+  border: 1px solid rgba(6, 182, 212, 0.4) !important;
+  color: #ffffff !important;
+  font-weight: 600 !important;
+  border-radius: 10px !important;
+  box-shadow: 0 4px 14px rgba(6, 182, 212, 0.25) !important;
+}
+
+button.primary:hover:not(:disabled) {
+  background: var(--simprint-btn-gradient-hover) !important;
+  box-shadow: 0 6px 20px rgba(6, 182, 212, 0.35) !important;
+}
+
+button.ghost {
+  border-radius: 10px !important;
+  border: 1px solid #1e293b !important;
+  background: rgba(17, 24, 39, 0.7) !important;
+  color: #cbd5e1 !important;
+}
+
+button.ghost:hover:not(:disabled) {
+  background: #1e293b !important;
+  color: #ffffff !important;
+  border-color: #334155 !important;
+}
