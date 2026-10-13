@@ -147,9 +147,11 @@ textarea {
 /* ---- layout ------------------------------------------------------------ */
 
 .app {
-  display: grid;
-  grid-template-columns: 216px 1fr;
+  display: flex !important;
+  flex-direction: column !important;
+  width: 100vw;
   height: 100vh;
+  overflow: hidden;
 }
 
 .sidebar {

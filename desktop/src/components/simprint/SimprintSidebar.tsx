@@ -10,7 +10,6 @@ import {
   Plus,
   Settings as SettingsIcon,
   Folder,
-  ShieldCheck,
   ChevronRight,
   MoreVertical,
 } from "lucide-react";
@@ -84,55 +83,24 @@ export const SimprintSidebar: React.FC<SimprintSidebarProps> = ({
         collapsed ? "w-16 min-w-[4rem]" : "w-64 min-w-[16rem]"
       }`}
     >
-      {/* Brand Header */}
-      <div className={`p-3 ${collapsed ? "flex flex-col items-center" : "p-4 pb-2"}`}>
+      {/* Sidebar Top: + New Profile Button */}
+      <div className={`p-3 ${collapsed ? "flex flex-col items-center" : "p-3 pb-2"}`}>
         {!collapsed ? (
-          <>
-            <div className="flex items-center gap-2.5 px-2 py-1.5 mb-3">
-              <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-gradient-to-br from-cyan-500 to-blue-600 shadow-lg shadow-cyan-500/20 text-white font-bold shrink-0">
-                <ShieldCheck size={20} className="text-white" />
-              </div>
-              <div className="flex flex-col">
-                <div className="flex items-center gap-1.5">
-                  <span className="font-extrabold text-base tracking-wider bg-gradient-to-r from-white via-slate-100 to-cyan-300 bg-clip-text text-transparent">
-                    FURY
-                  </span>
-                  <span className="text-[10px] font-semibold uppercase tracking-widest px-1.5 py-0.5 rounded bg-cyan-500/10 text-cyan-400 border border-cyan-500/30">
-                    STUDIO
-                  </span>
-                </div>
-                <span className="text-[11px] text-slate-500 font-medium">Antidetect Browser</span>
-              </div>
-            </div>
-
-            {/* "+ New Profile" Full Button */}
-            <button
-              onClick={onNewProfile}
-              className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl font-medium text-sm text-white bg-gradient-to-r from-cyan-500 via-sky-500 to-blue-600 hover:from-cyan-400 hover:via-sky-400 hover:to-blue-500 shadow-lg shadow-cyan-500/25 active:scale-[0.98] transition-all duration-200 border border-cyan-400/30 cursor-pointer"
-            >
-              <Plus size={18} className="stroke-[2.5]" />
-              <span>{t("bar.newProfile")}</span>
-            </button>
-          </>
+          <button
+            onClick={onNewProfile}
+            className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl font-medium text-sm text-white bg-gradient-to-r from-cyan-500 via-sky-500 to-blue-600 hover:from-cyan-400 hover:via-sky-400 hover:to-blue-500 shadow-lg shadow-cyan-500/25 active:scale-[0.98] transition-all duration-200 border border-cyan-400/30 cursor-pointer"
+          >
+            <Plus size={18} className="stroke-[2.5]" />
+            <span>{t("bar.newProfile")}</span>
+          </button>
         ) : (
-          <>
-            {/* Collapsed Brand Icon */}
-            <div
-              title="Fury Antidetect Studio"
-              className="flex items-center justify-center w-9 h-9 rounded-xl bg-gradient-to-br from-cyan-500 to-blue-600 shadow-lg shadow-cyan-500/20 text-white font-bold mb-3 cursor-pointer shrink-0"
-            >
-              <ShieldCheck size={20} className="text-white" />
-            </div>
-
-            {/* Collapsed "+ New Profile" Icon Button */}
-            <button
-              onClick={onNewProfile}
-              title={t("bar.newProfile")}
-              className="w-10 h-10 flex items-center justify-center rounded-xl text-white bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 shadow-md shadow-cyan-500/20 transition-all cursor-pointer border border-cyan-400/30 shrink-0"
-            >
-              <Plus size={20} className="stroke-[2.5]" />
-            </button>
-          </>
+          <button
+            onClick={onNewProfile}
+            title={t("bar.newProfile")}
+            className="w-10 h-10 flex items-center justify-center rounded-xl text-white bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 shadow-md shadow-cyan-500/20 transition-all cursor-pointer border border-cyan-400/30 shrink-0"
+          >
+            <Plus size={20} className="stroke-[2.5]" />
+          </button>
         )}
       </div>
 

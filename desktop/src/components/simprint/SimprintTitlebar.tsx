@@ -104,6 +104,33 @@ export const SimprintTitlebar: React.FC<SimprintTitlebarProps> = ({
       }
     }
   };
+  const handleMouseDown = (e: React.MouseEvent) => {
+    if (e.buttons === 1) {
+      const target = e.target as HTMLElement;
+      if (!target.closest("button") && !target.closest("input") && !target.closest("select")) {
+        if (isTauri) {
+          try {
+            void getCurrentWindow().startDragging();
+          } catch {
+            /* ignore */
+          }
+        }
+      }
+    }
+  };
+
+  const handleDoubleClick = (e: React.MouseEvent) => {
+    const target = e.target as HTMLElement;
+    if (!target.closest("button") && !target.closest("input") && !target.closest("select")) {
+      if (isTauri) {
+        try {
+          void getCurrentWindow().toggleMaximize();
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+  };
 
   const CurrentIcon = SECTION_ICONS[view] ?? Layers;
   const sectionTitle =
@@ -124,7 +151,9 @@ export const SimprintTitlebar: React.FC<SimprintTitlebarProps> = ({
   return (
     <header
       data-tauri-drag-region
-      className="h-10 w-full min-h-[40px] flex items-center justify-between px-3 bg-[#0a0e1a]/95 border-b border-slate-800/80 select-none z-50 text-xs backdrop-blur-2xl"
+      onMouseDown={handleMouseDown}
+      onDoubleClick={handleDoubleClick}
+      className="h-10 w-full min-h-[40px] flex items-center justify-between pl-3 pr-0 bg-[#0a0e1a]/95 border-b border-slate-800/80 select-none z-50 text-xs backdrop-blur-2xl"
     >
       {/* Left side: Sidebar Toggle + Brand Logo + Breadcrumbs */}
       <div className="flex items-center gap-2">
@@ -284,27 +313,27 @@ export const SimprintTitlebar: React.FC<SimprintTitlebarProps> = ({
         </button>
 
         {/* Window controls (Minimize, Maximize, Close) */}
-        <div className="flex items-center ml-1 border-l border-slate-800/80 pl-1">
+        <div className="flex items-center h-10 ml-2 border-l border-slate-800/80">
           <button
             onClick={handleMinimize}
             title="Minimize"
-            className="w-8 h-7 flex items-center justify-center rounded-md text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+            className="w-12 h-10 flex items-center justify-center text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
           >
-            <Minus size={13} />
+            <Minus size={15} />
           </button>
           <button
             onClick={handleMaximize}
             title="Maximize"
-            className="w-8 h-7 flex items-center justify-center rounded-md text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+            className="w-12 h-10 flex items-center justify-center text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
           >
-            <Square size={11} />
+            <Square size={13} />
           </button>
           <button
             onClick={handleClose}
             title="Close"
-            className="w-8 h-7 flex items-center justify-center rounded-md text-slate-400 hover:text-white hover:bg-rose-600 transition-colors cursor-pointer"
+            className="w-12 h-10 flex items-center justify-center text-slate-400 hover:text-white hover:bg-rose-600 active:bg-rose-700 transition-colors cursor-pointer"
           >
-            <X size={14} />
+            <X size={15} />
           </button>
         </div>
       </div>
