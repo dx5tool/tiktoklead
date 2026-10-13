@@ -31,6 +31,7 @@ import { useTheme } from "./theme";
 import { exitSharing } from "./consistency";
 import { AppBackground } from "./components/simprint/AppBackground";
 import { SimprintSidebar } from "./components/simprint/SimprintSidebar";
+import { SimprintTitlebar } from "./components/simprint/SimprintTitlebar";
 import { SimprintHeader } from "./components/simprint/SimprintHeader";
 import { SimprintProfileTable } from "./components/simprint/SimprintProfileTable";
 import { SimprintProfileGrid } from "./components/simprint/SimprintProfileGrid";
@@ -149,6 +150,24 @@ export function App() {
     } catch {
       /* ignore */
     }
+  };
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+    try {
+      return localStorage.getItem("fury.sidebar_collapsed") === "true";
+    } catch {
+      return false;
+    }
+  });
+  const handleToggleSidebar = () => {
+    setSidebarCollapsed((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem("fury.sidebar_collapsed", String(next));
+      } catch {
+        /* ignore */
+      }
+      return next;
+    });
   };
   const [selected, setSelected] = useState<Set<string>>(new Set());
   /** `undefined` closed, `null` making new ones, a profile means copying it. */
@@ -767,14 +786,41 @@ export function App() {
   const dl = shell?.core_download ?? null;
 
   return (
-    <div className="app relative overflow-hidden flex h-screen w-screen bg-[#090d16] text-slate-100">
+    <div className="app relative overflow-hidden flex flex-col h-screen w-screen bg-[#090d16] text-slate-100">
       <AppBackground />
       {askDialog}
+      <SimprintTitlebar
+        view={view}
+        activeProject={active}
+        me={me}
+        shell={shell}
+        sidebarCollapsed={sidebarCollapsed}
+        onToggleSidebar={handleToggleSidebar}
+        onSelectProject={setActive}
+        onView={setView}
+        onSettings={() => setSettingsOpen(true)}
+        onSignOut={signOut}
+        onPaletteOpen={() => setPaletteOpen(true)}
+        coreDownloadRunning={dl?.running}
+        updateAvailable={update?.status === "available"}
+        onDownloadCore={async () => {
+          setCoreBusy(true);
+          try {
+            await api.downloadCore();
+          } catch (e) {
+            setError(say(e));
+          } finally {
+            setTimeout(() => setCoreBusy(false), 3000);
+          }
+        }}
+      />
+      <div className="flex flex-1 min-h-0 overflow-hidden relative">
       <SimprintSidebar
         projects={projects}
         active={active}
         shell={shell}
         me={me}
+        collapsed={sidebarCollapsed}
         onSelect={setActive}
         view={view}
         onView={setView}
@@ -901,7 +947,7 @@ export function App() {
           await load();
         }}
       />
-      <main className="main flex-1 flex flex-col h-screen overflow-hidden relative min-w-0">
+      <main className="main flex-1 flex flex-col h-full overflow-hidden relative min-w-0">
         <SimprintHeader
           title={
             view === "trash"
@@ -1506,6 +1552,7 @@ export function App() {
           />
         )}
       </main>
+      </div>
     </div>
   );
 }

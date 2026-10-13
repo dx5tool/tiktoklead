@@ -23,6 +23,7 @@ interface SimprintSidebarProps {
   active: Project | null;
   shell: Shell;
   me: Me | null;
+  collapsed?: boolean;
   onSelect: (p: Project | null) => void;
   onNewProject: (origin: "local" | "team") => void;
   onSendProject: (p: Project) => void;
@@ -50,6 +51,7 @@ export const SimprintSidebar: React.FC<SimprintSidebarProps> = ({
   active,
   shell,
   me,
+  collapsed = false,
   onSelect,
   onNewProject,
   onSendProject,
@@ -77,43 +79,72 @@ export const SimprintSidebar: React.FC<SimprintSidebarProps> = ({
       ] as const);
 
   return (
-    <aside className="w-64 min-w-[16rem] h-screen flex flex-col justify-between bg-[#0b0f19]/90 backdrop-blur-2xl border-r border-slate-800/80 text-slate-200 select-none z-20">
+    <aside
+      className={`h-full flex flex-col justify-between bg-[#0b0f19]/90 backdrop-blur-2xl border-r border-slate-800/80 text-slate-200 select-none z-20 transition-all duration-300 ease-in-out ${
+        collapsed ? "w-16 min-w-[4rem]" : "w-64 min-w-[16rem]"
+      }`}
+    >
       {/* Brand Header */}
-      <div className="p-4 pb-2">
-        <div className="flex items-center gap-2.5 px-2 py-1.5 mb-3">
-          <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-gradient-to-br from-cyan-500 to-blue-600 shadow-lg shadow-cyan-500/20 text-white font-bold">
-            <ShieldCheck size={20} className="text-white" />
-          </div>
-          <div className="flex flex-col">
-            <div className="flex items-center gap-1.5">
-              <span className="font-extrabold text-base tracking-wider bg-gradient-to-r from-white via-slate-100 to-cyan-300 bg-clip-text text-transparent">
-                FURY
-              </span>
-              <span className="text-[10px] font-semibold uppercase tracking-widest px-1.5 py-0.5 rounded bg-cyan-500/10 text-cyan-400 border border-cyan-500/30">
-                STUDIO
-              </span>
+      <div className={`p-3 ${collapsed ? "flex flex-col items-center" : "p-4 pb-2"}`}>
+        {!collapsed ? (
+          <>
+            <div className="flex items-center gap-2.5 px-2 py-1.5 mb-3">
+              <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-gradient-to-br from-cyan-500 to-blue-600 shadow-lg shadow-cyan-500/20 text-white font-bold shrink-0">
+                <ShieldCheck size={20} className="text-white" />
+              </div>
+              <div className="flex flex-col">
+                <div className="flex items-center gap-1.5">
+                  <span className="font-extrabold text-base tracking-wider bg-gradient-to-r from-white via-slate-100 to-cyan-300 bg-clip-text text-transparent">
+                    FURY
+                  </span>
+                  <span className="text-[10px] font-semibold uppercase tracking-widest px-1.5 py-0.5 rounded bg-cyan-500/10 text-cyan-400 border border-cyan-500/30">
+                    STUDIO
+                  </span>
+                </div>
+                <span className="text-[11px] text-slate-500 font-medium">Antidetect Browser</span>
+              </div>
             </div>
-            <span className="text-[11px] text-slate-500 font-medium">Antidetect Browser</span>
-          </div>
-        </div>
 
-        {/* "+ New Profile" Gradient Button */}
-        <button
-          onClick={onNewProfile}
-          className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl font-medium text-sm text-white bg-gradient-to-r from-cyan-500 via-sky-500 to-blue-600 hover:from-cyan-400 hover:via-sky-400 hover:to-blue-500 shadow-lg shadow-cyan-500/25 active:scale-[0.98] transition-all duration-200 border border-cyan-400/30 cursor-pointer"
-        >
-          <Plus size={18} className="stroke-[2.5]" />
-          <span>{t("bar.newProfile")}</span>
-        </button>
+            {/* "+ New Profile" Full Button */}
+            <button
+              onClick={onNewProfile}
+              className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl font-medium text-sm text-white bg-gradient-to-r from-cyan-500 via-sky-500 to-blue-600 hover:from-cyan-400 hover:via-sky-400 hover:to-blue-500 shadow-lg shadow-cyan-500/25 active:scale-[0.98] transition-all duration-200 border border-cyan-400/30 cursor-pointer"
+            >
+              <Plus size={18} className="stroke-[2.5]" />
+              <span>{t("bar.newProfile")}</span>
+            </button>
+          </>
+        ) : (
+          <>
+            {/* Collapsed Brand Icon */}
+            <div
+              title="Fury Antidetect Studio"
+              className="flex items-center justify-center w-9 h-9 rounded-xl bg-gradient-to-br from-cyan-500 to-blue-600 shadow-lg shadow-cyan-500/20 text-white font-bold mb-3 cursor-pointer shrink-0"
+            >
+              <ShieldCheck size={20} className="text-white" />
+            </div>
+
+            {/* Collapsed "+ New Profile" Icon Button */}
+            <button
+              onClick={onNewProfile}
+              title={t("bar.newProfile")}
+              className="w-10 h-10 flex items-center justify-center rounded-xl text-white bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 shadow-md shadow-cyan-500/20 transition-all cursor-pointer border border-cyan-400/30 shrink-0"
+            >
+              <Plus size={20} className="stroke-[2.5]" />
+            </button>
+          </>
+        )}
       </div>
 
       {/* Main Navigation & Folders list */}
-      <nav className="flex-1 overflow-y-auto px-3 py-2 space-y-4">
+      <nav className={`flex-1 overflow-y-auto py-2 space-y-4 ${collapsed ? "px-2" : "px-3"}`}>
         {/* Core Nav Links */}
         <div className="space-y-1">
           {navItems.map((v) => {
             const IconComponent = NAV_ICONS[v] ?? Layers;
             const isSelected = view === v && !(v === "profiles" && active);
+            const navLabel = t(`nav.${v}` as never);
+
             return (
               <button
                 key={v}
@@ -121,26 +152,62 @@ export const SimprintSidebar: React.FC<SimprintSidebarProps> = ({
                   if (v === "profiles") onSelect(null);
                   onView(v);
                 }}
-                className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-sm font-medium transition-all duration-150 cursor-pointer ${
+                title={collapsed ? navLabel : undefined}
+                className={`flex items-center rounded-xl font-medium transition-all duration-150 cursor-pointer ${
+                  collapsed
+                    ? "w-10 h-10 mx-auto justify-center"
+                    : "w-full justify-between px-3 py-2 text-sm"
+                } ${
                   isSelected
                     ? "bg-cyan-500/15 text-cyan-400 border border-cyan-500/30 shadow-sm shadow-cyan-500/10"
                     : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border border-transparent"
                 }`}
               >
-                <div className="flex items-center gap-3">
-                  <IconComponent size={18} className={isSelected ? "text-cyan-400" : "text-slate-400"} />
-                  <span>{t(`nav.${v}` as never)}</span>
+                <div className={`flex items-center ${collapsed ? "justify-center" : "gap-3"}`}>
+                  <IconComponent size={collapsed ? 19 : 18} className={isSelected ? "text-cyan-400" : "text-slate-400"} />
+                  {!collapsed && <span>{navLabel}</span>}
                 </div>
-                {isSelected && <ChevronRight size={14} className="text-cyan-400" />}
+                {!collapsed && isSelected && <ChevronRight size={14} className="text-cyan-400" />}
               </button>
             );
           })}
         </div>
 
         {/* Project Folders */}
-        <div className="pt-2 border-t border-slate-800/80 space-y-3">
+        <div className={`pt-2 border-t border-slate-800/80 ${collapsed ? "space-y-2" : "space-y-3"}`}>
           {projectSections.map(([side, label]) => {
             const sideProjects = projects.filter((p) => p.origin === side);
+
+            if (collapsed) {
+              return (
+                <div key={side} className="space-y-1">
+                  {sideProjects.map((p) => {
+                    const isFolderActive = p.id === active?.id && view === "profiles";
+                    return (
+                      <button
+                        key={p.id}
+                        onClick={() => {
+                          onSelect(p);
+                          onView("profiles");
+                        }}
+                        title={`${p.name} (${p.profile_count})`}
+                        className={`w-10 h-9 mx-auto flex items-center justify-center rounded-xl transition-colors cursor-pointer relative ${
+                          isFolderActive
+                            ? "bg-cyan-500/15 text-cyan-400 border border-cyan-500/30"
+                            : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/40 border border-transparent"
+                        }`}
+                      >
+                        <Folder size={16} className={isFolderActive ? "text-cyan-400" : "text-slate-500"} />
+                        {p.profile_count > 0 && (
+                          <span className="absolute top-1 right-1 h-1.5 w-1.5 rounded-full bg-cyan-400" />
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              );
+            }
+
             return (
               <div key={side} className="space-y-1">
                 <div className="flex items-center justify-between px-3 py-1 text-xs font-semibold uppercase tracking-wider text-slate-500">
@@ -221,96 +288,130 @@ export const SimprintSidebar: React.FC<SimprintSidebarProps> = ({
                               {!local && p.origin === "local" && (
                                 <button
                                   onClick={() => {
-                                  setActiveMenuId(null);
-                                  onSendProject(p);
-                                }}
-                                className="w-full text-left px-3 py-1.5 text-slate-300 hover:bg-slate-800 hover:text-white"
-                              >
-                                {t("proj.sendAll")}
-                              </button>
-                            )}
-                            {!local && p.origin === "team" && (
+                                    setActiveMenuId(null);
+                                    onSendProject(p);
+                                  }}
+                                  className="w-full text-left px-3 py-1.5 text-slate-300 hover:bg-slate-800 hover:text-white"
+                                >
+                                  {t("proj.sendAll")}
+                                </button>
+                              )}
+                              {!local && p.origin === "team" && (
+                                <button
+                                  onClick={() => {
+                                    setActiveMenuId(null);
+                                    onShareProject(p);
+                                  }}
+                                  className="w-full text-left px-3 py-1.5 text-slate-300 hover:bg-slate-800 hover:text-white"
+                                >
+                                  {t("proj.shareAll")}
+                                </button>
+                              )}
                               <button
                                 onClick={() => {
                                   setActiveMenuId(null);
-                                  onShareProject(p);
+                                  onDeleteProject(p);
                                 }}
-                                className="w-full text-left px-3 py-1.5 text-slate-300 hover:bg-slate-800 hover:text-white"
+                                className="w-full text-left px-3 py-1.5 text-rose-400 hover:bg-rose-500/10"
                               >
-                                {t("proj.shareAll")}
+                                {t("proj.delete")}
                               </button>
-                            )}
-                            <button
-                              onClick={() => {
-                                setActiveMenuId(null);
-                                onDeleteProject(p);
-                              }}
-                              className="w-full text-left px-3 py-1.5 text-rose-400 hover:bg-rose-500/10"
-                            >
-                              {t("proj.delete")}
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          );
-        })}
-      </div>
-    </nav>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </nav>
 
       {/* Footer Status & Machine Info */}
-      <div className="p-3 border-t border-slate-800/80 bg-slate-950/40 space-y-2">
-        {/* Real-time Agent Status indicator */}
-        <div className="flex items-center justify-between px-2 py-1.5 rounded-lg bg-slate-900/60 border border-slate-800 text-xs">
-          <div className="flex items-center gap-2">
-            <span className="relative flex h-2.5 w-2.5">
+      <div className={`border-t border-slate-800/80 bg-slate-950/40 ${collapsed ? "p-2 flex flex-col items-center gap-2" : "p-3 space-y-2"}`}>
+        {!collapsed ? (
+          <>
+            {/* Real-time Agent Status indicator */}
+            <div className="flex items-center justify-between px-2 py-1.5 rounded-lg bg-slate-900/60 border border-slate-800 text-xs">
+              <div className="flex items-center gap-2">
+                <span className="relative flex h-2.5 w-2.5">
+                  {shell.agent_ready ? (
+                    <>
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                      <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500 shadow-[0_0_8px_#10b981]" />
+                    </>
+                  ) : (
+                    <>
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75" />
+                      <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-rose-500 shadow-[0_0_8px_#f43f5e]" />
+                    </>
+                  )}
+                </span>
+                <span
+                  className={`font-semibold tracking-wide ${
+                    shell.agent_ready ? "text-emerald-400" : "text-rose-400"
+                  }`}
+                >
+                  {shell.agent_ready ? "Agent Online" : "Agent Disconnected"}
+                </span>
+              </div>
+              <span className="text-[10px] text-slate-500 font-mono">v0.3.9</span>
+            </div>
+
+            {/* User / Machine details */}
+            {me && (
+              <div className="px-2 text-xs font-medium text-slate-300 truncate" title={me.email}>
+                {me.email}
+              </div>
+            )}
+            <div className="flex items-center justify-between px-2 text-[11px] text-slate-400">
+              <div className="truncate flex-1 pr-2" title={shell.machine_name}>
+                <span>{shell.machine_name}</span>
+                {!shell.native && <span className="text-cyan-400"> · {t("app.browserDev")}</span>}
+              </div>
+              <button
+                onClick={onSettings}
+                title={t("app.settings")}
+                aria-label={t("app.settings")}
+                className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+              >
+                <SettingsIcon size={15} />
+              </button>
+            </div>
+          </>
+        ) : (
+          <>
+            {/* Collapsed Agent Status dot */}
+            <div
+              title={shell.agent_ready ? "Agent Online (v0.3.9)" : "Agent Disconnected"}
+              className="relative flex h-3 w-3 my-1 cursor-pointer"
+            >
               {shell.agent_ready ? (
                 <>
                   <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-                  <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500 shadow-[0_0_8px_#10b981]" />
+                  <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500 shadow-[0_0_8px_#10b981]" />
                 </>
               ) : (
                 <>
                   <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75" />
-                  <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-rose-500 shadow-[0_0_8px_#f43f5e]" />
+                  <span className="relative inline-flex rounded-full h-3 w-3 bg-rose-500 shadow-[0_0_8px_#f43f5e]" />
                 </>
               )}
-            </span>
-            <span
-              className={`font-semibold tracking-wide ${
-                shell.agent_ready ? "text-emerald-400" : "text-rose-400"
-              }`}
-            >
-              {shell.agent_ready ? "Agent Online" : "Agent Disconnected"}
-            </span>
-          </div>
-          <span className="text-[10px] text-slate-500 font-mono">v0.3.9</span>
-        </div>
+            </div>
 
-        {/* User / Machine details */}
-        {me && (
-          <div className="px-2 text-xs font-medium text-slate-300 truncate" title={me.email}>
-            {me.email}
-          </div>
+            {/* Collapsed Settings icon */}
+            <button
+              onClick={onSettings}
+              title={t("app.settings")}
+              aria-label={t("app.settings")}
+              className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+            >
+              <SettingsIcon size={16} />
+            </button>
+          </>
         )}
-        <div className="flex items-center justify-between px-2 text-[11px] text-slate-400">
-          <div className="truncate flex-1 pr-2" title={shell.machine_name}>
-            <span>{shell.machine_name}</span>
-            {!shell.native && <span className="text-cyan-400"> · {t("app.browserDev")}</span>}
-          </div>
-          <button
-            onClick={onSettings}
-            title={t("app.settings")}
-            aria-label={t("app.settings")}
-            className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
-          >
-            <SettingsIcon size={15} />
-          </button>
-        </div>
       </div>
     </aside>
   );
