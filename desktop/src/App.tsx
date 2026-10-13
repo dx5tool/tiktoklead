@@ -948,48 +948,40 @@ export function App() {
         }}
       />
       <main className="main flex-1 flex flex-col h-full overflow-hidden relative min-w-0">
-        <SimprintHeader
-          title={
-            view === "trash"
-              ? t("trash.title")
-              : view === "proxies"
-                ? t("nav.proxies")
-                : view === "extensions"
-                ? t("nav.extensions")
-                : view === "assistants"
-                ? t("nav.assistants")
-                : view === "users"
-                  ? t("nav.users")
-                  : view === "sharedWithMe"
-                    ? t("nav.sharedWithMe")
-                    : (active?.name ?? t("nav.profiles"))
-          }
-          totalCount={view === "sharedWithMe" ? shared.length : profiles.length}
-          runningCount={profiles.filter((p) => p.running).length}
-          viewMode={viewMode}
-          onViewModeChange={handleViewModeChange}
-          query={query}
-          onQueryChange={setQuery}
-          tags={tags}
-          selectedTag={tag}
-          onTagChange={setTag}
-          stages={stages}
-          selectedStage={stage}
-          onStageChange={setStage}
-          openOnly={openOnly}
-          onOpenOnlyChange={setOpenOnly}
-          importsHere={importsHere}
-          onOpenBulk={() => setBulk(null)}
-          onOpenCsv={() => setCsv(true)}
-          onOpenGologin={() => setGologin(true)}
-          onRefresh={() => refreshProfiles()}
-          stageCounts={Object.fromEntries(
-            stages.map((st) => [
-              st,
-              profiles.filter((p) => (p.status ?? "").trim().toLowerCase() === st).length,
-            ])
-          )}
-        />
+        {(view === "profiles" || view === "sharedWithMe") && (
+          <SimprintHeader
+            title={
+              view === "sharedWithMe"
+                ? t("nav.sharedWithMe")
+                : (active?.name ?? t("nav.profiles"))
+            }
+            totalCount={view === "sharedWithMe" ? shared.length : profiles.length}
+            runningCount={profiles.filter((p) => p.running).length}
+            viewMode={viewMode}
+            onViewModeChange={handleViewModeChange}
+            query={query}
+            onQueryChange={setQuery}
+            tags={tags}
+            selectedTag={tag}
+            onTagChange={setTag}
+            stages={stages}
+            selectedStage={stage}
+            onStageChange={setStage}
+            openOnly={openOnly}
+            onOpenOnlyChange={setOpenOnly}
+            importsHere={importsHere}
+            onOpenBulk={() => setBulk(null)}
+            onOpenCsv={() => setCsv(true)}
+            onOpenGologin={() => setGologin(true)}
+            onRefresh={() => refreshProfiles()}
+            stageCounts={Object.fromEntries(
+              stages.map((st) => [
+                st,
+                profiles.filter((p) => (p.status ?? "").trim().toLowerCase() === st).length,
+              ])
+            )}
+          />
+        )}
 
         {!shell.agent_ready && (
           <div className="notice warnBar" role="status">

@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   Home,
@@ -22,9 +22,20 @@ import {
   ShieldCheck,
   Settings,
   LogOut,
-  Laptop,
+  Languages,
+  Palette,
+  Sun,
+  Moon,
+  Monitor,
+  Check,
+  Building,
+  HardDrive,
+  Wifi,
+  Fingerprint,
+  User,
 } from "lucide-react";
 import { useI18n } from "../../i18n";
+import { useTheme } from "../../theme";
 import type { Me, Project, Shell } from "../../api";
 import type { View } from "../Sidebar";
 
@@ -71,9 +82,26 @@ export const SimprintTitlebar: React.FC<SimprintTitlebarProps> = ({
   updateAvailable,
   onDownloadCore,
 }) => {
-  const { t } = useI18n();
+  const { t, language, setLanguage } = useI18n();
+  const [theme, setTheme] = useTheme();
   const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const [activeSubmenu, setActiveSubmenu] = useState<"theme" | "language" | null>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+
   const isTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+
+  // Auto-close menu when clicking outside
+  useEffect(() => {
+    if (!userMenuOpen) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setUserMenuOpen(false);
+        setActiveSubmenu(null);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [userMenuOpen]);
 
   const handleMinimize = async () => {
     if (isTauri) {
@@ -104,6 +132,7 @@ export const SimprintTitlebar: React.FC<SimprintTitlebarProps> = ({
       }
     }
   };
+
   const handleMouseDown = (e: React.MouseEvent) => {
     if (e.buttons === 1) {
       const target = e.target as HTMLElement;
@@ -148,12 +177,14 @@ export const SimprintTitlebar: React.FC<SimprintTitlebarProps> = ({
             ? t("nav.sharedWithMe")
             : t("nav.profiles");
 
+  const displayName = me?.email ?? (shell.mode === "local" ? "Local User" : "User");
+
   return (
     <header
       data-tauri-drag-region
       onMouseDown={handleMouseDown}
       onDoubleClick={handleDoubleClick}
-      className="h-10 w-full min-h-[40px] flex items-center justify-between pl-3 pr-0 bg-[#0a0e1a]/95 border-b border-slate-800/80 select-none z-50 text-xs backdrop-blur-2xl"
+      className="h-10 w-full min-h-[40px] flex items-center justify-between pl-3 pr-0 bg-[#0a0e1a]/95 border-b border-slate-800/80 select-none z-50 text-xs backdrop-blur-2xl shrink-0"
     >
       {/* Left side: Sidebar Toggle + Brand Logo + Breadcrumbs */}
       <div className="flex items-center gap-2">
@@ -251,54 +282,280 @@ export const SimprintTitlebar: React.FC<SimprintTitlebarProps> = ({
         </div>
 
         {/* User Profile Dropdown Pill */}
-        <div className="relative">
+        <div className="relative" ref={menuRef}>
           <button
-            onClick={() => setUserMenuOpen(!userMenuOpen)}
+            onClick={() => {
+              setUserMenuOpen(!userMenuOpen);
+              setActiveSubmenu(null);
+            }}
             className="flex items-center gap-2 px-2.5 py-1 rounded-xl bg-slate-900/80 hover:bg-slate-800 border border-slate-800 text-slate-200 transition-colors cursor-pointer"
           >
             <div className="w-4 h-4 rounded-full bg-gradient-to-tr from-cyan-500 to-blue-600 flex items-center justify-center text-[10px] font-bold text-white shadow-sm">
-              {me?.email ? me.email.charAt(0).toUpperCase() : "U"}
+              😊
             </div>
             <span className="max-w-[120px] truncate text-xs font-medium">
-              {me?.email ?? (shell.mode === "local" ? "Local User" : "User")}
+              {displayName}
             </span>
             <ChevronDown size={12} className="text-slate-500" />
           </button>
 
-          {/* User Menu Popup */}
+          {/* User Menu Popup (Style matching Simprint Image #1) */}
           {userMenuOpen && (
-            <div className="absolute right-0 top-9 w-52 py-2 bg-slate-900/95 border border-slate-700/80 rounded-2xl shadow-2xl backdrop-blur-2xl z-50 text-xs">
-              <div className="px-3 py-1.5 border-b border-slate-800/80 mb-1">
-                <div className="font-semibold text-slate-200 truncate">{me?.email ?? "Local User"}</div>
-                <div className="text-[10px] text-slate-500 flex items-center gap-1 mt-0.5">
-                  <Laptop size={11} />
-                  <span className="truncate">{shell.machine_name}</span>
-                </div>
+            <div className="absolute right-0 top-10 w-60 py-1.5 bg-[#171b26]/98 border border-slate-800 rounded-2xl shadow-2xl backdrop-blur-2xl z-50 text-xs">
+              {/* Menu Header */}
+              <div className="px-4 py-2.5 border-b border-slate-800/80">
+                <div className="font-semibold text-slate-100 truncate">{displayName}</div>
+                <div className="text-base mt-0.5 select-none">😊</div>
               </div>
 
-              <button
-                onClick={() => {
-                  setUserMenuOpen(false);
-                  onSettings();
-                }}
-                className="w-full flex items-center gap-2 px-3 py-2 text-slate-300 hover:bg-slate-800 hover:text-white transition-colors cursor-pointer"
-              >
-                <Settings size={13} />
-                <span>{t("app.settings")}</span>
-              </button>
-
-              {onSignOut && shell.mode !== "local" && (
+              {/* Menu Items */}
+              <div className="py-1">
+                {/* 1. Account & Security */}
                 <button
                   onClick={() => {
                     setUserMenuOpen(false);
-                    onSignOut();
+                    onSettings();
                   }}
-                  className="w-full flex items-center gap-2 px-3 py-2 text-rose-400 hover:bg-rose-500/10 transition-colors cursor-pointer"
+                  className="w-full flex items-center gap-3 px-4 py-2 text-slate-300 hover:text-white hover:bg-slate-800/70 transition-colors cursor-pointer text-left"
                 >
-                  <LogOut size={13} />
-                  <span>{t("app.signOut")}</span>
+                  <User size={15} className="text-slate-400" />
+                  <span>Account & Security</span>
                 </button>
-              )}
+
+                {/* 2. General */}
+                <button
+                  onClick={() => {
+                    setUserMenuOpen(false);
+                    onSettings();
+                  }}
+                  className="w-full flex items-center gap-3 px-4 py-2 text-slate-300 hover:text-white hover:bg-slate-800/70 transition-colors cursor-pointer text-left"
+                >
+                  <Settings size={15} className="text-slate-400" />
+                  <span>General</span>
+                </button>
+
+                {/* 3. Browser & Automation */}
+                <button
+                  onClick={() => {
+                    setUserMenuOpen(false);
+                    onView("assistants");
+                  }}
+                  className="w-full flex items-center gap-3 px-4 py-2 text-slate-300 hover:text-white hover:bg-slate-800/70 transition-colors cursor-pointer text-left"
+                >
+                  <Fingerprint size={15} className="text-slate-400" />
+                  <span>Browser & Automation</span>
+                </button>
+
+                {/* 4. Network & Sync */}
+                <button
+                  onClick={() => {
+                    setUserMenuOpen(false);
+                    onView("proxies");
+                  }}
+                  className="w-full flex items-center gap-3 px-4 py-2 text-slate-300 hover:text-white hover:bg-slate-800/70 transition-colors cursor-pointer text-left"
+                >
+                  <Wifi size={15} className="text-slate-400" />
+                  <span>Network & Sync</span>
+                </button>
+
+                {/* 5. Storage & Update */}
+                <button
+                  onClick={() => {
+                    setUserMenuOpen(false);
+                    onDownloadCore?.();
+                  }}
+                  className="w-full flex items-center gap-3 px-4 py-2 text-slate-300 hover:text-white hover:bg-slate-800/70 transition-colors cursor-pointer text-left"
+                >
+                  <HardDrive size={15} className="text-slate-400" />
+                  <span>Storage & Update</span>
+                </button>
+
+                {/* 6. Workspace */}
+                <button
+                  onClick={() => {
+                    setUserMenuOpen(false);
+                    onSelectProject(null);
+                    onView("profiles");
+                  }}
+                  className="w-full flex items-center gap-3 px-4 py-2 text-slate-300 hover:text-white hover:bg-slate-800/70 transition-colors cursor-pointer text-left"
+                >
+                  <Building size={15} className="text-slate-400" />
+                  <span>Workspace</span>
+                </button>
+
+                {/* 7. Team */}
+                <button
+                  onClick={() => {
+                    setUserMenuOpen(false);
+                    onView("users");
+                  }}
+                  className="w-full flex items-center justify-between px-4 py-2 text-slate-300 hover:text-white hover:bg-slate-800/70 transition-colors cursor-pointer text-left"
+                >
+                  <div className="flex items-center gap-3">
+                    <Users size={15} className="text-slate-400" />
+                    <span>Team</span>
+                  </div>
+                  <ChevronRight size={13} className="text-slate-500" />
+                </button>
+
+                {/* 8. Language Submenu */}
+                <div
+                  className="relative"
+                  onMouseEnter={() => setActiveSubmenu("language")}
+                >
+                  <button
+                    onClick={() => setActiveSubmenu(activeSubmenu === "language" ? null : "language")}
+                    className={`w-full flex items-center justify-between px-4 py-2 transition-colors cursor-pointer text-left ${
+                      activeSubmenu === "language"
+                        ? "bg-slate-800 text-cyan-400 font-medium"
+                        : "text-slate-300 hover:text-white hover:bg-slate-800/70"
+                    }`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <Languages size={15} className={activeSubmenu === "language" ? "text-cyan-400" : "text-slate-400"} />
+                      <span>Language</span>
+                    </div>
+                    <ChevronRight size={13} className="text-slate-500" />
+                  </button>
+
+                  {activeSubmenu === "language" && (
+                    <div className="absolute right-full top-0 mr-1.5 w-36 py-1.5 bg-[#171b26]/98 border border-slate-800 rounded-xl shadow-2xl backdrop-blur-2xl z-50">
+                      <button
+                        onClick={() => {
+                          setLanguage("en");
+                          setUserMenuOpen(false);
+                          setActiveSubmenu(null);
+                        }}
+                        className={`w-full flex items-center justify-between px-3.5 py-2 text-xs text-left hover:bg-slate-800 cursor-pointer ${
+                          language === "en" ? "text-cyan-400 font-semibold" : "text-slate-300"
+                        }`}
+                      >
+                        <span>English</span>
+                        {language === "en" && <Check size={13} />}
+                      </button>
+                      <button
+                        onClick={() => {
+                          setLanguage("ru");
+                          setUserMenuOpen(false);
+                          setActiveSubmenu(null);
+                        }}
+                        className={`w-full flex items-center justify-between px-3.5 py-2 text-xs text-left hover:bg-slate-800 cursor-pointer ${
+                          language === "ru" ? "text-cyan-400 font-semibold" : "text-slate-300"
+                        }`}
+                      >
+                        <span>Русский</span>
+                        {language === "ru" && <Check size={13} />}
+                      </button>
+                      <button
+                        onClick={() => {
+                          setLanguage("system");
+                          setUserMenuOpen(false);
+                          setActiveSubmenu(null);
+                        }}
+                        className={`w-full flex items-center justify-between px-3.5 py-2 text-xs text-left hover:bg-slate-800 cursor-pointer ${
+                          language === "system" ? "text-cyan-400 font-semibold" : "text-slate-300"
+                        }`}
+                      >
+                        <span>System</span>
+                        {language === "system" && <Check size={13} />}
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                {/* 9. Theme Submenu (Highlighted in blue like Image #1) */}
+                <div
+                  className="relative"
+                  onMouseEnter={() => setActiveSubmenu("theme")}
+                >
+                  <button
+                    onClick={() => setActiveSubmenu(activeSubmenu === "theme" ? null : "theme")}
+                    className={`w-full flex items-center justify-between px-4 py-2 transition-colors cursor-pointer text-left ${
+                      activeSubmenu === "theme"
+                        ? "bg-blue-600/35 text-blue-300 font-medium"
+                        : "text-slate-300 hover:text-white hover:bg-slate-800/70"
+                    }`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <Palette size={15} className={activeSubmenu === "theme" ? "text-blue-400" : "text-slate-400"} />
+                      <span>Theme</span>
+                    </div>
+                    <ChevronRight size={13} className="text-slate-500" />
+                  </button>
+
+                  {activeSubmenu === "theme" && (
+                    <div className="absolute right-full top-0 mr-1.5 w-36 py-1.5 bg-[#171b26]/98 border border-slate-800 rounded-xl shadow-2xl backdrop-blur-2xl z-50">
+                      <button
+                        onClick={() => {
+                          setTheme("light");
+                          setUserMenuOpen(false);
+                          setActiveSubmenu(null);
+                        }}
+                        className={`w-full flex items-center justify-between px-3.5 py-2 text-xs text-left hover:bg-slate-800 cursor-pointer ${
+                          theme === "light" ? "text-cyan-400 font-semibold" : "text-slate-300"
+                        }`}
+                      >
+                        <div className="flex items-center gap-2">
+                          <Sun size={14} />
+                          <span>Light</span>
+                        </div>
+                        {theme === "light" && <Check size={13} />}
+                      </button>
+                      <button
+                        onClick={() => {
+                          setTheme("dark");
+                          setUserMenuOpen(false);
+                          setActiveSubmenu(null);
+                        }}
+                        className={`w-full flex items-center justify-between px-3.5 py-2 text-xs text-left hover:bg-slate-800 cursor-pointer ${
+                          theme === "dark" ? "text-cyan-400 font-semibold" : "text-slate-300"
+                        }`}
+                      >
+                        <div className="flex items-center gap-2">
+                          <Moon size={14} className={theme === "dark" ? "text-cyan-400" : ""} />
+                          <span>Dark</span>
+                        </div>
+                        {theme === "dark" && <Check size={13} />}
+                      </button>
+                      <button
+                        onClick={() => {
+                          setTheme("system");
+                          setUserMenuOpen(false);
+                          setActiveSubmenu(null);
+                        }}
+                        className={`w-full flex items-center justify-between px-3.5 py-2 text-xs text-left hover:bg-slate-800 cursor-pointer ${
+                          theme === "system" ? "text-cyan-400 font-semibold" : "text-slate-300"
+                        }`}
+                      >
+                        <div className="flex items-center gap-2">
+                          <Monitor size={14} />
+                          <span>System</span>
+                        </div>
+                        {theme === "system" && <Check size={13} />}
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                {/* Divider */}
+                <div className="my-1.5 border-t border-slate-800/80" />
+
+                {/* 10. Switch User / Sign Out */}
+                <button
+                  onClick={() => {
+                    setUserMenuOpen(false);
+                    if (onSignOut && shell.mode !== "local") {
+                      onSignOut();
+                    } else {
+                      onSettings();
+                    }
+                  }}
+                  className="w-full flex items-center gap-3 px-4 py-2 text-rose-400 hover:bg-rose-500/10 transition-colors text-xs text-left cursor-pointer"
+                >
+                  <LogOut size={15} />
+                  <span>Switch User</span>
+                </button>
+              </div>
             </div>
           )}
         </div>
