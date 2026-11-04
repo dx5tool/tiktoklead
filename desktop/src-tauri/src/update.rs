@@ -31,7 +31,11 @@ use tauri_plugin_updater::UpdaterExt;
 // that sounds right would have told every user "nothing has been published"
 // while two releases sat on the page. Measured 16.08.2026, the day the second
 // one went up. The list is newest-first, so the first entry is the answer.
-const RELEASES: &str = "https://api.github.com/repos/furyteamtop/fury-antidetect-browser/releases?per_page=5";
+//
+// Fork: `plugins.updater.endpoints` in tauri.conf.json is the installer feed,
+// and this is the version-check feed. Both are placeholders until the Simprint
+// fork publishes its own builds; replace both together.
+const RELEASES: &str = "https://api.github.com/repos/simprint-placeholder/fury-simprint/releases?per_page=5";
 
 #[derive(Serialize)]
 pub struct UpdateCheck {
