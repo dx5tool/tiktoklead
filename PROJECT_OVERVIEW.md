@@ -125,34 +125,27 @@ E:/SOURCE_CODE/FURY/
 
 ## 5. HƯỚNG DẪN BIÊN DỊCH VÀ KHỞI CHẠY (DEVELOPER WORKFLOW)
 
-### 5.1. Yêu cầu môi trường
+### 5.1. Phân biệt: Khi nào cần Rebuild C++ vs. Khi nào chỉ cần Hot-Reload
+
+| Tình huống | Loại thay đổi | Cách chạy & Thời gian phản hồi | Có cần MSVC C++ Compiler không? |
+| :--- | :--- | :--- | :--- |
+| **Sửa giao diện UI** | Mọi file trong `desktop/src/` (TSX, CSS, theme tokens, icon, text) | **Chỉ cần Hot-Reload** (`run-app.bat` hoặc `npm run dev`). Phản hồi trong **~50ms**. | ❌ **KHÔNG CẦN**. Vite HMR tự động đẩy code mới vào app đang chạy. |
+| **Thêm thư viện React** | Thêm packages frontend trong `desktop/package.json` | Chạy `npm install` rồi chạy `run-app.bat`. | ❌ **KHÔNG CẦN**. |
+| **Sửa tầng Rust/Tauri** | Sửa file trong `desktop/src-tauri/` (commands, permissions, icons) | **Bắt buộc Rebuild**: Chạy `run-app.bat rebuild` hoặc `npm run app`. | ✅ **BẮT BUỘC CẦN**. Cần MSVC C++ & Windows 11 SDK. |
+| **Sửa Daemon/Core** | Sửa file trong `agent/`, `server/`, `shared-rs/` | **Bắt buộc Rebuild**: Chạy `cargo build -p fury-agent`. | ✅ **BẮT BUỘC CẦN**. |
+| **Sau khi `cargo clean`** | Xóa sạch thư mục `target/` hoặc clone máy mới | **Bắt buộc Rebuild**: Biên dịch lại toàn bộ Rust binaries từ con số 0. | ✅ **BẮT BUỘC CẦN**. |
+
+### 5.2. Yêu cầu môi trường
 - **Hệ điều hành**: Windows 10/11 x64 (hoặc macOS/Linux).
 - **Node.js**: v20+ trở lên & `npm`.
 - **Rust Toolchain**: `rustc` và `cargo` v1.80+ (cài qua `rustup`).
+- **C++ Toolchain (chỉ khi rebuild native)**: Visual Studio MSVC C++ Build Tools + Windows 11 SDK (`10.0.26100.0`).
 
-### 5.2. Chế độ Phát triển Giao diện Trực tiếp (Web Dev Mode)
-Thích hợp nhất khi làm việc với UI, hỗ trợ Hot-Reload tức thì mà không cần build lại Rust:
-```bash
-cd desktop
-npm run dev
-```
-Truy cập: `http://localhost:5273`
-
-### 5.3. Chế độ Ứng dụng Desktop Đầy đủ (Tauri Native Desktop Mode)
-Khởi động ứng dụng Desktop native frameless:
-```bash
-cd desktop
-npm run app
-```
-
-> **LƯU Ý VỀ TỆP SIDECAR `fury-agent`**:
-> Tauri yêu cầu file nhị phân của Rust daemon tại `desktop/src-tauri/binaries/fury-agent-x86_64-pc-windows-msvc.exe`.  
-> Nếu file này chưa có hoặc vừa clean target, chạy lệnh sau để build và sao chép:
-> ```bash
-> cargo build -p fury-agent
-> mkdir desktop\src-tauri\binaries
-> copy target\debug\fury-agent.exe desktop\src-tauri\binaries\fury-agent-x86_64-pc-windows-msvc.exe
-> ```
+### 5.3. Cách khởi chạy nhanh nhất (Khuyên dùng)
+Chỉ cần nhấp đúp file:
+👉 **`desktop/run-app.bat`**
+- **Chế độ mặc định (Fast Launch)**: Nhận diện bản build `.exe` có sẵn, bật server Vite ở cổng 5273 và mở ứng dụng trong **1.5 giây**. Khi bạn sửa file `.tsx` hay `.css`, giao diện tự động cập nhật ngay trên cửa sổ.
+- **Chế độ Rebuild lại từ đầu**: Gõ `desktop\run-app.bat rebuild`. Script sẽ tự động nạp môi trường MSVC C++ (`vcvars64.bat`) và gọi `tauri dev` biên dịch lại.
 
 ### 5.4. Kiểm tra Typecheck và Build Production Frontend
 ```bash
@@ -160,7 +153,6 @@ cd desktop
 npm run build
 ```
 *(Yêu cầu kết thúc với `0 errors`)*.
-
 ---
 
 ## 6. QUY TRÌNH ĐỒNG BỘ UPSTREAM (ZERO-CONFLICT UPDATE)
