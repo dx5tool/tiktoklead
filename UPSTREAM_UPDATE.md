@@ -1,4 +1,4 @@
-# Hướng Dẫn Cập Nhật Fury Upstream (Zero-Conflict Update Guide)
+# Hướng Dẫn Cập Nhật Fury Upstream
 
 Dự án này sử dụng kiến trúc phân tầng module hóa **"Ruột Fury - Vỏ Simprint"**:
 - **Tầng lõi C++** (`core/` - Chromium patches, fingerprint spoofing canvas, webgl, audio): **Giữ nguyên 100% gốc**.
