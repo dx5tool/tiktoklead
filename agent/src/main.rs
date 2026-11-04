@@ -33,6 +33,7 @@ mod paths;
 mod personas;
 mod relay;
 mod store;
+mod syn_shape;
 mod sync;
 #[cfg(test)]
 mod sync_tests;
@@ -43,6 +44,7 @@ mod transfer;
 mod usage;
 mod vault;
 mod warm;
+mod farm;
 mod webstore;
 mod widevine;
 mod wg_stack;
@@ -82,7 +84,14 @@ async fn main() -> anyhow::Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
         Some("serve") => {
+            // Before anything opens a socket. See fury_platform::fdlimit: 256
+            // from the Finder was the agent's ceiling, and it hit it.
+            if let Some((before, after)) = fury_platform::raise_fd_limit() {
+                tracing::info!(before, after, "open-file limit");
+            }
             let agent = ipc::Agent::new().await?;
+            // Farming plans run whether or not a window is open. See farm.rs.
+            agent.start_farming();
 
             // Only when asked for. See http.rs: a loopback port is reachable
             // from a page the browser itself opens, and the defences are worth
@@ -279,15 +288,17 @@ async fn cmd_launch(args: &[String]) -> anyhow::Result<()> {
         );
     }
     let mut config = persona.derive_core_config(seed, &ctx);
-    // The canvas mode a profile picks in its Advanced tab, for measuring the
-    // two side by side from a terminal.
-    if args.iter().any(|a| a == "--real-canvas") {
-        fury_shared::overrides::MachineOverrides {
-            canvas: Some(fury_shared::overrides::CanvasMode::Real),
-            ..Default::default()
-        }
-        .apply_config(&mut config);
+    // What a profile with nothing pinned launches with (the monitor's own
+    // screen), plus the canvas mode a profile picks in its Advanced tab, for
+    // measuring the two side by side from a terminal.
+    fury_shared::overrides::MachineOverrides {
+        canvas: args
+            .iter()
+            .any(|a| a == "--real-canvas")
+            .then_some(fury_shared::overrides::CanvasMode::Real),
+        ..Default::default()
     }
+    .apply_config(&mut config);
 
     // The installed core is the last resort and it was missing entirely: this
     // took --core or FURY_CORE and nothing else, so on a machine where
@@ -488,10 +499,14 @@ pub fn core_outdated(exe: &std::path::Path) -> Option<String> {
 ///
 /// 0.3.8 rebuilt only the macOS core: 0903, a profile restoring its session
 /// quits with its last window too.
+///
+/// 0.4.12 rebuilt both: what demo.fingerprint.com named tampering -- client
+/// rects off the layout grid (0033), WebGL extensions out of Chrome's order
+/// (0031) -- and Chrome's own Google voices (0042).
 #[cfg(windows)]
-pub const CORE_BUILD: &str = "0.3.7";
+pub const CORE_BUILD: &str = "0.4.14";
 #[cfg(not(windows))]
-pub const CORE_BUILD: &str = "0.3.8";
+pub const CORE_BUILD: &str = "0.4.14";
 
 /// `0.2.10` as (0, 2, 10); None for anything else.
 pub fn parse_release(s: &str) -> Option<(u32, u32, u32)> {
@@ -548,12 +563,12 @@ pub fn core_stale(exe: &std::path::Path) -> Option<Option<String>> {
 #[cfg(target_os = "macos")]
 const CORE_BUILD_ENGINE: Option<(&str, &str)> = Some((
     "../Frameworks/Fury Framework.framework/Versions/Current/Fury Framework",
-    "ebcc89046d7990bc411b2edb919970043228cc2bee42f68a91f1e4b141e4ab8d",
+    "15bd18f402f0c2aad176670a58841d1d9cbdcac63abce1ddfd354cf6714a21fd",
 ));
 #[cfg(windows)]
 const CORE_BUILD_ENGINE: Option<(&str, &str)> = Some((
     "chrome.dll",
-    "4a7f55d5b4c556f578ed1112ff5b3e2c1b3612de8eeae1a1e5c4e3e4f4d00869",
+    "82c85a925edd140cb87ba98cb7f67ab7f7b0f312cbc62674911d41c63bfe1f50",
 ));
 #[cfg(not(any(target_os = "macos", windows)))]
 const CORE_BUILD_ENGINE: Option<(&str, &str)> = None;
@@ -872,6 +887,15 @@ pub fn parse_upstream(url: &str) -> anyhow::Result<Upstream> {
         // socks5 is treated as socks5h unconditionally: local DNS resolution
         // would leak the operator's resolver. See docs/05.
         "socks5" | "socks5h" => Upstream::Socks5 { host, port, auth },
+        // The config rides in the password (`wireguard::url`); host and port
+        // are only the endpoint repeated for display. Windows until a launch
+        // says which persona this is (`Upstream::for_os`): a check has no
+        // persona, and Windows is what most of them are.
+        "wireguard" => {
+            let auth = auth.ok_or_else(|| anyhow::anyhow!("a wireguard:// URL carries its config"))?;
+            let config = wireguard::from_url_secret(&auth.password)?;
+            Upstream::WireGuard(wg_stack::Shared::for_config(config), syn_shape::Os::Windows)
+        }
         other => anyhow::bail!("unsupported proxy scheme {other:?}"),
     })
 }
@@ -1002,6 +1026,21 @@ mod tests {
         assert!(matches!(parse_upstream("direct://").unwrap(), Upstream::Direct));
         // And nothing else becomes it by accident.
         assert!(parse_upstream("direct://host:1080").is_err());
+    }
+
+    #[test]
+    fn a_login_is_taken_as_written() {
+        // A supplier's session parameters ride in the login. The parser does
+        // not percent-decode, so the form must not encode: "%3B" here was a
+        // login the proxy did not know (13.10.2026).
+        let u = parse_upstream("socks5://c8734fb39d__cr.us;sessttl.60:pw@gw.psbproxy.io:10000").unwrap();
+        match u {
+            Upstream::Socks5 { host, port, auth } => {
+                assert_eq!((host.as_str(), port), ("gw.psbproxy.io", 10000));
+                assert_eq!(auth.unwrap().username, "c8734fb39d__cr.us;sessttl.60");
+            }
+            _ => panic!("wrong variant"),
+        }
     }
 
     #[test]

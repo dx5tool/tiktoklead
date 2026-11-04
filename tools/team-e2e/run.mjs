@@ -540,6 +540,67 @@ async function main() {
     await close(t7, run, "agent");
   }
 
+  console.log("\n== 8. A warms the team profile; B gets the cookies it collected");
+  {
+    // What commands.rs::warm_start does: open it under its lock with the
+    // debugging port, then hand it to the agent, which finds it running.
+    const run = await launch(t, "A");
+    run.cdp.close();
+    const v0 = await serverVersion(t);
+    const WARM_SITE = process.env.FURY_E2E_WARM_SITE || "https://httpbin.org/cookies/set?fury_warm=1";
+    const out = await ipc("A", "warm.start", {
+      profile_ids: [t.profileId],
+      names: { [t.profileId]: "e2e team profile" },
+      plan: { urls: [WARM_SITE], dwell_seconds: [2, 3], follow_link: false, close_after: true },
+    });
+    claim(out.started?.includes(t.profileId), `the agent took the open team profile (${JSON.stringify(out.refused)})`);
+    const held = await lock(t, "B").then(
+      async (g) => { await api("POST", `/v1/profiles/${t.profileId}/unlock`, t.tokens.B, { lock_token: g.lock_token }); return true; },
+      () => false,
+    );
+    claim(!held, "B cannot take it while it warms");
+    let p = null;
+    for (let i = 0; i < 120; i++) {
+      await sleep(500);
+      p = (await ipc("A", "warm.status")).find((x) => x.profile_id === t.profileId);
+      if (p?.finished) break;
+    }
+    claim(p?.name === "e2e team profile", `the progress line names the profile (${p?.name})`);
+    claim(p?.finished && !p.error && p.done === p.total, `the list was visited (${JSON.stringify(p)})`);
+    let v1 = v0;
+    for (let i = 0; i < 120 && v1 === v0; i++) {
+      await sleep(500);
+      v1 = await serverVersion(t);
+    }
+    claim(v1 !== v0, "closing after the warm-up pushed the session");
+    const b8 = await launch(t, "B");
+    const { cookies } = await b8.cdp.send("Storage.getCookies");
+    claim(cookies.some((k) => k.name === "fury_warm"), "B has the cookie the warm-up collected on A");
+    await close(t, b8, "agent");
+  }
+
+  console.log("\n== 9. A proxy saved back with the host as it was shown masked keeps its host");
+  {
+    // server/src/api.rs mask_host, for a host whose first label is short.
+    const host = "127.0.0.1";
+    const tag = crypto.createHash("sha256").update(host).digest("hex").slice(0, 4);
+    const masked = `***${tag}.0.0.1`;
+    const hostNow = async () => (await api("GET", `/v1/proxies/${t.proxyServerId}/credentials`, t.tokens.A)).host;
+    await api("PATCH", `/v1/proxies/${t.proxyServerId}`, t.tokens.A, { name: "e2e renamed", kind: "socks5", host: masked, port: 1080 });
+    claim((await hostNow()) === host, `the stored host survived a save of its mask (${masked})`);
+    await api("PATCH", `/v1/proxies/${t.proxyServerId}`, t.tokens.A, { name: "e2e renamed", kind: "socks5", host: "127.0.0.2", port: 1080 });
+    claim((await hostNow()) === "127.0.0.2", "a host actually typed is still saved");
+  }
+
+  console.log("\n== 10. The proxy list says who added a proxy and whether this account may change it");
+  {
+    // The form used to learn it from a refused Save (tester, 20.10.2026).
+    const me = await api("GET", "/v1/me", t.tokens.A);
+    const listed = (await api("GET", "/v1/proxies", t.tokens.A)).find((p) => p.id === t.proxyServerId);
+    claim(listed?.added_by === me.email, `added_by names its author (${listed?.added_by})`);
+    claim(listed?.may_change === true, "its author, an owner, may change it");
+  }
+
   console.log(`\n${failed === 0 ? "PASS" : "FAIL"} -- ${passed} ok, ${failed} false`);
   process.exitCode = failed === 0 ? 0 : 1;
 }

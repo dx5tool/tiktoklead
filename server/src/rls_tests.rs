@@ -843,6 +843,72 @@ db_test!(edit_proxy_on_a_project_adds_proxies_and_changes_only_ones_own, c, {
 });
 
 // ---------------------------------------------------------------------------
+// 0021: a proxy from before 0015 gets its author back from the audit log
+// ---------------------------------------------------------------------------
+
+db_test!(a_proxy_older_than_its_author_column_is_claimed_by_the_log, c, {
+    use crate::rbac_guard::{may_change_proxy, ProxyChange};
+    use fury_shared::rbac::OrgRole;
+    bind(&mut c, USER_A).await;
+    make_project(&mut c, PROJECT_A, ORG_A, USER_A).await;
+    // A member who added two proxies while they were admin, and one proxy
+    // nobody's log remembers. The tester was refused their own (20.10.2026).
+    let was_admin = "cccccccc-0000-0000-0000-00000000000e";
+    let sql = format!(
+        "INSERT INTO users (id, email, password_hash, public_key, wrapped_private_key, kdf_salt)
+           VALUES ('{was_admin}','m3@example.com','x','\\x00','\\x00','\\x00');
+         INSERT INTO org_members (org_id, user_id, role, wrapped_ork, ork_generation)
+           VALUES ('{ORG_A}','{was_admin}','member','\\x00',1);
+         INSERT INTO project_grants (project_id, user_id, permissions, granted_by)
+           VALUES ('{PROJECT_A}','{was_admin}',17,'{USER_A}');
+         INSERT INTO proxies (id, org_id, name, kind, host, port, created_by)
+           VALUES ('00000000-0000-0000-0000-0000000000f1','{ORG_A}','theirs','http','h1',1,NULL),
+                  ('00000000-0000-0000-0000-0000000000f2','{ORG_A}','owners','http','h2',2,NULL),
+                  ('00000000-0000-0000-0000-0000000000f3','{ORG_A}','unknown','http','h3',3,NULL);
+         INSERT INTO audit_events (org_id, actor_user_id, action, target_id)
+           VALUES ('{ORG_A}','{was_admin}','proxy.create','00000000-0000-0000-0000-0000000000f1'),
+                  ('{ORG_A}','{USER_A}','proxy.create','00000000-0000-0000-0000-0000000000f2'),
+                  ('{ORG_A}','{was_admin}','proxy.update','00000000-0000-0000-0000-0000000000f3');"
+    );
+    c.execute(sql.as_str()).await.expect("seed proxies without an author");
+
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("migrations");
+    let backfill = std::fs::read_to_string(dir.join("0021_proxy_author_from_audit.sql")).unwrap();
+    // As the migrator runs it: nobody bound, which under FORCE sees no rows.
+    sqlx::query("SELECT set_config('app.user_id', '', false)").execute(&mut c).await.unwrap();
+    c.execute(backfill.as_str()).await.expect("0021 again, over the seeded rows");
+    bind(&mut c, USER_A).await;
+
+    let org = uuid::Uuid::parse_str(ORG_A).unwrap();
+    let was_admin = uuid::Uuid::parse_str(was_admin).unwrap();
+    let id = |n: &str| uuid::Uuid::parse_str(&format!("00000000-0000-0000-0000-0000000000{n}")).unwrap();
+    macro_rules! change {
+        ($proxy:expr) => {
+            may_change_proxy(&mut c, was_admin, org, OrgRole::Member, id($proxy)).await.unwrap()
+        };
+    }
+    assert_eq!(change!("f1"), Some(ProxyChange::Allowed));
+    assert_eq!(change!("f2"), Some(ProxyChange::NotTheirs));
+    assert_eq!(change!("f3"), Some(ProxyChange::NotTheirs));
+
+    // The list names the author, so the form can say it before Save does.
+    let rows: Vec<crate::api::ProxyRow> = sqlx::query_as(&crate::api::list_proxies_sql())
+        .bind(org)
+        .fetch_all(&mut c)
+        .await
+        .expect("the list query runs");
+    let by: Vec<(String, Option<String>)> = rows.into_iter().map(|r| (r.1, r.10)).collect();
+    assert!(by.contains(&("theirs".into(), Some("m3@example.com".into()))));
+    assert!(by.contains(&("owners".into(), Some("a@example.com".into()))));
+    assert!(by.contains(&("unknown".into(), None)));
+
+    // FORCE is back on: unbound, the table is empty again.
+    sqlx::query("SELECT set_config('app.user_id', '', false)").execute(&mut c).await.unwrap();
+    let seen: i64 = sqlx::query_scalar("SELECT count(*) FROM proxies").fetch_one(&mut c).await.unwrap();
+    assert_eq!(seen, 0);
+});
+
+// ---------------------------------------------------------------------------
 // 0016: an organisation's own machines join its catalogue, and only its own
 // ---------------------------------------------------------------------------
 
@@ -872,4 +938,155 @@ db_test!(an_organisations_machine_is_in_its_catalogue_and_nobody_elses, c, {
     assert!(!b.iter().any(|p| p.id == "captured-desk-1280x720"));
     let peek = crate::api::org_catalogue(&mut c, org_a).await.unwrap();
     assert!(!peek.iter().any(|p| p.id == "captured-desk-1280x720"), "RLS hides another org's machines");
+});
+
+// ---------------------------------------------------------------------------
+// 0017: the organisation's own roles, linked to the grants that carry them
+// ---------------------------------------------------------------------------
+
+db_test!(a_role_rewrites_the_grants_on_it_under_each_persons_ceiling, c, {
+    use crate::rbac_guard::permissions_for;
+    use fury_shared::rbac::{Perm, PermSet};
+    bind(&mut c, USER_A).await;
+    make_project(&mut c, PROJECT_A, ORG_A, USER_A).await;
+    let role = "eeeeeeee-0000-0000-0000-000000000001";
+    let member = "cccccccc-0000-0000-0000-00000000000c";
+    let manager = "cccccccc-0000-0000-0000-00000000000d";
+    // "lead": see, open, give access. The grants start with stale bits, as
+    // they would after the role was edited and before relink ran.
+    let sql = format!(
+        "INSERT INTO users (id, email, password_hash, public_key, wrapped_private_key, kdf_salt)
+           VALUES ('{member}','m1@example.com','x','\\x00','\\x00','\\x00'),
+                  ('{manager}','m2@example.com','x','\\x00','\\x00','\\x00');
+         INSERT INTO org_members (org_id, user_id, role, wrapped_ork, ork_generation)
+           VALUES ('{ORG_A}','{member}','member','\\x00',1),
+                  ('{ORG_A}','{manager}','manager','\\x00',1);
+         INSERT INTO org_access_roles (id, org_id, name, permissions, created_by)
+           VALUES ('{role}','{ORG_A}','lead',515,'{USER_A}');
+         INSERT INTO project_grants (project_id, user_id, permissions, granted_by, access_role)
+           VALUES ('{PROJECT_A}','{member}',1,'{USER_A}','{role}'),
+                  ('{PROJECT_A}','{manager}',1,'{USER_A}','{role}');"
+    );
+    c.execute(sql.as_str()).await.expect("seed a role and two people on it");
+    let role = uuid::Uuid::parse_str(role).unwrap();
+    let member = uuid::Uuid::parse_str(member).unwrap();
+    let manager = uuid::Uuid::parse_str(manager).unwrap();
+    let project = uuid::Uuid::parse_str(PROJECT_A).unwrap();
+    let bits = |p: PermSet| p.to_vec();
+
+    assert_eq!(crate::api::relink(&mut c, Some(role), None).await.unwrap(), 2);
+    let m = permissions_for(&mut c, member, project).await.unwrap();
+    let g = permissions_for(&mut c, manager, project).await.unwrap();
+    assert_eq!(bits(m), vec![Perm::View, Perm::Launch], "a member never holds manage_access, role or not");
+    assert_eq!(bits(g), vec![Perm::View, Perm::Launch, Perm::ManageAccess]);
+
+    // The role gains "edit profile": both grants follow.
+    sqlx::query("UPDATE org_access_roles SET permissions = 519 WHERE id = $1").bind(role).execute(&mut c).await.unwrap();
+    crate::api::relink(&mut c, Some(role), None).await.unwrap();
+    assert!(permissions_for(&mut c, member, project).await.unwrap().has(Perm::EditProfile));
+    assert!(permissions_for(&mut c, manager, project).await.unwrap().has(Perm::EditProfile));
+
+    // The member is made a manager: relinking just them lifts the ceiling.
+    sqlx::query("UPDATE org_members SET role = 'manager' WHERE user_id = $1").bind(member).execute(&mut c).await.unwrap();
+    assert_eq!(crate::api::relink(&mut c, None, Some(member)).await.unwrap(), 1);
+    assert!(permissions_for(&mut c, member, project).await.unwrap().has(Perm::ManageAccess));
+
+    // Deleting the role unlinks and changes nobody's access.
+    sqlx::query("DELETE FROM org_access_roles WHERE id = $1").bind(role).execute(&mut c).await.unwrap();
+    let left: Vec<(i64, Option<uuid::Uuid>)> =
+        sqlx::query_as("SELECT permissions, access_role FROM project_grants ORDER BY user_id").fetch_all(&mut c).await.unwrap();
+    assert_eq!(left, vec![(519, None), (519, None)]);
+    assert_eq!(crate::api::relink(&mut c, None, Some(member)).await.unwrap(), 0, "nothing linked any more");
+
+    // B sees none of A's roles and cannot write one into A.
+    sqlx::query("INSERT INTO org_access_roles (id, org_id, name, permissions) VALUES (gen_random_uuid(), $1::uuid, 'x', 1)")
+        .bind(ORG_A).execute(&mut c).await.unwrap();
+    bind(&mut c, USER_B).await;
+    let n: i64 = sqlx::query_scalar("SELECT count(*) FROM org_access_roles").fetch_one(&mut c).await.unwrap();
+    assert_eq!(n, 0);
+    assert!(sqlx::query("INSERT INTO org_access_roles (id, org_id, name, permissions) VALUES (gen_random_uuid(), $1::uuid, 'y', 1)")
+        .bind(ORG_A).execute(&mut c).await.is_err());
+});
+
+// ---------------------------------------------------------------------------
+// 0020: a rotation reaches everything the old key does
+// ---------------------------------------------------------------------------
+
+db_test!(rotation_material_lists_what_the_old_key_reaches, c, {
+    make_shared_fixture(&mut c).await;
+    share_with_b(&mut c, "NULL", "'\\x0102'").await;
+    let org = uuid::Uuid::parse_str(ORG_A).unwrap();
+    // Two bundles under a profile key, one under the machine that packed it
+    // (no prefix: the organisation key has nothing to do with it), and a
+    // saved login.
+    let sql = format!(
+        "INSERT INTO bundles (id, profile_id, version, kind, s3_key, size_bytes, sha256, wrapped_dek, uploaded_by) VALUES
+           ('00000000-0000-0000-0000-0000000000b1','{SHARED}',1,'snapshot','k1',1,'\\x00',convert_to('fury:ork1:AAAA','UTF8'),'{USER_A}'),
+           ('00000000-0000-0000-0000-0000000000b2','{SHARED}',2,'snapshot','k2',1,'\\x00',convert_to('fury:ork1:BBBB','UTF8'),'{USER_A}'),
+           ('00000000-0000-0000-0000-0000000000b3','{PRIVATE}',1,'snapshot','k3',1,'\\x00',convert_to('v10machine','UTF8'),'{USER_A}');
+         INSERT INTO credentials (id, profile_id, label, payload_enc, wrapped_dek) VALUES
+           ('00000000-0000-0000-0000-0000000000c1','{SHARED}','x','\\x00',convert_to('abcd','UTF8'));
+         UPDATE profiles SET wrapped_cookie_key = '\\x0a0b' WHERE id = '{SHARED}';"
+    );
+    c.execute(sql.as_str()).await.expect("seed");
+
+    let mut bundles: Vec<String> = crate::api::rotation_bundles(&mut c, org)
+        .await
+        .expect("bundles")
+        .into_iter()
+        .map(|(_, _, w)| String::from_utf8(w).unwrap())
+        .collect();
+    bundles.sort();
+    assert_eq!(bundles, ["fury:ork1:AAAA", "fury:ork1:BBBB"], "every version, and no machine-sealed one");
+
+    let profiles = crate::api::rotation_profiles(&mut c, org).await.expect("profiles");
+    assert_eq!(profiles.len(), 2);
+    let shared = uuid::Uuid::parse_str(SHARED).unwrap();
+    assert_eq!(profiles.iter().find(|(id, _)| *id == shared).unwrap().1.as_deref(), Some(&[0x0a, 0x0b][..]));
+
+    let creds = crate::api::rotation_credentials(&mut c, org).await.expect("credentials");
+    assert_eq!(creds.len(), 1);
+    assert_eq!(creds[0].1, b"abcd");
+
+    // The grantee is in another organisation, and is listed with their key.
+    let shares = crate::api::rotation_shares(&mut c, org).await.expect("shares");
+    assert_eq!(shares.len(), 1);
+    assert_eq!(shares[0].1, uuid::Uuid::parse_str(USER_B).unwrap());
+
+    // And nothing of A's reaches B's rotation.
+    bind(&mut c, USER_B).await;
+    let b = uuid::Uuid::parse_str(ORG_B).unwrap();
+    assert!(crate::api::rotation_bundles(&mut c, b).await.expect("b bundles").is_empty());
+    assert!(crate::api::rotation_profiles(&mut c, b).await.expect("b profiles").is_empty());
+});
+
+db_test!(an_upload_reads_the_generation_it_is_checked_against, c, {
+    make_shared_fixture(&mut c).await;
+    // The statement upload_bundle runs inside its transaction.
+    let g: Option<i32> = sqlx::query_scalar(
+        "SELECT o.ork_generation FROM organizations o \
+         WHERE o.id = (SELECT org_id FROM profiles WHERE id = $1) FOR SHARE",
+    )
+    .bind(uuid::Uuid::parse_str(SHARED).unwrap())
+    .fetch_optional(&mut c)
+    .await
+    .expect("generation");
+    assert_eq!(g, Some(1));
+});
+
+db_test!(an_upload_can_lock_the_profile_it_versions, c, {
+    make_shared_fixture(&mut c).await;
+    share_with_b(&mut c, "NULL", "'\\x01'").await;
+    // upload_bundle reads current_version FOR UPDATE, which RLS filters by the
+    // UPDATE side of the policy. Both a member of the owning organisation and
+    // the grantee of a share must still find the row, or their uploads 404.
+    for user in [USER_A, USER_B] {
+        bind(&mut c, user).await;
+        let v: Option<i32> = sqlx::query_scalar("SELECT current_version FROM profiles WHERE id = $1 FOR UPDATE")
+            .bind(uuid::Uuid::parse_str(SHARED).unwrap())
+            .fetch_optional(&mut c)
+            .await
+            .expect("lock");
+        assert!(v.is_some(), "{user} could not lock the profile it may upload to");
+    }
 });

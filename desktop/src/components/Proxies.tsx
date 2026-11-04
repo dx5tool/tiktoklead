@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright 2026 Bogdan Shapovalov and the Fury authors
 
+import { IconButton } from "./Icon";
 import { useCallback, useEffect, useState } from "react";
 import { api, type LocalProxy, type Profile } from "../api";
 import { useI18n } from "../i18n";
 import { useAsk } from "./Ask";
-import { ProxyForm } from "./ProxyForm";
+import { ProxyForm, addedByMe, proxyLock } from "./ProxyForm";
 import { ProxyPaste } from "./ProxyPaste";
+import { proxyUrl } from "../proxyUrl";
 
 /** The proxies this machine knows about.
  *
@@ -15,7 +17,7 @@ import { ProxyPaste } from "./ProxyPaste";
  *  three accounts, and the place to see that is here — the "used by" column is
  *  the one number that matters, since several accounts behind one address is
  *  the oldest farm signal there is. */
-export function Proxies({ profiles }: { profiles: Profile[] }) {
+export function Proxies({ profiles, local, myEmail = null }: { profiles: Profile[]; local: boolean; myEmail?: string | null }) {
   const { t, say } = useI18n();
   const { ask, dialog } = useAsk();
   const [rows, setRows] = useState<LocalProxy[]>([]);
@@ -28,10 +30,7 @@ export function Proxies({ profiles }: { profiles: Profile[] }) {
 
   /** The URL the single-proxy form would build. In team mode the password is
    *  not here, and check_proxy fetches it by id instead. */
-  const urlOf = (p: LocalProxy) => {
-    const auth = p.username ? `${encodeURIComponent(p.username)}:${encodeURIComponent(p.password ?? "")}@` : "";
-    return `${p.kind}://${auth}${p.host}:${p.port}`;
-  };
+  const urlOf = (p: LocalProxy) => proxyUrl(p.kind, p.host, p.port, p.username, p.password);
 
   const checkAll = async () => {
     const list = rows;
@@ -60,6 +59,12 @@ export function Proxies({ profiles }: { profiles: Profile[] }) {
     await load();
   };
 
+  /** Local proxies whose password the keychain will not open now. They read
+   *  back blank, and nothing used to say so: a tester re-typed every one after
+   *  an update (15.10.2026). */
+  const [unreadable, setUnreadable] = useState<string[]>([]);
+  const [stillLocked, setStillLocked] = useState(false);
+
   const load = useCallback(async () => {
     try {
       setRows(await api.proxies());
@@ -67,7 +72,10 @@ export function Proxies({ profiles }: { profiles: Profile[] }) {
     } catch (e) {
       setError(say(e));
     }
-  }, []);
+    if (local) {
+      void api.vaultStatus().then((v) => setUnreadable(v.unreadable), () => {});
+    }
+  }, [local]);
 
   useEffect(() => {
     void load();
@@ -94,12 +102,26 @@ export function Proxies({ profiles }: { profiles: Profile[] }) {
           </span>
         )}
         <div className="spacer" />
-        <button className="ghost" onClick={() => void load()}>
-          {t("bar.refresh")}
-        </button>
+        <IconButton icon="refresh" label={t("bar.refresh")} onClick={() => void load()} />
       </div>
 
       {error && <div className="notice warnBar">{error}</div>}
+      {unreadable.length > 0 && (
+        <div className="notice warnBar">
+          {t("px.vaultUnreadable", { n: unreadable.length, list: unreadable.join(", ") })}
+          {stillLocked && <> {t("px.vaultStillLocked")}</>}{" "}
+          <button
+            className="linky"
+            onClick={async () => {
+              const v = await api.vaultStatus(true).catch(() => null);
+              setStillLocked(v !== null && v.unreadable.length > 0);
+              await load();
+            }}
+          >
+            {t("px.vaultRetry")}
+          </button>
+        </div>
+      )}
 
       <div className="tableWrap">
         {rows.length === 0 ? (
@@ -120,7 +142,10 @@ export function Proxies({ profiles }: { profiles: Profile[] }) {
                 <tr key={p.id}>
                   <td>
                     <div className="name">{p.name}</div>
-                    <div className="muted small">{p.kind}</div>
+                    <div className="muted small">
+                      {p.kind}
+                      {p.added_by && <> · {addedByMe(p, myEmail) ? t("px.addedByYou") : t("px.addedBy", { who: p.added_by })}</>}
+                    </div>
                   </td>
                   <td className="mono">
                     {p.host}:{p.port}
@@ -144,11 +169,15 @@ export function Proxies({ profiles }: { profiles: Profile[] }) {
                   </td>
                   <td className="actions">
                     <div>
-                      <button className="ghost" onClick={() => setEditing(p)}>
-                        {t("row.edit")}
-                      </button>
-                      <button
-                        className="ghost"
+                      {/* The same two icons a profile row has, in the same
+                          places: one table's pencil is every table's pencil. */}
+                      <IconButton icon="pencil" label={t("row.edit")} onClick={() => setEditing(p)} />
+                      <IconButton
+                        icon="trash"
+                        danger
+                        label={t("row.delete")}
+                        title={proxyLock(p, myEmail, t) ?? undefined}
+                        disabled={proxyLock(p, myEmail, t) !== null}
                         onClick={async () => {
                           const go = await ask({
                             title: t("row.delete"),
@@ -157,12 +186,14 @@ export function Proxies({ profiles }: { profiles: Profile[] }) {
                             danger: true,
                           });
                           if (go === null) return;
-                          await api.deleteProxy(p.id);
+                          try {
+                            await api.deleteProxy(p.id);
+                          } catch (e) {
+                            setError(say(e));
+                          }
                           await load();
                         }}
-                      >
-                        {t("row.delete")}
-                      </button>
+                      />
                     </div>
                   </td>
                 </tr>
@@ -175,6 +206,7 @@ export function Proxies({ profiles }: { profiles: Profile[] }) {
       {editing !== undefined && (
         <ProxyForm
           editing={editing}
+          myEmail={myEmail}
           onClose={() => setEditing(undefined)}
           onSaved={async () => {
             setEditing(undefined);

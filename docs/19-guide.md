@@ -11,14 +11,23 @@ team server is in [14](14-team-server.md) (Russian). Everything else is here.
 After installing, Fury offers **Download the browser**. That is the browser
 your profiles open in, 100 to 150 MB, once. Profiles do not open without it.
 
-Then the sign-in screen, where you choose how you work:
+Then the profile list opens straight away. This is working **without an
+account**: everything stays on this computer, no sign-up, no server, nothing
+leaves. One person needs nothing more.
 
-| Button | What it is | For |
+### A team: sign in, create an account or accept an invitation
+
+All three are in one place. On the left choose **Users** and press **Connect
+a server**. Settings open on the **Team server** tab. The gear at the bottom
+left, next to the computer's name, leads there too.
+
+| What to press there | When | Then |
 |---|---|---|
-| **Work without an account** | Everything stays on this computer. No sign-up, no server, nothing leaves. | One person |
-| **Create an account** | A team on our server; `srv.furybrowser.dev` is filled in. Email, password and a team name; you become its owner. | A team that does not want to run a server |
-| **I have an invitation** | A colleague invited you and sent a code. | A team member |
-| **Sign in** | You already have an account. | |
+| **Connect** (`srv.furybrowser.dev` is filled in) | You already have an account | Email and password |
+| **Create an account**, under the field after "No account yet?" | You are starting a team on our server | Email, password and a team name. You become its owner |
+| **I have an invitation**, next to it | A colleague invited you and sent a code | The code and your own password. Then wait for an owner or admin to let you in |
+
+If your team runs its own server, type its address in the field instead of ours.
 
 All of it is free, alone or as a team.
 
@@ -26,8 +35,9 @@ All of it is free, alone or as a team.
 on your machine and nobody holds a copy, the server included. Put it in a
 password manager right away.
 
-You can move from working alone to a team later: **Settings → Team server**.
-Profiles made on this computer stay.
+Profiles made before connecting stay on the computer, under **On this machine**
+on the left. After signing out of a team account Fury opens on the sign-in
+screen, with the same buttons and **Work without an account**.
 
 ## 2. Profiles
 
@@ -84,6 +94,13 @@ this computer open or with none. Import first, then give profiles to the team.
 - Tick several and the bar above acts on all of them: **Open**, **Close**,
   **Proxy →** (one each or one for all), **Warm up…** (visit a list of sites
   so cookies build up), **Move to project…**, **Delete**.
+- **Warm up…** runs now, once, or **on a schedule**: for a number of days,
+  each profile reads a few of the sites every day at random times within the
+  hours you set, in its own timezone (its proxy's if it has none), and closes
+  again. Fury has to be running and the computer awake; a day it slept
+  through is skipped, not made up. A profile you have open is left alone, and
+  team profiles farm only while the Fury window is open. Plans show above the
+  list, with **Pause** and **Remove plan**.
 - Search matches name, tag and proxy; tag and stage filters sit beside it.
 - A profile's **cookies** can be exported and imported as JSON.
 
@@ -117,7 +134,7 @@ The owner or an admin runs the team from **Users**.
 
 ### Inviting someone
 
-1. **Users → Invite someone**: email and role, then **Create invitation**.
+1. **Users → Team → Invite**: email and role, then **Create invitation**.
 2. A code appears. It is shown once, lasts 48 hours and works for one sign-up.
    Pass it on any way you like.
 3. They install Fury and press **I have an invitation** on the first screen
@@ -125,9 +142,19 @@ The owner or an admin runs the team from **Users**.
    invitation**), enter the code and choose their own password. You never see it.
 4. In **Users** they are marked **waiting to be let in**. Press **Let them in** and
    tick the projects they need.
+5. Before letting them in, check the **verification code**. Their Fury shows eight
+   digits on the waiting screen; the **Let them in** dialog shows the digits it
+   expects. Ask the person for theirs privately and tick **They told me this
+   code** only if they match.
 
 Step 4 is the easy one to miss. Until then they can sign in and see the team,
 and open nothing.
+
+Step 5 is what tells you who signed up. An invitation code works for whoever
+types it first, so if it leaked, somebody else may be waiting under your
+colleague's address. Then your colleague has no code at all ("the invitation
+has already been used"). Do not let that person in: press **Remove** and send a
+new invitation.
 
 ### Roles
 
@@ -141,8 +168,23 @@ and open nothing.
 ### Project access
 
 A project is a folder of profiles and the unit of access: whoever has the
-project has every profile in it. In **Users** pick the project, **Add from the
+project has every profile in it. In **Users → Project access** pick the project, **Add from the
 team**, tick the rights and **Grant access**. **Revoke** ends it at once.
+
+### Project roles
+
+When the same boxes have to be ticked for many people, make a role:
+**Users → Roles → New role…**, a name and the rights. A role is picked
+in the **Role:** field beside a person in a project, in **Add from the team**,
+in the **Let them in** dialog, and when creating the invitation.
+
+A role is linked: change its boxes and everybody on it changes at once. While
+someone is on a role their boxes are locked; pick **by hand** to tick them
+yourself. Deleting a role takes nothing from anybody: they keep the same
+rights, just without the role.
+
+The team role stays the ceiling: a member never gets "give access to others",
+even if their project role has it. Owners and admins create and change roles.
 
 ### Giving one profile
 
@@ -170,7 +212,7 @@ somebody left it open and went home.
 
 ### Someone leaves
 
-**Users → Remove**. Their access ends at once and the team key is replaced, so
+**Users → Team → Remove**. Their access ends at once and the team key is replaced, so
 nothing new opens with their old copy. If a laptop with access is lost, use
 **Replace the organisation key**.
 

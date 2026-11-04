@@ -506,6 +506,7 @@ pub mod samples {
 /// runtime (`GetInt(std::string("mediaDevices.") + key)`), so what has to exist
 /// is a non-empty object there, not one named key.
 pub const CORE_CONFIG_KEYS: &[&str] = &[
+    "audio.baseLatency",
     "audio.outputLatency",
     "automation.hideTraces",
     "battery.charging",
@@ -521,6 +522,9 @@ pub const CORE_CONFIG_KEYS: &[&str] = &[
     "geolocation.accuracy",
     "geolocation.latitude",
     "geolocation.longitude",
+    "gpu.shaderPrecision.",
+    "gpu.webgl1Extensions",
+    "gpu.webgl2Extensions",
     "gpu.webglExtensions",
     "gpu.webglParams.",
     "gpu.webgpu.architecture",
@@ -555,6 +559,7 @@ pub const CORE_CONFIG_KEYS: &[&str] = &[
     "screen.height",
     "screen.scrollbarWidth",
     "screen.width",
+    "speech.androidVoices",
     "speech.voices",
     "webrtc.ipHandlingPolicy",
     "window.profileName",
@@ -593,6 +598,14 @@ const OPTIONAL_BRANCHES: &[(&str, &[&str])] = &[
         ],
     ),
     ("speech", &["speech.voices"]),
+    // Per-context extension lists and shader precision come from a capture
+    // that recorded them; absent, the core falls back to gpu.webglExtensions
+    // and to the host's precision (patch 0031).
+    ("gpu.webgl1Extensions", &["gpu.webgl1Extensions"]),
+    ("gpu.webgl2Extensions", &["gpu.webgl2Extensions"]),
+    ("gpu.shaderPrecision", &["gpu.shaderPrecision."]),
+    // A phone persona converted before its voice locales were kept.
+    ("speech.androidVoices", &["speech.androidVoices"]),
     // A desktop persona has no handset, and its absence is what leaves
     // patch 0130 out of the way (persona.rs, derive_core_config).
     ("mobile", &["mobile.connectionType", "mobile.enabled", "mobile.touchSeed"]),
@@ -633,11 +646,19 @@ pub fn check_core_config(config: &serde_json::Value) -> Result<(), Vec<String>> 
     // out -- that is how the core is told not to noise. The marker is what
     // tells this check that the absence was meant (overrides::CanvasMode).
     let real_canvas = lookup(config, "noise.canvas").and_then(|v| v.as_str()) == Some("real");
+    // The same for text measurements (persona.rs, derive_core_config) and for
+    // the monitor itself (overrides::MachineOverrides::apply_config).
+    let real_rects = lookup(config, "noise.clientRects").and_then(|v| v.as_str()) == Some("real");
+    let real_screen = lookup(config, "screen.size").and_then(|v| v.as_str()) == Some("real");
 
     let missing: Vec<String> = CORE_CONFIG_KEYS
         .iter()
         .filter(|path| !skipped.contains(path))
         .filter(|path| !(real_canvas && **path == "noise.canvasSeed"))
+        .filter(|path| !(real_rects && **path == "noise.clientRectsSeed"))
+        .filter(|path| {
+            !(real_screen && crate::overrides::MONITOR_KEYS.iter().any(|k| path.strip_prefix("screen.") == Some(*k)))
+        })
         .filter(|path| match path.strip_suffix('.') {
             // A prefix the core completes at runtime: what must be there is an
             // object with something in it. An empty one reads exactly like a

@@ -6,8 +6,11 @@ import { api, type DomainList, type KeptPersona, type Shell } from "../api";
 import { SecondFactor } from "./SecondFactor";
 import { languages, useI18n, type Language } from "../i18n";
 import { type Theme, themes, useTheme } from "../theme";
+import { Select } from "./Select";
+import { DEFAULT_SERVER } from "../defaults";
+import { Icon, type IconName } from "./Icon";
 
-const TABS = ["general", "team", "data", "about"] as const;
+const TABS = ["general", "team", "data", "about", "products"] as const;
 type Tab = (typeof TABS)[number];
 
 /** Everything that is a preference rather than a property of a profile.
@@ -33,6 +36,7 @@ export function Settings({
   onEnrol,
   onSignup,
   onClose,
+  initialTab,
 }: {
   shell: Shell;
   hasProject: boolean;
@@ -45,16 +49,20 @@ export function Settings({
   onEnrol: () => void;
   onSignup: () => void;
   onClose: () => void;
+  initialTab?: Tab;
 }) {
   const [theme, setTheme] = useTheme();
   const { t, language, setLanguage } = useI18n();
-  const [tab, setTab] = useState<Tab>("general");
+  const [tab, setTab] = useState<Tab>(initialTab ?? "general");
   // Prefilled with the server this machine used last. The first screen already
   // does this, and somebody working locally never reaches the first screen --
   // the window opens straight into the profile list, so THIS is where the way
   // back has to be. Reported exactly that way: "открываю лаунчер и он сразу
   // входит, кнопки войти в свой аккаунт нет".
-  const [url, setUrl] = useState(shell.last_server ?? "");
+  // Our server when this machine has used none, as the sign-up and invitation
+  // screens already do: an empty field next to "Connect" left a tester asking
+  // what to type.
+  const [url, setUrl] = useState(shell.last_server ?? DEFAULT_SERVER);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -106,7 +114,7 @@ export function Settings({
                       aria-pressed={language === l}
                       onClick={() => setLanguage(l as Language)}
                     >
-                      {l === "system" ? t("set.langSystem") : l === "ru" ? "Русский" : "English"}
+                      {l === "system" ? t("set.langSystem") : l === "ru" ? "Русский" : l === "zh" ? "简体中文" : "English"}
                     </button>
                   ))}
                 </div>
@@ -275,6 +283,7 @@ export function Settings({
           )}
 
           {tab === "about" && <About shell={shell} />}
+          {tab === "products" && <Products />}
         </div>
 
         <div className="modalFoot">
@@ -571,14 +580,14 @@ function DomainLists() {
       <div className="field">
         <label htmlFor="dl-pick">{t("set.listName")}</label>
         <div>
-          <select id="dl-pick" value={isNew ? "" : name} onChange={(e) => void pick(e.target.value)}>
+          <Select id="dl-pick" value={isNew ? "" : name} onChange={(e) => void pick(e.target.value)}>
             <option value="">{t("set.listNew")}</option>
             {lists.map((l) => (
               <option key={l.name} value={l.name}>
-                {l.name} — {l.allow_only ? t("pd.listAllowOnly", { n: l.domains }) : t("pd.listBlocks", { n: l.domains })}
+                {l.name} — {l.local ? t("pd.listLocal", { n: l.domains }) : l.allow_only ? t("pd.listAllowOnly", { n: l.domains }) : t("pd.listBlocks", { n: l.domains })}
               </option>
             ))}
-          </select>
+          </Select>
           {isNew && (
             <>
               <input
@@ -617,7 +626,7 @@ function DomainLists() {
                   setNote(
                     t("set.listSaved", {
                       n: saved.domains,
-                      mode: saved.allow_only ? t("set.listModeAllow") : "",
+                      mode: saved.local ? t("set.listModeLocal") : saved.allow_only ? t("set.listModeAllow") : "",
                     }),
                   );
                   setIsNew(false);
@@ -871,10 +880,89 @@ function describeMachine(p: Record<string, unknown>): string {
   const gpu = o(p.gpu);
   const screen = o(p.screen);
   return [
-    [os.name, os.version].filter(Boolean).join(" "),
+    [os.name, os.name === "Windows" ? windowsRelease(String(os.version ?? "")) : os.version].filter(Boolean).join(" "),
     gpu.webgl_renderer,
     screen.width && screen.height ? `${screen.width}×${screen.height}` : null,
   ]
     .filter(Boolean)
     .join(" · ");
+}
+
+/** A capture kept before 0.3.10 stores Client Hints' platformVersion as the
+ *  version, and on Windows that is not the release: Windows 10 1809 says
+ *  7.0.0. Same table as shared-rs persona.rs `windows_release`. */
+function windowsRelease(v: string): string {
+  if (!v.includes(".")) return v;
+  const [major, minor] = v.split(".").map((x) => parseInt(x, 10));
+  if (major === 0) return ({ 1: "7", 2: "8", 3: "8.1" } as Record<number, string>)[minor] ?? v;
+  if (major >= 1 && major <= 10) return "10";
+  if (major >= 13) return "11";
+  return v;
+}
+
+/** The developer's other products, the same list FuryMail's About shows.
+ *
+ *  Fury is free, and the people who use it are the audience for the rest:
+ *  agencies running accounts, SEO people. Asked for on 14.10.2026 so that
+ *  somebody using the antidetect sees what else there is. Plain links, opened
+ *  in the system browser; nothing here is fetched or reported. */
+const DEVELOPER_TELEGRAM = "https://t.me/mrbogdan";
+
+const PRODUCTS: { name: string; detail: "prod.crm" | "prod.seoPlugin" | "prod.seoExtension" | "prod.mail"; icon: IconName; url: string | null }[] = [
+  { name: "FuryCRM", detail: "prod.crm", icon: "people", url: "https://furycrm.ru" },
+  { name: "SEO Fury", detail: "prod.seoPlugin", icon: "puzzle", url: "https://seo-fury.com" },
+  {
+    name: "SEO Fury — SEO Auditor",
+    detail: "prod.seoExtension",
+    icon: "globe",
+    url: "https://chromewebstore.google.com/detail/seo-fury-%E2%80%94-seo-auditor/omkoncaffmikgcdndbnnokjggdmkfkce",
+  },
+  // The Mac App Store page without a storefront or a language in it, so it
+  // opens in the reader's own store and language.
+  { name: "FuryMail", detail: "prod.mail", icon: "mail", url: "https://apps.apple.com/app/furymail/id6814842270?mt=12" },
+];
+
+function Products() {
+  const { t } = useI18n();
+  const open = (url: string) => void api.openUrl(url);
+  return (
+    <>
+      <div className="settingsGroup">
+        <div className="devCard">
+          <div className="devAvatar" aria-hidden="true">БШ</div>
+          <div className="devWho">
+            <div className="devName">Bogdan Shapovalov</div>
+            <div className="muted small">{t("prod.role")}</div>
+          </div>
+          <button className="primary" onClick={() => open(DEVELOPER_TELEGRAM)}>
+            <Icon name="send" /> {t("prod.telegram")}
+          </button>
+        </div>
+      </div>
+      <div className="settingsGroup">
+        <h2>{t("set.tab.products")}</h2>
+        <p>{t("prod.intro")}</p>
+        <div className="productList">
+          {PRODUCTS.map((p) => (
+            <div key={p.name} className="productRow">
+              <span className="productIcon">
+                <Icon name={p.icon} size={18} />
+              </span>
+              <div className="productText">
+                <div className="productName">{p.name}</div>
+                <div className="muted small">{t(p.detail)}</div>
+              </div>
+              {p.url ? (
+                <button className="ghost" onClick={() => open(p.url!)}>
+                  {t("prod.open")} <Icon name="external" size={13} />
+                </button>
+              ) : (
+                <span className="muted small">{t("prod.soon")}</span>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+    </>
+  );
 }

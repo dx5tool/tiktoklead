@@ -44,6 +44,8 @@ pub fn routes() -> Router<Arc<AppState>> {
         .route("/v1/me/totp/verify", post(crate::security::totp_verify))
         .route("/v1/org/security", get(crate::security::get_policy).put(crate::security::put_policy))
         .route("/v1/org/domain-lists", get(list_domain_lists).post(upsert_domain_list))
+        .route("/v1/org/access-roles", get(list_access_roles).post(upsert_access_role))
+        .route("/v1/org/access-roles/{id}", axum::routing::delete(delete_access_role))
         .route("/v1/org/personas", get(list_org_personas).post(add_org_persona))
         .route("/v1/org/personas/{id}", axum::routing::delete(delete_org_persona))
         .route("/v1/org/domain-lists/{id}", axum::routing::delete(delete_domain_list))
@@ -53,6 +55,8 @@ pub fn routes() -> Router<Arc<AppState>> {
         .route("/v1/org/members/{user_id}/sessions", axum::routing::delete(crate::security::revoke_member_sessions))
         .route("/v1/auth/enroll", post(complete_enrollment))
         .route("/v1/auth/enroll/{code}", get(peek_enrollment))
+        .route("/v1/auth/enroll/{code}/email", post(enroll_email_send))
+        .route("/v1/auth/enroll/{code}/email/verify", post(enroll_email_verify))
         .route("/v1/auth/signup", post(signup))
         .route("/v1/server", get(server_info))
         .route("/v1/me", get(whoami))
@@ -357,7 +361,173 @@ struct Invitation {
 /// Deliberately nothing else. A server's name, its size, who is on it — all of
 /// that would turn an address into a thing worth scanning for.
 async fn server_info(State(state): State<Arc<AppState>>) -> Json<serde_json::Value> {
-    Json(json!({ "open_signup": state.open_signup }))
+    // And whether an invited address is confirmed by email: the person
+    // sending a code is told whether the code alone is enough (mail.rs).
+    Json(json!({ "open_signup": state.open_signup, "email_check": state.mailer.is_some() }))
+}
+
+/// Whether redeeming this invitation takes the six digits from the letter.
+/// Not for an owner's bootstrap code: it is minted at the server's own shell,
+/// by the person it is for.
+fn email_check_applies(state: &AppState, role: &str) -> bool {
+    state.mailer.is_some() && role != "owner"
+}
+
+/// How long the six digits live, how many letters one invitation may send,
+/// how far apart, and how many wrong answers spend a letter's code.
+const EMAIL_CODE_MINUTES: i64 = 15;
+const EMAIL_LETTERS_MAX: i32 = 5;
+const EMAIL_LETTER_GAP_SECS: i64 = 60;
+const EMAIL_ATTEMPTS_MAX: i32 = 5;
+
+/// The stored form of the six digits or of the proof: bound to the invitation
+/// so a hash from one row says nothing about another.
+fn email_secret_hash(enrollment: Uuid, secret: &str) -> Vec<u8> {
+    use sha2::{Digest, Sha256};
+    Sha256::digest(format!("{enrollment}:{secret}").as_bytes()).to_vec()
+}
+
+#[derive(Deserialize)]
+struct EmailCodeRequest {
+    /// The language of the newcomer's app, for the letter.
+    #[serde(default)]
+    lang: String,
+}
+
+/// `POST /v1/auth/enroll/{code}/email` -- send six digits to the invited
+/// address. A minute apart and five per invitation, so a code in the wrong
+/// hands cannot be used to flood somebody's inbox.
+async fn enroll_email_send(
+    State(state): State<Arc<AppState>>,
+    Path(code): Path<String>,
+    Json(req): Json<EmailCodeRequest>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let Some(mailer) = state.mailer.clone() else {
+        return Err(ApiError::BadRequest("this server does not confirm addresses by email".into()));
+    };
+    let mut tx = state.db.begin().await?;
+    let row: Option<(Uuid, String, Option<String>, Option<Uuid>, String, i32, i64)> = sqlx::query_as(
+        "SELECT id, email::text, org_name, org_id, role::text, email_codes_sent, \
+                CASE WHEN email_code_sent_at IS NULL THEN 0 \
+                     ELSE GREATEST(0, CEIL($2 - EXTRACT(EPOCH FROM now() - email_code_sent_at))) END::bigint \
+         FROM enrollments \
+         WHERE code_hash = $1 AND used_at IS NULL AND expires_at > now() \
+         FOR UPDATE",
+    )
+    .bind(crate::enroll::hash_code(&code))
+    .bind(EMAIL_LETTER_GAP_SECS as f64)
+    .fetch_optional(&mut *tx)
+    .await?;
+    // The same one answer for expired, spent and unknown as the peek gives.
+    let Some((id, email, org_name, org_id, role, sent, wait)) = row else {
+        return Err(ApiError::NotFound);
+    };
+    if !email_check_applies(&state, &role) {
+        return Err(ApiError::BadRequest("this invitation is not confirmed by email".into()));
+    }
+    if wait > 0 {
+        return Ok(Json(json!({ "sent": false, "retry_after": wait })));
+    }
+    if sent >= EMAIL_LETTERS_MAX {
+        return Err(ApiError::BadRequest(
+            "five letters have been sent for this invitation already; ask whoever invited you for a new one".into(),
+        ));
+    }
+
+    let digits = {
+        use rand::Rng;
+        format!("{:06}", rand::rngs::OsRng.gen_range(0..1_000_000u32))
+    };
+    sqlx::query(
+        "UPDATE enrollments SET email_code_hash = $2, \
+                email_code_expires_at = now() + ($3 || ' minutes')::interval, \
+                email_code_attempts = 0, email_code_sent_at = now(), \
+                email_codes_sent = email_codes_sent + 1, email_proof_hash = NULL \
+         WHERE id = $1",
+    )
+    .bind(id)
+    .bind(email_secret_hash(id, &digits))
+    .bind(EMAIL_CODE_MINUTES.to_string())
+    .execute(&mut *tx)
+    .await?;
+
+    let org = match (org_name, org_id) {
+        (Some(name), _) => name,
+        (None, Some(org)) => sqlx::query_scalar::<_, String>("SELECT name FROM organizations WHERE id = $1")
+            .bind(org)
+            .fetch_one(&mut *tx)
+            .await?,
+        (None, None) => String::new(),
+    };
+    // Sent before the commit: a letter that did not go out must not use up one
+    // of the five, or the minute's wait.
+    let (subject, body) = crate::mail::email_code_letter(&req.lang, &org, &digits, EMAIL_CODE_MINUTES);
+    if let Err(e) = mailer.send(&email, &subject, body).await {
+        tracing::warn!(error = %e, "could not send an invitation's email code");
+        return Err(ApiError::BadRequest(
+            "the server could not send the letter; try again in a minute, or tell whoever invited you".into(),
+        ));
+    }
+    tx.commit().await?;
+    Ok(Json(json!({ "sent": true, "retry_after": EMAIL_LETTER_GAP_SECS })))
+}
+
+#[derive(Deserialize)]
+struct EmailVerifyRequest {
+    email_code: String,
+}
+
+/// `POST /v1/auth/enroll/{code}/email/verify` -- the six digits in, a one-time
+/// proof out, which `complete_enrollment` then requires. Checked here, before
+/// a password is chosen, so a mistyped code is not found out after the keys
+/// were generated.
+async fn enroll_email_verify(
+    State(state): State<Arc<AppState>>,
+    Path(code): Path<String>,
+    Json(req): Json<EmailVerifyRequest>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let mut tx = state.db.begin().await?;
+    let row: Option<(Uuid, Option<Vec<u8>>, bool, i32)> = sqlx::query_as(
+        "SELECT id, email_code_hash, COALESCE(email_code_expires_at > now(), false), email_code_attempts \
+         FROM enrollments \
+         WHERE code_hash = $1 AND used_at IS NULL AND expires_at > now() \
+         FOR UPDATE",
+    )
+    .bind(crate::enroll::hash_code(&code))
+    .fetch_optional(&mut *tx)
+    .await?;
+    let Some((id, stored, live, attempts)) = row else {
+        return Err(ApiError::NotFound);
+    };
+    let Some(stored) = stored.filter(|_| live) else {
+        return Err(ApiError::BadRequest("the code from the letter has expired; send another letter".into()));
+    };
+    if attempts >= EMAIL_ATTEMPTS_MAX {
+        return Err(ApiError::BadRequest("too many wrong codes; send another letter".into()));
+    }
+    let digits: String = req.email_code.chars().filter(|c| c.is_ascii_digit()).collect();
+    if email_secret_hash(id, &digits) != stored {
+        sqlx::query("UPDATE enrollments SET email_code_attempts = email_code_attempts + 1 WHERE id = $1")
+            .bind(id)
+            .execute(&mut *tx)
+            .await?;
+        tx.commit().await?;
+        return Err(ApiError::BadRequest("that is not the code from the letter".into()));
+    }
+    let proof = {
+        use rand::RngCore;
+        let mut b = [0u8; 32];
+        rand::rngs::OsRng.fill_bytes(&mut b);
+        b.iter().map(|x| format!("{x:02x}")).collect::<String>()
+    };
+    // The digits are spent: the proof is what carries the confirmation on.
+    sqlx::query("UPDATE enrollments SET email_proof_hash = $2, email_code_hash = NULL WHERE id = $1")
+        .bind(id)
+        .bind(email_secret_hash(id, &proof))
+        .execute(&mut *tx)
+        .await?;
+    tx.commit().await?;
+    Ok(Json(json!({ "email_proof": proof })))
 }
 
 #[derive(Deserialize)]
@@ -560,6 +730,8 @@ async fn peek_enrollment(
         // An owner brings the organisation key into being; everyone else waits
         // to be handed it. The client needs to know which job it has.
         "creates_org_key": role == "owner",
+        // Whether the next step is the six digits from a letter (mail.rs).
+        "email_check": email_check_applies(&state, &role),
     })))
 }
 
@@ -583,6 +755,9 @@ pub struct EnrollRequest {
     wrapped_ork: Option<String>,
     #[serde(default)]
     machine_name: String,
+    /// What `enroll_email_verify` returned, when the server confirms addresses.
+    #[serde(default)]
+    email_proof: Option<String>,
 }
 
 async fn complete_enrollment(
@@ -638,6 +813,25 @@ async fn complete_enrollment(
             "this invitation is not valid — it may have been used already, or expired".into(),
         ));
     };
+
+    if email_check_applies(&state, &role) {
+        let stored: Option<Vec<u8>> =
+            sqlx::query_scalar("SELECT email_proof_hash FROM enrollments WHERE id = $1")
+                .bind(enrollment_id)
+                .fetch_one(&mut *tx)
+                .await?;
+        let proven = match (stored, req.email_proof.as_deref()) {
+            (Some(stored), Some(proof)) => email_secret_hash(enrollment_id, proof) == stored,
+            _ => false,
+        };
+        if !proven {
+            return Err(ApiError::BadRequest(
+                "this server confirms the invited address by email first. If the app did not ask for \
+                 a code from a letter, update Fury to 0.3.12 or later"
+                    .into(),
+            ));
+        }
+    }
 
     let owner = role == "owner";
     if owner && wrapped_ork.is_none() {
@@ -771,6 +965,12 @@ async fn whoami(
         "org_id": caller.org_id,
         "role": caller.role,
         "has_org_key": has_org_key,
+        // So the application can tell a self-hosting owner their server is
+        // behind the latest release; the tester who runs his own learned of
+        // server updates only when told (14.10.2026). Here and not in
+        // /v1/server: that one answers strangers, and a version is what a
+        // scanner looks for first.
+        "server_version": env!("CARGO_PKG_VERSION"),
     })))
 }
 
@@ -1088,6 +1288,8 @@ pub(crate) async fn profiles_in(
                         detected_kind: None,
                         last_checked_at: None,
                         shared_with_profiles: 0,
+                        added_by: None,
+                        may_change: None,
                     }),
                     lock: lock_user.map(|uid| LockInfo {
                         user_id: uid,
@@ -1311,7 +1513,34 @@ async fn grant_access(
         ));
     };
     let role = auth::parse_role(&role).ok_or(ApiError::NotFound)?;
-    let requested = PermSet::from_iter(req.permissions.iter().copied());
+
+    // Which of the organisation's own roles the grant follows (0017). Absent
+    // keeps the current link, so attaching a domain list to somebody on
+    // "operator" leaves them on "operator"; null unlinks.
+    let link: Option<Uuid> = match req.access_role {
+        Some(link) => link,
+        None => sqlx::query_scalar::<_, Option<Uuid>>(
+            "SELECT access_role FROM project_grants WHERE project_id = $1 AND user_id = $2",
+        )
+        .bind(project_id)
+        .bind(req.user_id)
+        .fetch_optional(db.as_mut())
+        .await?
+        .flatten(),
+    };
+    let requested = match link {
+        Some(id) => {
+            let bits: Option<i64> = sqlx::query_scalar(
+                "SELECT permissions FROM org_access_roles WHERE id = $1 AND org_id = $2",
+            )
+            .bind(id)
+            .bind(caller.org_id)
+            .fetch_optional(db.as_mut())
+            .await?;
+            PermSet(bits.ok_or_else(|| ApiError::BadRequest("that role does not exist in this organisation".into()))?)
+        }
+        None => PermSet::from_iter(req.permissions.iter().copied()),
+    };
     let capped = requested.intersect(fury_shared::rbac::role_ceiling(role));
 
     // $5::timestamptz, not $5. The expiry arrives as an RFC 3339 string — the
@@ -1338,12 +1567,13 @@ async fn grant_access(
         }
     };
     sqlx::query(
-        "INSERT INTO project_grants (project_id, user_id, permissions, granted_by, expires_at, domain_lists) \
-         VALUES ($1, $2, $3, $4, $5::timestamptz, COALESCE($6, '{}')) \
+        "INSERT INTO project_grants (project_id, user_id, permissions, granted_by, expires_at, domain_lists, access_role) \
+         VALUES ($1, $2, $3, $4, $5::timestamptz, COALESCE($6, '{}'), $7) \
          ON CONFLICT (project_id, user_id) DO UPDATE \
          SET permissions = EXCLUDED.permissions, granted_by = EXCLUDED.granted_by, \
              granted_at = now(), expires_at = EXCLUDED.expires_at, \
-             domain_lists = COALESCE($6, project_grants.domain_lists)",
+             domain_lists = COALESCE($6, project_grants.domain_lists), \
+             access_role = EXCLUDED.access_role",
     )
     .bind(project_id)
     .bind(req.user_id)
@@ -1351,14 +1581,16 @@ async fn grant_access(
     .bind(caller.user_id)
     .bind(req.expires_at.as_deref())
     .bind(lists.as_deref())
+    .bind(link)
     .execute(db.as_mut())
     .await?;
 
     audit(db.as_mut(), &caller, "access.grant", Some(project_id),
-          json!({ "target": req.user_id, "requested": requested.to_vec(), "granted": capped.to_vec(), "domain_lists": req.domain_lists }))
+          json!({ "target": req.user_id, "requested": requested.to_vec(), "granted": capped.to_vec(),
+                  "domain_lists": req.domain_lists, "access_role": link }))
         .await?;
 
-    Ok(Json(json!({ "granted": capped.to_vec() })))
+    Ok(Json(json!({ "granted": capped.to_vec(), "access_role": link })))
 }
 
 // ---- the organisation's domain lists ---------------------------------------
@@ -1516,7 +1748,7 @@ async fn list_domain_lists(mut db: auth::Db) -> ApiResult<Json<serde_json::Value
         .map(|(id, name, body, updated_at)| {
             let parsed = fury_shared::domains::summarise(&body);
             json!({ "id": id, "name": name, "body": body, "updated_at": updated_at,
-                    "domains": parsed.0, "allow_only": parsed.1 })
+                    "domains": parsed.entries, "allow_only": parsed.allow_only, "local": parsed.local })
         })
         .collect::<Vec<_>>())))
 }
@@ -1530,7 +1762,7 @@ async fn upsert_domain_list(mut db: auth::Db, Json(req): Json<DomainListUpsert>)
     if name.is_empty() || name.len() > 64 {
         return Err(ApiError::BadRequest("a list needs a name of up to 64 characters".into()));
     }
-    let (domains, _) = fury_shared::domains::summarise(&req.body);
+    let domains = fury_shared::domains::summarise(&req.body).entries;
     if domains == 0 {
         return Err(ApiError::BadRequest("the list names no domains — check the format: a hosts file, an Adblock list, or one domain per line".into()));
     }
@@ -1583,6 +1815,145 @@ async fn delete_domain_list(mut db: auth::Db, Path(id): Path<Uuid>) -> ApiResult
     Ok(Json(json!({ "deleted": true })))
 }
 
+// ---- the organisation's own roles (0017) ------------------------------------
+
+#[derive(Deserialize)]
+struct AccessRoleUpsert {
+    #[serde(default)]
+    id: Option<Uuid>,
+    name: String,
+    permissions: Vec<Perm>,
+}
+
+/// `GET /v1/org/access-roles` -- everyone in the organisation may read them: a
+/// manager giving access inside a project picks from the same list, and a
+/// member sees what the name on their row means.
+async fn list_access_roles(mut db: auth::Db) -> ApiResult<Json<serde_json::Value>> {
+    let caller = db.caller;
+    let rows: Vec<(Uuid, String, i64, String, i64)> = sqlx::query_as(&format!(
+        "SELECT r.id, r.name, r.permissions, {}, \
+                (SELECT count(*) FROM project_grants g WHERE g.access_role = r.id) \
+         FROM org_access_roles r WHERE r.org_id = $1 ORDER BY r.name",
+        rfc3339("r.updated_at")
+    ))
+    .bind(caller.org_id)
+    .fetch_all(db.as_mut())
+    .await?;
+    Ok(Json(json!(rows
+        .into_iter()
+        .map(|(id, name, perms, updated_at, grants)| json!({
+            "id": id, "name": name, "permissions": PermSet(perms).to_vec(),
+            "updated_at": updated_at, "grants": grants,
+        }))
+        .collect::<Vec<_>>())))
+}
+
+async fn upsert_access_role(mut db: auth::Db, Json(req): Json<AccessRoleUpsert>) -> ApiResult<Json<serde_json::Value>> {
+    let caller = db.caller;
+    if !matches!(caller.role, fury_shared::rbac::OrgRole::Owner | fury_shared::rbac::OrgRole::Admin) {
+        return Err(ApiError::Denied(Perm::ManageAccess));
+    }
+    let name = req.name.trim();
+    if name.is_empty() || name.chars().count() > 64 {
+        return Err(ApiError::BadRequest("a role needs a name of up to 64 characters".into()));
+    }
+    // Seeing the profiles is what being let into a project is; a role without
+    // it would put people on the project's list who can reach none of it.
+    let perms = PermSet::from_iter(req.permissions.iter().copied()).with(Perm::View);
+
+    let id = req.id.unwrap_or_else(Uuid::now_v7);
+    let mut tx = db.begin().await?;
+    // The update is limited to this organisation's row: an id from another
+    // organisation is a role that does not exist here, not one to overwrite.
+    let written = sqlx::query(
+        "INSERT INTO org_access_roles (id, org_id, name, permissions, created_by) VALUES ($1, $2, $3, $4, $5) \
+         ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, permissions = EXCLUDED.permissions, updated_at = now() \
+         WHERE org_access_roles.org_id = EXCLUDED.org_id",
+    )
+    .bind(id)
+    .bind(caller.org_id)
+    .bind(name)
+    .bind(perms.0)
+    .bind(caller.user_id)
+    .execute(&mut *tx)
+    .await
+    .map_err(|e| match e {
+        sqlx::Error::Database(ref d) if d.is_unique_violation() => ApiError::Conflict(format!("a role named {name:?} already exists")),
+        other => ApiError::Db(other),
+    })?
+    .rows_affected();
+    if written == 0 {
+        return Err(ApiError::NotFound);
+    }
+    let relinked = relink(&mut tx, Some(id), None).await?;
+    tx.commit().await?;
+
+    audit(db.as_mut(), &caller, "access_role.saved", Some(id),
+          json!({ "name": name, "permissions": perms.to_vec(), "grants_rewritten": relinked }))
+        .await?;
+    Ok(Json(json!({ "id": id, "grants_rewritten": relinked })))
+}
+
+async fn delete_access_role(mut db: auth::Db, Path(id): Path<Uuid>) -> ApiResult<Json<serde_json::Value>> {
+    let caller = db.caller;
+    if !matches!(caller.role, fury_shared::rbac::OrgRole::Owner | fury_shared::rbac::OrgRole::Admin) {
+        return Err(ApiError::Denied(Perm::ManageAccess));
+    }
+    // The grants on it keep the boxes they have and lose the link (ON DELETE
+    // SET NULL): nobody's access changes because a name went off the list.
+    let n = sqlx::query("DELETE FROM org_access_roles WHERE id = $1 AND org_id = $2")
+        .bind(id)
+        .bind(caller.org_id)
+        .execute(db.as_mut())
+        .await?
+        .rows_affected();
+    if n == 0 {
+        return Err(ApiError::NotFound);
+    }
+    audit(db.as_mut(), &caller, "access_role.deleted", Some(id), json!({})).await?;
+    Ok(Json(json!({ "deleted": true })))
+}
+
+/// Rewrite `permissions` on the grants that follow a role, from the role's
+/// boxes capped by each person's org role -- the same cap `grant_access`
+/// applies, from the same `role_ceiling`, so a linked grant never holds what a
+/// hand-ticked one could not. Narrowed to one role, one person, or both.
+///
+/// This is what keeps every check in the server reading one column: the link
+/// is resolved when it changes, not on every request.
+pub(crate) async fn relink(
+    db: &mut sqlx::PgConnection,
+    role_id: Option<Uuid>,
+    user_id: Option<Uuid>,
+) -> ApiResult<u64> {
+    let rows: Vec<(Uuid, Uuid, String, i64)> = sqlx::query_as(
+        "SELECT g.project_id, g.user_id, m.role::text, r.permissions \
+         FROM project_grants g \
+         JOIN org_access_roles r ON r.id = g.access_role \
+         JOIN projects p ON p.id = g.project_id \
+         JOIN org_members m ON m.org_id = p.org_id AND m.user_id = g.user_id \
+         WHERE ($1::uuid IS NULL OR g.access_role = $1) \
+           AND ($2::uuid IS NULL OR g.user_id = $2)",
+    )
+    .bind(role_id)
+    .bind(user_id)
+    .fetch_all(&mut *db)
+    .await?;
+    let mut n = 0;
+    for (project_id, user_id, org_role, bits) in rows {
+        let Some(org_role) = auth::parse_role(&org_role) else { continue };
+        let capped = PermSet(bits).intersect(fury_shared::rbac::role_ceiling(org_role));
+        n += sqlx::query("UPDATE project_grants SET permissions = $3 WHERE project_id = $1 AND user_id = $2")
+            .bind(project_id)
+            .bind(user_id)
+            .bind(capped.0)
+            .execute(&mut *db)
+            .await?
+            .rows_affected();
+    }
+    Ok(n)
+}
+
 /// Who can reach this project, and with what.
 ///
 /// Owners and admins reach every project implicitly and have no grant row, so
@@ -1598,9 +1969,9 @@ async fn list_grants(
 
     rbac_guard::require(db.as_mut(), caller.user_id, project_id, Perm::ManageAccess).await?;
 
-    let rows: Vec<(Uuid, String, String, i64, Option<String>, Vec<Uuid>)> = sqlx::query_as(
+    let rows: Vec<(Uuid, String, String, i64, Option<String>, Vec<Uuid>, Option<Uuid>)> = sqlx::query_as(
         &format!(
-        "SELECT u.id, u.email, m.role::text, g.permissions, {}, g.domain_lists \
+        "SELECT u.id, u.email, m.role::text, g.permissions, {}, g.domain_lists, g.access_role \
          FROM project_grants g \
          JOIN users u ON u.id = g.user_id \
          JOIN projects p ON p.id = g.project_id \
@@ -1626,13 +1997,14 @@ async fn list_grants(
     .await?;
 
     Ok(Json(json!({
-        "granted": rows.iter().map(|(id, email, role, perms, expires, lists)| json!({
+        "granted": rows.iter().map(|(id, email, role, perms, expires, lists, access_role)| json!({
             "user_id": id,
             "email": email,
             "role": role,
             "permissions": PermSet(*perms).to_vec(),
             "expires_at": expires,
             "domain_lists": lists,
+            "access_role": access_role,
         })).collect::<Vec<_>>(),
         "implicit": implicit.iter().map(|(id, email, role)| json!({
             "user_id": id, "email": email, "role": role,
@@ -1731,8 +2103,8 @@ async fn create_proxy(
     if !rbac_guard::may_add_proxies(db.as_mut(), caller.user_id, caller.org_id, caller.role).await? {
         return Err(ApiError::Denied(Perm::EditProxy));
     }
-    if !matches!(req.kind.as_str(), "http" | "https" | "socks5") {
-        return Err(ApiError::BadRequest("kind must be http, https or socks5".into()));
+    if !matches!(req.kind.as_str(), "http" | "https" | "socks5" | "wireguard") {
+        return Err(ApiError::BadRequest("kind must be http, https, socks5 or wireguard".into()));
     }
     if !(1..=65535).contains(&req.port) {
         return Err(ApiError::BadRequest("port must be between 1 and 65535".into()));
@@ -1919,6 +2291,27 @@ struct AuditEntry {
     at: String,
 }
 
+/// One row of `list_proxies_sql`.
+pub(crate) type ProxyRow = (
+    Uuid, String, String, String, i32, Option<String>, Option<String>, Option<String>, i64,
+    Option<Uuid>, Option<String>,
+);
+
+/// The organisation's proxies, with who added each, as SQL. A function so a
+/// test runs the real query against the real schema.
+pub(crate) fn list_proxies_sql() -> String {
+    format!(
+        "SELECT x.id, x.name, x.kind::text, x.host, x.port, x.last_country, \
+                x.last_kind_detected, {}, \
+                (SELECT count(*) FROM profiles f WHERE f.proxy_id = x.id AND f.deleted_at IS NULL), \
+                x.created_by, u.email \
+         FROM proxies x LEFT JOIN users u ON u.id = x.created_by \
+         WHERE x.org_id = $1 AND x.deleted_at IS NULL \
+         ORDER BY x.name",
+        rfc3339("x.last_checked_at"),
+    )
+}
+
 /// The organisation's proxies, for the picker on a profile.
 ///
 /// Never returns `credentials_enc`. Someone choosing which exit a profile uses
@@ -1933,18 +2326,20 @@ async fn list_proxies(
     let caller = db.caller;
 
     let reveal = caller.implicit_permissions().has(Perm::RevealSecrets);
-    let rows: Vec<(Uuid, String, String, String, i32, Option<String>, Option<String>, Option<String>, i64)> =
-        sqlx::query_as(&format!(
-            "SELECT x.id, x.name, x.kind::text, x.host, x.port, x.last_country,                     x.last_kind_detected, {},                     (SELECT count(*) FROM profiles f WHERE f.proxy_id = x.id AND f.deleted_at IS NULL)              FROM proxies x              WHERE x.org_id = $1 AND x.deleted_at IS NULL              ORDER BY x.name",
-            rfc3339("x.last_checked_at"),
-        ))
+    let rows: Vec<ProxyRow> = sqlx::query_as(&list_proxies_sql())
         .bind(caller.org_id)
         .fetch_all(db.as_mut())
         .await?;
 
+    // Who may change which, by the rule edit_proxy and delete_proxy enforce,
+    // so the list can say it instead of the Save button.
+    let implicit = fury_shared::rbac::has_implicit_project_access(caller.role);
+    let may_add = !implicit
+        && rbac_guard::may_add_proxies(db.as_mut(), caller.user_id, caller.org_id, caller.role).await?;
+
     Ok(Json(
         rows.into_iter()
-            .map(|(id, name, kind, host, port, country, detected, checked, used)| ProxySummary {
+            .map(|(id, name, kind, host, port, country, detected, checked, used, author, author_email)| ProxySummary {
                 id,
                 name,
                 kind,
@@ -1961,6 +2356,11 @@ async fn list_proxies(
                 detected_kind: detected,
                 last_checked_at: checked,
                 shared_with_profiles: used,
+                added_by: author_email,
+                may_change: Some(
+                    rbac_guard::proxy_change(implicit, author == Some(caller.user_id), may_add)
+                        == rbac_guard::ProxyChange::Allowed,
+                ),
             })
             .collect(),
     ))
@@ -2314,12 +2714,27 @@ async fn edit_proxy(
         Some(rbac_guard::ProxyChange::NoLongerPermitted) => return Err(ApiError::Denied(Perm::EditProxy)),
         Some(rbac_guard::ProxyChange::Allowed) => {}
     }
-    if !matches!(req.kind.as_str(), "http" | "https" | "socks5") {
-        return Err(ApiError::BadRequest("kind must be http, https or socks5".into()));
+    if !matches!(req.kind.as_str(), "http" | "https" | "socks5" | "wireguard") {
+        return Err(ApiError::BadRequest("kind must be http, https, socks5 or wireguard".into()));
     }
     if !(1..=65535).contains(&req.port) || req.host.trim().is_empty() {
         return Err(ApiError::BadRequest("a proxy needs a host and a port".into()));
     }
+
+    // Someone without `reveal_secrets` is shown the host masked, and the form
+    // sends back what it showed. Written, it turned a renamed proxy into one
+    // that dials "***1a2b.provider.net". The mask of the stored host means
+    // "unchanged".
+    let stored_host: Option<String> =
+        sqlx::query_scalar("SELECT host FROM proxies WHERE id = $1 AND org_id = $2 AND deleted_at IS NULL")
+            .bind(proxy_id)
+            .bind(caller.org_id)
+            .fetch_optional(db.as_mut())
+            .await?;
+    let host = match stored_host {
+        Some(stored) if req.host.trim() == mask_host(&stored) => stored,
+        _ => req.host.trim().to_string(),
+    };
 
     let credentials = match (&req.credentials_enc, &req.wrapped_dek) {
         (Some(c), Some(d)) => {
@@ -2349,7 +2764,7 @@ async fn edit_proxy(
             )
             .bind(req.name.trim())
             .bind(&req.kind)
-            .bind(req.host.trim())
+            .bind(&host)
             .bind(req.port)
             .bind(&c)
             .bind(&d)
@@ -2365,7 +2780,7 @@ async fn edit_proxy(
             )
             .bind(req.name.trim())
             .bind(&req.kind)
-            .bind(req.host.trim())
+            .bind(&host)
             .bind(req.port)
             .bind(proxy_id)
             .bind(caller.org_id)
@@ -3126,6 +3541,11 @@ async fn set_member_role(
         .execute(db.as_mut())
         .await?;
 
+    // A grant that follows one of the organisation's roles is rewritten
+    // against the new ceiling: a member made manager on "lead" gets the
+    // "give access" box the role has and the member ceiling withheld.
+    relink(db.as_mut(), None, Some(user_id)).await?;
+
     audit(
         db.as_mut(),
         &caller,
@@ -3188,8 +3608,39 @@ async fn rotation_material(
         .fetch_one(db.as_mut())
         .await?;
 
+    // Everything else the old key reaches, and which a rotation that moved
+    // only members and proxies left behind. Until 14.10.2026 it did: every
+    // bundle, cookie jar and saved login of the organisation stopped opening
+    // the moment somebody was removed (migration 0020 says how that was met).
+    let profiles = rotation_profiles(db.as_mut(), caller.org_id).await?;
+    let bundles = rotation_bundles(db.as_mut(), caller.org_id).await?;
+    let credentials = rotation_credentials(db.as_mut(), caller.org_id).await?;
+    let shares = rotation_shares(db.as_mut(), caller.org_id).await?;
+
     Ok(Json(json!({
         "generation": generation,
+        // Every profile, for its cookie key: unwrapped under the old profile
+        // key when one is stored, derived from it when not, and wrapped under
+        // the new one either way.
+        "profiles": profiles.iter().map(|(id, ck)| json!({
+            "id": id, "wrapped_cookie_key": ck.as_deref().map(hex),
+        })).collect::<Vec<_>>(),
+        // Every version of every bundle sealed under a profile key. Stored as
+        // the agent's own text (`fury:ork1:` and base64), so it goes out as
+        // that text and comes back as it.
+        "bundles": bundles.iter().map(|(id, profile_id, w)| json!({
+            "id": id, "profile_id": profile_id, "wrapped_dek": String::from_utf8_lossy(w),
+        })).collect::<Vec<_>>(),
+        // Saved logins: a data key under the organisation key, stored as hex
+        // text -- the same shape the credential endpoints read and write.
+        "credentials": credentials.iter().map(|(id, w)| json!({
+            "id": id, "wrapped_dek": String::from_utf8_lossy(w),
+        })).collect::<Vec<_>>(),
+        // Profiles handed to somebody by key: the new profile key has to be
+        // sealed to them again, or the profile stops opening for them.
+        "shares": shares.iter().map(|(profile_id, user_id, pk)| json!({
+            "profile_id": profile_id, "user_id": user_id, "public_key": b64(pk),
+        })).collect::<Vec<_>>(),
         "members": members.iter().map(|(id, email, pk)| json!({
             "user_id": id, "email": email, "public_key": b64(pk),
         })).collect::<Vec<_>>(),
@@ -3199,6 +3650,69 @@ async fn rotation_material(
             "id": id, "wrapped_dek": dek.as_deref().map(hex),
         })).collect::<Vec<_>>(),
     })))
+}
+
+/// Every profile of the organisation with its stored cookie key, if any.
+/// Deleted ones too: the trash can be emptied back into use, and a profile
+/// restored with a cookie key from a retired generation is the failure this
+/// exists to stop.
+pub(crate) async fn rotation_profiles(
+    db: &mut sqlx::PgConnection,
+    org_id: Uuid,
+) -> Result<Vec<(Uuid, Option<Vec<u8>>)>, sqlx::Error> {
+    sqlx::query_as("SELECT id, wrapped_cookie_key FROM profiles WHERE org_id = $1")
+        .bind(org_id)
+        .fetch_all(db)
+        .await
+}
+
+/// Every bundle sealed under a profile key. One sealed under a machine key
+/// (no prefix, from before team bundles had their own) opens only on the
+/// machine that packed it, whatever the organisation key is, and is left alone.
+pub(crate) async fn rotation_bundles(
+    db: &mut sqlx::PgConnection,
+    org_id: Uuid,
+) -> Result<Vec<(Uuid, Uuid, Vec<u8>)>, sqlx::Error> {
+    sqlx::query_as(
+        "SELECT b.id, b.profile_id, b.wrapped_dek FROM bundles b \
+         JOIN profiles p ON p.id = b.profile_id \
+         WHERE p.org_id = $1 AND position($2::bytea IN b.wrapped_dek) = 1",
+    )
+    .bind(org_id)
+    .bind(fury_shared::keys::SHARED_BUNDLE_PREFIX.as_bytes())
+    .fetch_all(db)
+    .await
+}
+
+pub(crate) async fn rotation_credentials(
+    db: &mut sqlx::PgConnection,
+    org_id: Uuid,
+) -> Result<Vec<(Uuid, Vec<u8>)>, sqlx::Error> {
+    sqlx::query_as(
+        "SELECT c.id, c.wrapped_dek FROM credentials c \
+         JOIN profiles p ON p.id = c.profile_id WHERE p.org_id = $1",
+    )
+    .bind(org_id)
+    .fetch_all(db)
+    .await
+}
+
+/// Profiles given to a person with the key sealed to them, and that person's
+/// public key. The person may be in another organisation; `users` is not
+/// behind a policy, and the grant is.
+pub(crate) async fn rotation_shares(
+    db: &mut sqlx::PgConnection,
+    org_id: Uuid,
+) -> Result<Vec<(Uuid, Uuid, Vec<u8>)>, sqlx::Error> {
+    sqlx::query_as(
+        "SELECT g.profile_id, g.user_id, u.public_key FROM profile_grants g \
+         JOIN profiles p ON p.id = g.profile_id \
+         JOIN users u ON u.id = g.user_id \
+         WHERE p.org_id = $1 AND g.wrapped_key IS NOT NULL",
+    )
+    .bind(org_id)
+    .fetch_all(db)
+    .await
 }
 
 #[derive(Deserialize)]
@@ -3214,6 +3728,54 @@ pub struct RotateRequest {
     /// The generation this was computed against, so two administrators
     /// rotating at once cannot half-apply each other's work.
     generation: i32,
+    /// Each profile's cookie key, wrapped under its new profile key.
+    #[serde(default)]
+    cookie_keys: Vec<RotatedCookieKey>,
+    /// Each bundle's data key, wrapped under its new profile key.
+    #[serde(default)]
+    bundles: Vec<RotatedBundle>,
+    /// Each saved login's data key, under the new organisation key.
+    #[serde(default)]
+    credentials: Vec<RotatedCredential>,
+    /// The new profile key, sealed to each person a profile was given to.
+    #[serde(default)]
+    shares: Vec<RotatedShare>,
+    /// Bundles, saved logins and cookie keys the old key did not open. Named
+    /// rather than silently left out, so that "this client could not" and
+    /// "this client did not know to" stay two different things: the first is
+    /// left as it is, the second refuses the rotation. They are already lost
+    /// to the old key -- an earlier rotation by a Fury that did not carry them
+    /// over -- and refusing would make one such profile block removing anyone
+    /// for good.
+    #[serde(default)]
+    unreadable: Vec<Uuid>,
+}
+
+#[derive(Deserialize)]
+pub struct RotatedCookieKey {
+    profile_id: Uuid,
+    wrapped_cookie_key: String,
+}
+
+#[derive(Deserialize)]
+pub struct RotatedBundle {
+    id: Uuid,
+    /// The agent's text form, `fury:ork1:` and base64.
+    wrapped_dek: String,
+}
+
+#[derive(Deserialize)]
+pub struct RotatedCredential {
+    id: Uuid,
+    /// Hex, as the credential endpoints store it.
+    wrapped_dek: String,
+}
+
+#[derive(Deserialize)]
+pub struct RotatedShare {
+    profile_id: Uuid,
+    user_id: Uuid,
+    wrapped_key: String,
 }
 
 #[derive(Deserialize)]
@@ -3240,6 +3802,40 @@ pub struct RotatedProxy {
 /// Everything lands in one transaction. A half-rotated organisation is one
 /// where some proxies open under the old key and some under the new, and no
 /// single member can read all of them.
+/// Whether `caller` may remove a member whose role is `target`. The same
+/// line set_member_role draws: the owner is out of reach, and an admin
+/// manages managers and members, not other admins.
+fn may_remove(caller: fury_shared::rbac::OrgRole, target: fury_shared::rbac::OrgRole) -> ApiResult<()> {
+    use fury_shared::rbac::OrgRole;
+    match (caller, target) {
+        (_, OrgRole::Owner) => Err(ApiError::BadRequest("the owner cannot be removed from the organisation".into())),
+        (OrgRole::Owner, _) => Ok(()),
+        (OrgRole::Admin, OrgRole::Admin) => Err(ApiError::Denied(Perm::ManageAccess)),
+        (OrgRole::Admin, _) => Ok(()),
+        _ => Err(ApiError::Denied(Perm::ManageAccess)),
+    }
+}
+
+#[cfg(test)]
+mod may_remove_tests {
+    use super::may_remove;
+    use fury_shared::rbac::OrgRole::*;
+
+    #[test]
+    fn nobody_removes_the_owner_and_an_admin_stays_below_admin() {
+        for caller in [Owner, Admin, Manager, Member] {
+            assert!(may_remove(caller, Owner).is_err(), "{caller:?} removed the owner");
+        }
+        assert!(may_remove(Owner, Admin).is_ok());
+        assert!(may_remove(Owner, Member).is_ok());
+        assert!(may_remove(Admin, Admin).is_err());
+        assert!(may_remove(Admin, Manager).is_ok());
+        assert!(may_remove(Admin, Member).is_ok());
+        assert!(may_remove(Manager, Member).is_err());
+        assert!(may_remove(Member, Member).is_err());
+    }
+}
+
 async fn rotate_org_key(
     mut db: auth::Db,
     headers: HeaderMap,
@@ -3285,6 +3881,21 @@ async fn rotate_org_key(
     }
 
     if let Some(gone) = req.remove_user_id {
+        // Who may be removed is who may have their role changed
+        // (set_member_role): never the owner, and an admin only below admin.
+        // Until 14.10.2026 the caller's role was checked and the target's was
+        // not, so an admin could remove the owner, rotating the key to
+        // everyone but them.
+        let target: Option<String> = sqlx::query_scalar(
+            "SELECT role::text FROM org_members WHERE org_id = $1 AND user_id = $2 FOR UPDATE",
+        )
+        .bind(caller.org_id)
+        .bind(gone)
+        .fetch_optional(&mut *tx)
+        .await?;
+        let target = target.and_then(|r| auth::parse_role(&r)).ok_or(ApiError::NotFound)?;
+        may_remove(caller.role, target)?;
+
         let removed = sqlx::query("DELETE FROM org_members WHERE org_id = $1 AND user_id = $2")
             .bind(caller.org_id)
             .bind(gone)
@@ -3368,6 +3979,120 @@ async fn rotate_org_key(
             .await?;
     }
 
+    // The rest of what the old key reaches, read again inside the transaction
+    // and under the lock: a bundle uploaded between the material and this
+    // request is one the client never saw, and has to refuse the rotation
+    // rather than be left under a key nobody will hold.
+    let unreadable: std::collections::HashSet<Uuid> = req.unreadable.iter().copied().collect();
+    // Said once for all four. The likely cause of a gap is not a bug but a
+    // Fury from before 0.3.20, which rotates members and proxies and knows
+    // nothing else -- and finishing its rotation is what broke profiles.
+    let missing = |what: &str, id: Uuid| {
+        ApiError::BadRequest(format!(
+            "this rotation leaves {what} {id} under the old key, where nobody could open it \
+             again. Update Fury on this machine and remove the member again"
+        ))
+    };
+
+    let profiles = rotation_profiles(&mut tx, caller.org_id).await?;
+    let supplied: std::collections::HashSet<Uuid> =
+        req.cookie_keys.iter().map(|c| c.profile_id).collect();
+    if let Some((id, _)) = profiles
+        .iter()
+        .find(|(id, _)| !supplied.contains(id) && !unreadable.contains(id))
+    {
+        return Err(missing("the cookie key of profile", *id));
+    }
+    for c in &req.cookie_keys {
+        let wrapped = unhex("wrapped_cookie_key", &c.wrapped_cookie_key)?;
+        if wrapped.len() < 40 {
+            return Err(ApiError::BadRequest("that is not a wrapped cookie key".into()));
+        }
+        sqlx::query("UPDATE profiles SET wrapped_cookie_key = $1 WHERE id = $2 AND org_id = $3")
+            .bind(&wrapped)
+            .bind(c.profile_id)
+            .bind(caller.org_id)
+            .execute(&mut *tx)
+            .await?;
+    }
+
+    let bundles = rotation_bundles(&mut tx, caller.org_id).await?;
+    let supplied: std::collections::HashSet<Uuid> = req.bundles.iter().map(|b| b.id).collect();
+    if let Some((id, _, _)) = bundles
+        .iter()
+        .find(|(id, _, _)| !supplied.contains(id) && !unreadable.contains(id))
+    {
+        return Err(missing("bundle", *id));
+    }
+    for b in &req.bundles {
+        if !b.wrapped_dek.starts_with(fury_shared::keys::SHARED_BUNDLE_PREFIX) || b.wrapped_dek.len() < 60 {
+            return Err(ApiError::BadRequest("that is not a wrapped bundle key".into()));
+        }
+        sqlx::query(
+            "UPDATE bundles SET wrapped_dek = $1 WHERE id = $2 \
+             AND profile_id IN (SELECT id FROM profiles WHERE org_id = $3)",
+        )
+        .bind(b.wrapped_dek.as_bytes())
+        .bind(b.id)
+        .bind(caller.org_id)
+        .execute(&mut *tx)
+        .await?;
+    }
+
+    let credentials = rotation_credentials(&mut tx, caller.org_id).await?;
+    let supplied: std::collections::HashSet<Uuid> = req.credentials.iter().map(|c| c.id).collect();
+    if let Some((id, _)) = credentials
+        .iter()
+        .find(|(id, _)| !supplied.contains(id) && !unreadable.contains(id))
+    {
+        return Err(missing("saved login", *id));
+    }
+    for c in &req.credentials {
+        // Checked as hex and stored as the text, which is how the credential
+        // endpoints keep it (`create_credential`).
+        if unhex("wrapped_dek", &c.wrapped_dek)?.len() < 40 {
+            return Err(ApiError::BadRequest("that is not a wrapped data key".into()));
+        }
+        sqlx::query(
+            "UPDATE credentials SET wrapped_dek = $1 WHERE id = $2 \
+             AND profile_id IN (SELECT id FROM profiles WHERE org_id = $3)",
+        )
+        .bind(c.wrapped_dek.as_bytes())
+        .bind(c.id)
+        .bind(caller.org_id)
+        .execute(&mut *tx)
+        .await?;
+    }
+
+    // No "unreadable" here: the new profile key is computed, not opened, so
+    // there is nothing that could fail to open.
+    let shares = rotation_shares(&mut tx, caller.org_id).await?;
+    let supplied: std::collections::HashSet<(Uuid, Uuid)> =
+        req.shares.iter().map(|g| (g.profile_id, g.user_id)).collect();
+    if let Some((profile_id, _, _)) = shares
+        .iter()
+        .find(|(p, u, _)| !supplied.contains(&(*p, *u)))
+    {
+        return Err(missing("the share of profile", *profile_id));
+    }
+    for g in &req.shares {
+        let wrapped = unhex_or_b64("wrapped_key", &g.wrapped_key)?;
+        if wrapped.len() < 104 {
+            return Err(ApiError::BadRequest("that is not a sealed profile key".into()));
+        }
+        sqlx::query(
+            "UPDATE profile_grants SET wrapped_key = $1 \
+             WHERE profile_id = $2 AND user_id = $3 AND wrapped_key IS NOT NULL \
+             AND profile_id IN (SELECT id FROM profiles WHERE org_id = $4)",
+        )
+        .bind(&wrapped)
+        .bind(g.profile_id)
+        .bind(g.user_id)
+        .bind(caller.org_id)
+        .execute(&mut *tx)
+        .await?;
+    }
+
     sqlx::query("UPDATE organizations SET ork_generation = $1 WHERE id = $2")
         .bind(next)
         .bind(caller.org_id)
@@ -3377,8 +4102,19 @@ async fn rotate_org_key(
     tx.commit().await?;
 
     audit(db.as_mut(), &caller, "org.rotate", None,
-          json!({ "removed": req.remove_user_id, "generation": next })).await?;
-    Ok(Json(json!({ "generation": next, "removed": req.remove_user_id })))
+          json!({
+              "removed": req.remove_user_id,
+              "generation": next,
+              "bundles": req.bundles.len(),
+              "credentials": req.credentials.len(),
+              "shares": req.shares.len(),
+              "unreadable": req.unreadable.len(),
+          })).await?;
+    Ok(Json(json!({
+        "generation": next,
+        "removed": req.remove_user_id,
+        "unreadable": req.unreadable.len(),
+    })))
 }
 
 /// Accepts hex, or base64 — `hand_over_key` established base64 for a sealed
@@ -3560,10 +4296,16 @@ async fn launch_spec(db: &mut sqlx::PgConnection, profile_id: Uuid) -> ApiResult
         px_port: Option<i32>,
         credentials_enc: Option<Vec<u8>>,
         wrapped_dek: Option<Vec<u8>>,
+        wrapped_cookie_key: Option<Vec<u8>>,
+        key_generation: Option<i32>,
     }
 
+    // The generation through a subquery rather than a join: organizations has
+    // its own policy, and a profile someone was given from another
+    // organisation must still produce a spec -- with no generation, which the
+    // shell and the agent treat as "not checked".
     let row: Row = sqlx::query_as(
-        "SELECT f.name, f.persona_id, f.fp_seed, f.timezone, f.languages, f.start_urls, f.overrides,                 x.id AS px_id, x.kind::text AS px_kind, x.host AS px_host, x.port AS px_port,                 x.credentials_enc, x.wrapped_dek          FROM profiles f          LEFT JOIN proxies x ON x.id = f.proxy_id AND x.deleted_at IS NULL          WHERE f.id = $1 AND f.deleted_at IS NULL",
+        "SELECT f.name, f.persona_id, f.fp_seed, f.timezone, f.languages, f.start_urls, f.overrides,                 x.id AS px_id, x.kind::text AS px_kind, x.host AS px_host, x.port AS px_port,                 x.credentials_enc, x.wrapped_dek, f.wrapped_cookie_key,                 (SELECT o.ork_generation FROM organizations o WHERE o.id = f.org_id) AS key_generation          FROM profiles f          LEFT JOIN proxies x ON x.id = f.proxy_id AND x.deleted_at IS NULL          WHERE f.id = $1 AND f.deleted_at IS NULL",
     )
     .bind(profile_id)
     .fetch_optional(&mut *db)
@@ -3623,6 +4365,10 @@ async fn launch_spec(db: &mut sqlx::PgConnection, profile_id: Uuid) -> ApiResult
         // Filled in by the caller that knows who is launching; the spec
         // itself is about the profile.
         domain_lists: Vec::new(),
+        wrapped_cookie_key: row
+            .wrapped_cookie_key
+            .map(|v| v.iter().map(|b| format!("{b:02x}")).collect()),
+        key_generation: row.key_generation,
         proxy: fury_shared::api::SealedProxy {
             id: px_id,
             kind,
@@ -3877,6 +4623,79 @@ pub fn check_bundle_root() -> anyhow::Result<std::path::PathBuf> {
     Ok(dir)
 }
 
+/// A file that is removed when this goes out of scope, unless disarmed.
+///
+/// An upload writes a file before it knows whether the upload will stand, and
+/// every way out after that has to take the file with it. Each early return
+/// used to remove it by hand, and the ones nobody wrote leaked: a 409 because
+/// a colleague uploaded first, a failed query, a failed rename -- and after the
+/// rename, a database error left a finished `<version>.bundle` that no row
+/// names. None of it counted against a quota, and nothing swept it (found
+/// 14.10.2026, reading the handler after a tester asked about his disk). A
+/// handler dropped mid-upload, a client gone or the server shutting down, ran
+/// none of the hand-written removals at all; this runs on drop.
+struct RemoveOnDrop(Option<std::path::PathBuf>);
+
+impl RemoveOnDrop {
+    fn new(path: std::path::PathBuf) -> Self {
+        Self(Some(path))
+    }
+    /// The file has a row naming it now, or it was moved away: keep it.
+    fn disarm(&mut self) {
+        self.0 = None;
+    }
+}
+
+impl Drop for RemoveOnDrop {
+    fn drop(&mut self) {
+        if let Some(path) = self.0.take() {
+            match std::fs::remove_file(&path) {
+                Ok(()) => {}
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => tracing::warn!(error = %e, path = %path.display(), "could not remove an abandoned upload"),
+            }
+        }
+    }
+}
+
+/// The prefix of an upload still being received. See `upload_bundle`.
+const INCOMING: &str = ".incoming-";
+
+/// Removes uploads that stopped being written more than `idle` ago.
+///
+/// What [`RemoveOnDrop`] cannot catch: a server killed outright mid-upload, and
+/// the files the handler leaked before it existed. At startup, so a server
+/// that has been leaking cleans up once it is updated. By the time a file was
+/// last written rather than created: a slow upload of a large profile is
+/// written to the whole time it lasts, so it is never mistaken for a dead one.
+///
+/// Only `.incoming-*` files. A `<version>.bundle` with no row is also dead
+/// weight, but telling that needs the database, and a query here runs with no
+/// identity, under which row-level security shows no rows at all -- every
+/// bundle would look orphaned.
+pub fn sweep_abandoned_uploads(root: &std::path::Path, idle: std::time::Duration) -> usize {
+    let mut removed = 0;
+    let Ok(profiles) = std::fs::read_dir(root) else { return 0 };
+    for dir in profiles.flatten().filter(|d| d.path().is_dir()) {
+        let Ok(files) = std::fs::read_dir(dir.path()) else { continue };
+        for f in files.flatten() {
+            if !f.file_name().to_string_lossy().starts_with(INCOMING) {
+                continue;
+            }
+            let stale = f
+                .metadata()
+                .and_then(|m| m.modified())
+                .ok()
+                .and_then(|t| t.elapsed().ok())
+                .is_some_and(|age| age >= idle);
+            if stale && std::fs::remove_file(f.path()).is_ok() {
+                removed += 1;
+            }
+        }
+    }
+    removed
+}
+
 /// Upload a new version.
 ///
 /// The version the client based its work on comes in a header, and a mismatch
@@ -3961,6 +4780,10 @@ async fn upload_bundle(
     let base_version: i32 = header("x-fury-base-version")
         .and_then(|v| v.parse().ok())
         .ok_or_else(|| ApiError::BadRequest("missing x-fury-base-version".into()))?;
+    // The organisation key generation the bundle's key was derived from, as
+    // the shell checked it at launch. Absent from an agent older than the
+    // check, which is let through as before.
+    let key_generation: Option<i32> = header("x-fury-key-generation").and_then(|v| v.parse().ok());
 
     // Holding the lock is what authorises an upload — the permission only says
     // this person may work on the profile at all.
@@ -4007,7 +4830,8 @@ async fn upload_bundle(
 
     let dir = bundle_root().join(profile_id.to_string());
     std::fs::create_dir_all(&dir).map_err(|e| ApiError::Internal(e.into()))?;
-    let staging = dir.join(format!(".incoming-{}", Uuid::now_v7()));
+    let staging = dir.join(format!("{INCOMING}{}", Uuid::now_v7()));
+    let mut staging_guard = RemoveOnDrop::new(staging.clone());
 
     // What this organisation has already stored, so the ceiling is on the org
     // and not only on the single upload. Read once, before the stream, because
@@ -4038,13 +4862,9 @@ async fn upload_bundle(
         let mut file = std::fs::File::create(&staging).map_err(|e| ApiError::Internal(e.into()))?;
         let mut stream = body.into_data_stream();
         while let Some(chunk) = stream.next().await {
-            let chunk = chunk.map_err(|e| {
-                let _ = std::fs::remove_file(&staging);
-                ApiError::BadRequest(format!("the upload stopped early: {e}"))
-            })?;
+            let chunk = chunk.map_err(|e| ApiError::BadRequest(format!("the upload stopped early: {e}")))?;
             written += chunk.len();
             if written > limit {
-                let _ = std::fs::remove_file(&staging);
                 return Err(ApiError::BadRequest(format!(
                     "this bundle is over the {} limit for this server",
                     human_bytes(limit as i64)
@@ -4055,7 +4875,6 @@ async fn upload_bundle(
             // and the bandwidth it was meant to protect.
             if let Some(ceiling) = org_ceiling {
                 if org_used + written as i64 > ceiling {
-                    let _ = std::fs::remove_file(&staging);
                     return Err(ApiError::BadRequest(format!(
                         "this organisation may store {} and has {}; the upload was \
                          stopped after {}. Delete a profile, or ask whoever runs the \
@@ -4068,24 +4887,26 @@ async fn upload_bundle(
             }
             hasher.update(&chunk);
             use std::io::Write;
-            if let Err(e) = file.write_all(&chunk) {
-                let _ = std::fs::remove_file(&staging);
-                return Err(ApiError::Internal(e.into()));
-            }
+            file.write_all(&chunk).map_err(|e| ApiError::Internal(e.into()))?;
         }
     }
 
     let actual: String = hasher.finalize().iter().map(|b| format!("{b:02x}")).collect();
     if actual != sha256 {
-        let _ = std::fs::remove_file(&staging);
         return Err(ApiError::BadRequest(
             "the body does not match the digest it was sent with".into(),
         ));
     }
 
-    let current: i32 = sqlx::query_scalar("SELECT current_version FROM profiles WHERE id = $1")
+    let mut tx = db.begin().await?;
+
+    // FOR UPDATE, inside the transaction that records the version: two uploads
+    // that both read version 5 would otherwise both move their file to
+    // 6.bundle, the second over the first, and one row would end up naming the
+    // other's bytes. The second now waits here, then reads 6 and gets the 409.
+    let current: i32 = sqlx::query_scalar("SELECT current_version FROM profiles WHERE id = $1 FOR UPDATE")
         .bind(profile_id)
-        .fetch_optional(db.as_mut())
+        .fetch_optional(&mut *tx)
         .await?
         .ok_or(ApiError::NotFound)?;
 
@@ -4099,8 +4920,40 @@ async fn upload_bundle(
     let key = format!("{profile_id}/{version}.bundle");
     std::fs::rename(&staging, bundle_root().join(&key))
         .map_err(|e| ApiError::Internal(e.into()))?;
+    staging_guard.disarm();
+    // Declared after `tx`, so on an error it is dropped first: the file goes
+    // while the row lock is still held, before a waiting upload can move its
+    // own file to the same name.
+    let mut bundle_guard = RemoveOnDrop::new(bundle_root().join(&key));
 
-    let mut tx = db.begin().await?;
+    // A bundle sealed under a profile key from before a rotation opens for
+    // nobody who holds the current key. That is a browser left open across a
+    // colleague removing somebody: it was launched with the old key and closes
+    // after the new one exists. Refused, so the work stays on that machine
+    // (the agent keeps an unsent session) and goes up sealed under the new key
+    // the next time it is opened.
+    //
+    // FOR SHARE on the organisation's row, so a rotation (FOR UPDATE) cannot
+    // commit between this check and the insert; one that starts after it
+    // sees this row and is refused as incomplete -- its client never re-wrapped
+    // it.
+    if let Some(sealed_under) = key_generation {
+        let current: Option<i32> = sqlx::query_scalar(
+            "SELECT o.ork_generation FROM organizations o \
+             WHERE o.id = (SELECT org_id FROM profiles WHERE id = $1) FOR SHARE",
+        )
+        .bind(profile_id)
+        .fetch_optional(&mut *tx)
+        .await?;
+        if let Some(current) = current.filter(|c| sealed_under < *c) {
+            return Err(ApiError::Conflict(format!(
+                "this browser was opened with organisation key generation {sealed_under}, and the \
+                 key has been replaced since (now {current}). What it saved would open for nobody. \
+                 Unlock with your password and open the profile again to send it"
+            )));
+        }
+    }
+
     sqlx::query(
         "INSERT INTO bundles (id, profile_id, version, kind, s3_key, size_bytes, sha256,
                               wrapped_dek, uploaded_by)
@@ -4143,6 +4996,7 @@ async fn upload_bundle(
         .execute(&mut *tx)
         .await?;
     tx.commit().await?;
+    bundle_guard.disarm();
 
     // Now that the rows are gone for good.
     let mut freed = 0usize;
@@ -4364,5 +5218,57 @@ mod tests {
         assert!(mask_host("localhost").starts_with("***"));
         assert!(mask_host("ab.example.com").ends_with(".example.com"));
         assert!(!mask_host("ab.example.com").starts_with("ab***"));
+    }
+
+    fn scratch(name: &str) -> std::path::PathBuf {
+        let d = std::env::temp_dir().join(format!("fury-server-{}-{name}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    #[test]
+    fn an_upload_that_does_not_stand_takes_its_file_with_it() {
+        let d = scratch("guard");
+        let (dropped, kept) = (d.join(".incoming-a"), d.join("6.bundle"));
+        std::fs::write(&dropped, "x").unwrap();
+        std::fs::write(&kept, "x").unwrap();
+        {
+            // An early return, as on a 409: nothing disarms it.
+            let _g = RemoveOnDrop::new(dropped.clone());
+        }
+        {
+            let mut g = RemoveOnDrop::new(kept.clone());
+            g.disarm();
+        }
+        assert!(!dropped.exists(), "the refused upload stayed on disk");
+        assert!(kept.exists(), "a committed bundle was removed");
+        // A file already moved away is not an error.
+        drop(RemoveOnDrop::new(d.join("never-existed")));
+        std::fs::remove_dir_all(&d).unwrap();
+    }
+
+    #[test]
+    fn the_startup_sweep_takes_only_dead_uploads() {
+        let root = scratch("sweep");
+        let p = root.join("0194b3c0-0000-7000-8000-000000000001");
+        std::fs::create_dir_all(&p).unwrap();
+        for f in [".incoming-old", ".incoming-live", "3.bundle"] {
+            std::fs::write(p.join(f), "x").unwrap();
+        }
+        let hour_ago = std::time::SystemTime::now() - std::time::Duration::from_secs(7200);
+        for f in [".incoming-old", "3.bundle"] {
+            std::fs::File::options().write(true).open(p.join(f)).unwrap().set_modified(hour_ago).unwrap();
+        }
+        // A stray file at the top level is not a profile directory.
+        std::fs::write(root.join(".incoming-top"), "x").unwrap();
+
+        assert_eq!(sweep_abandoned_uploads(&root, std::time::Duration::from_secs(3600)), 1);
+        assert!(!p.join(".incoming-old").exists());
+        assert!(p.join(".incoming-live").exists(), "an upload still being written was removed");
+        assert!(p.join("3.bundle").exists(), "a bundle is never the sweep's to judge");
+        assert!(root.join(".incoming-top").exists());
+        assert_eq!(sweep_abandoned_uploads(&root.join("missing"), std::time::Duration::ZERO), 0);
+        std::fs::remove_dir_all(&root).unwrap();
     }
 }

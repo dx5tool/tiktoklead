@@ -90,6 +90,14 @@ pub struct PersonaMobile {
     /// `navigator.connection.type`: "cellular" | "wifi". Desktop Chrome does
     /// not expose the attribute at all; Android always does.
     pub connection: String,
+    /// The locales the phone's speech engine speaks, as Java writes them
+    /// ("ru_RU", "bs_BA_#Cyrl"), in the order Chrome lists them: the first
+    /// is the default voice. Chrome on Android names each voice after its
+    /// locale in the device's language, so the core builds the names from
+    /// these in the profile's (patch 0041); the host's voices cannot be
+    /// narrowed to an Android list. Empty for a persona made before 28.10.2026.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub voices: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -112,6 +120,63 @@ pub struct PersonaOs {
     pub ch_bitness: String,
 }
 
+impl PersonaOs {
+    /// The version a person would name: "Windows 10", not "Windows 7.0.0".
+    ///
+    /// A capture used to store Client Hints' platformVersion as the version,
+    /// and on Windows that number is not the release: Windows 10 1809 reports
+    /// 7.0.0, 22H2 10.0.0, Windows 11 13.0.0 and up. A tester on Windows 10
+    /// saw his own machine listed as "Windows 7.0.0" (13.10.2026). Files kept
+    /// before the capture was fixed still carry it, so it is read here too.
+    pub fn display_version(&self) -> String {
+        if self.name == "Windows" && self.version.contains('.') {
+            if let Some(release) = windows_release(&self.version) {
+                return release.to_string();
+            }
+        }
+        self.version.clone()
+    }
+}
+
+/// The same number as a person knows it, for showing beside the raw value:
+/// "Windows 10 1809" for 7.0.0. From Microsoft's table ("Detect Windows 11
+/// ... using User-Agent Client Hints"); 8 is 1903 or 1909, 10 any of 2004 to
+/// 22H2, and Windows 11 releases are not told apart here.
+pub fn windows_release_name(platform_version: &str) -> Option<String> {
+    let release = windows_release(platform_version)?;
+    let major: u32 = platform_version.split('.').next()?.trim().parse().ok()?;
+    let build = match major {
+        1 => "1507",
+        2 => "1511",
+        3 => "1607",
+        4 => "1703",
+        5 => "1709",
+        6 => "1803",
+        7 => "1809",
+        8 => "1903/1909",
+        9 | 10 => "2004+",
+        _ => "",
+    };
+    Some(if build.is_empty() { format!("Windows {release}") } else { format!("Windows {release} {build}") })
+}
+
+/// Windows' Client Hints platformVersion to its release: 1.0.0-10.0.0 are
+/// Windows 10 builds, 13.0.0 and up Windows 11, 0.1-0.3 Windows 7, 8 and 8.1.
+/// None for anything else, so a caller keeps what it had.
+pub fn windows_release(platform_version: &str) -> Option<&'static str> {
+    let mut parts = platform_version.split('.');
+    let major: u32 = parts.next()?.trim().parse().ok()?;
+    let minor: u32 = parts.next().and_then(|m| m.trim().parse().ok()).unwrap_or(0);
+    match (major, minor) {
+        (0, 1) => Some("7"),
+        (0, 2) => Some("8"),
+        (0, 3) => Some("8.1"),
+        (1..=10, _) => Some("10"),
+        (13.., _) => Some("11"),
+        _ => None,
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PersonaGpu {
     pub webgl_vendor: String,
@@ -119,8 +184,30 @@ pub struct PersonaGpu {
     /// Numbers and comma-joined ranges, keyed by the GL constant name.
     #[serde(default)]
     pub webgl_params: BTreeMap<String, serde_json::Value>,
+    /// The list both kinds of context fall back to when the persona does not
+    /// say per context. Older personas carry one context's list here: the
+    /// WebGL1 one for the two bases, the WebGL2 one for a converted capture.
     #[serde(default)]
     pub webgl_extensions: Vec<String>,
+    /// What a WebGL1 context and a WebGL2 context list, each as the machine
+    /// reported it. They are not one list narrowed two ways: a WebGL2 context
+    /// has its own extensions (EXT_color_buffer_float, OES_draw_buffers_indexed)
+    /// and drops the ones WebGL2 made core. With one list for both, the core
+    /// answered a WebGL2 context with the 18 names the two happened to share
+    /// (ctx-fury baseline, Windows persona); a real Chrome on the same machine
+    /// lists 32.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub webgl1_extensions: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub webgl2_extensions: Vec<String>,
+    /// getShaderPrecisionFormat, "rangeMin,rangeMax,precision", keyed
+    /// "VERTEX_SHADER.LOW_FLOAT" and so on. Empty means the host's, which is
+    /// right for a desktop: every desktop GPU answers 127,127,23 and 31,30,0.
+    /// A phone GPU does not, and differs by family: Adreno 722 answers lowp
+    /// and mediump vertex floats with 127,127,23 and ints with 31,31,0, Mali-G76
+    /// with 15,15,10 and 31,30,0 (captures of 14.10 and 28.10.2026).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub shader_precision: BTreeMap<String, String>,
     #[serde(default)]
     pub webgpu: Option<PersonaWebGpu>,
 }
@@ -150,6 +237,12 @@ pub struct PersonaScreen {
     pub avail_height: u32,
     pub color_depth: u32,
     pub device_pixel_ratio: f64,
+    /// screen.availTop as the machine reported it. Unset means the platform's
+    /// usual one (33 on macOS, 0 elsewhere). A phone is the case that needs
+    /// it: the status bar is reserved on one handset (Realme RMX5131, 40) and
+    /// not on another (Huawei P30, 0).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub avail_top: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -352,18 +445,16 @@ impl Persona {
                 "mobile": self.is_phone(),
                 "wow64": false,
                 "fullVersion": ctx.chrome_full_version,
-                // Empty is what a desktop Chrome sends. The header exists and
-                // is read; omitting the key left the patch falling back to
-                // whatever the host reports, which on a phone-shaped host
-                // would contradict Sec-CH-UA-Mobile: ?0.
-                //
-                // A phone and a tablet name themselves, as Chrome on Android
-                // does (user_agent_utils.cc, GetFormFactorsClientHint).
-                "formFactors": match self.mobile.as_ref().map(|m| m.form_factor.as_str()) {
-                    Some("phone") => vec!["Mobile"],
-                    Some("tablet") => vec!["Tablet"],
-                    _ => Vec::<&str>::new(),
-                },
+                // What Chrome 155 computes (user_agent_utils.cc,
+                // GetFormFactorsClientHint): "Mobile" when the mobile bit is
+                // set, "Desktop" otherwise -- a tablet too, since its mobile
+                // bit is off. This used to send an empty list for a desktop,
+                // which older Chrome did; real Chrome 155 on a Mac answers
+                // ["Desktop"] (measured 23.10.2026). The key must be present:
+                // omitting it left the patch falling back to whatever the host
+                // reports, which on a phone-shaped host would contradict
+                // Sec-CH-UA-Mobile: ?0.
+                "formFactors": if self.is_phone() { ["Mobile"] } else { ["Desktop"] },
             },
             "screen": {
                 "width": self.screen.width,
@@ -375,7 +466,7 @@ impl Persona {
                 // a macOS one reporting none, is a free contradiction against
                 // the platform it just claimed.
                 "availLeft": 0,
-                "availTop": if self.os.name == "macOS" { 33 } else { 0 },
+                "availTop": self.screen.avail_top.unwrap_or(if self.os.name == "macOS" { 33 } else { 0 }),
                 "colorDepth": self.screen.color_depth,
                 "devicePixelRatio": self.screen.device_pixel_ratio,
                 "chromeHeightDelta": self.chrome_metrics.outer_minus_inner_height,
@@ -405,13 +496,48 @@ impl Persona {
             },
             // Independent streams per vector: adding a new noised surface later
             // must not shift the canvas fingerprint of existing profiles.
+            //
+            // No clientRectsSeed: element and text measurements are the
+            // machine's own. Patch 0033 moves text edges by whole layout units,
+            // and that is still visible -- the same text measures a different
+            // width at a different sub-pixel position, and stops matching
+            // canvas measureText(), neither of which a real Chrome does.
+            // demo.fingerprint.com scored a Windows profile 0.24 with that
+            // seed alone and 0.88 with canvas and audio beside it, against
+            // 0.06 for canvas and audio without it (build box, 24.10.2026).
+            // Text widths are the fonts', which every machine of a family
+            // shares, so leaving them real costs little. The marker tells the
+            // launch check the absence was meant.
             "noise": {
                 "canvasSeed": sub_seed(seed, "canvas"),
                 "audioSeed": sub_seed(seed, "audio"),
-                "clientRectsSeed": sub_seed(seed, "clientRects"),
+                "clientRects": "real",
                 "deviceIdSalt": sub_seed(seed, "deviceId"),
             },
         });
+
+        // Per context when the persona knows both lists, so neither kind of
+        // context answers with the other's.
+        if !self.gpu.webgl1_extensions.is_empty() {
+            config["gpu"]["webgl1Extensions"] = self.gpu.webgl1_extensions.clone().into();
+        }
+        if !self.gpu.webgl2_extensions.is_empty() {
+            config["gpu"]["webgl2Extensions"] = self.gpu.webgl2_extensions.clone().into();
+        }
+        // Nested, "VERTEX_SHADER.LOW_FLOAT" becoming two levels, because the
+        // core looks a path up by its dots.
+        if !self.gpu.shader_precision.is_empty() {
+            let mut precision = serde_json::Map::new();
+            for (key, value) in &self.gpu.shader_precision {
+                if let Some((shader, kind)) = key.split_once('.') {
+                    let entry = precision
+                        .entry(shader.to_string())
+                        .or_insert_with(|| serde_json::json!({}));
+                    entry[kind] = value.clone().into();
+                }
+            }
+            config["gpu"]["shaderPrecision"] = precision.into();
+        }
 
         // WebGL params, with the vendor/renderer strings folded into the same
         // map the core reads so there is exactly one place to look.
@@ -592,6 +718,9 @@ impl Persona {
                 // shifts nothing else.
                 "touchSeed": sub_seed(seed, "touch"),
             });
+            if !m.voices.is_empty() {
+                config["speech"]["androidVoices"] = m.voices.clone().into();
+            }
         }
 
         if let Some(webgpu) = &self.gpu.webgpu {
@@ -948,6 +1077,24 @@ pub mod seed {
 #[cfg(test)]
 mod tests {
     #[test]
+    fn windows_is_named_by_its_release_not_its_client_hints_version() {
+        use super::windows_release as r;
+        // 7.0.0 is Windows 10 1809: the tester's machine, listed as Windows 7.
+        assert_eq!(r("7.0.0"), Some("10"));
+        assert_eq!(r("10.0.0"), Some("10"));
+        assert_eq!(r("1.0.0"), Some("10"));
+        assert_eq!(r("15.0.0"), Some("11"));
+        assert_eq!(r("19.0.0"), Some("11"));
+        assert_eq!(r("0.1.0"), Some("7"));
+        assert_eq!(r("0.3.0"), Some("8.1"));
+        assert_eq!(r("11.0.0"), None);
+        assert_eq!(r(""), None);
+        assert_eq!(super::windows_release_name("7.0.0").as_deref(), Some("Windows 10 1809"));
+        assert_eq!(super::windows_release_name("15.0.0").as_deref(), Some("Windows 11"));
+        assert_eq!(super::windows_release_name("15.0"), Some("Windows 11".into()));
+    }
+
+    #[test]
     fn a_seed_survives_every_representation_it_passes_through() {
         // The one that matters: a seed with the top bit set. As an i64 it is
         // negative, and a numeric conversion rather than a reinterpretation
@@ -1029,6 +1176,7 @@ mod tests {
             avail_height: 832,
             color_depth: 24,
             device_pixel_ratio: 2.8125,
+            avail_top: None,
         };
         p.chrome_metrics.scrollbar_width = 0;
         p.cpu.cores = 8;
@@ -1039,6 +1187,7 @@ mod tests {
             model: "SM-A546B".into(),
             form_factor: "phone".into(),
             connection: "cellular".into(),
+            voices: Vec::new(),
         });
         p
     }
@@ -1088,7 +1237,7 @@ mod tests {
         assert!(c.get("mobile").is_none());
         assert_eq!(c["clientHints"]["mobile"], false);
         assert_eq!(c["clientHints"]["model"], "");
-        assert_eq!(c["clientHints"]["formFactors"], serde_json::json!([]));
+        assert_eq!(c["clientHints"]["formFactors"], serde_json::json!(["Desktop"]));
     }
 
     #[test]
@@ -1099,7 +1248,7 @@ mod tests {
         p.validate().unwrap_or_else(|e| panic!("{e:?}"));
         let c = p.derive_core_config(1, &ctx());
         assert_eq!(c["clientHints"]["mobile"], false);
-        assert_eq!(c["clientHints"]["formFactors"], serde_json::json!(["Tablet"]));
+        assert_eq!(c["clientHints"]["formFactors"], serde_json::json!(["Desktop"]));
     }
 
     #[test]
@@ -1138,6 +1287,20 @@ mod tests {
             let derived = load(name).derive_core_config(1, &ctx());
             crate::fingerprint::check_core_config(&derived)
                 .unwrap_or_else(|missing| panic!("persona {name}:\n  {}", missing.join("\n  ")));
+        }
+    }
+
+    #[test]
+    fn text_measurements_are_the_machines_own() {
+        // No seed for patch 0033, and a marker the launch check accepts in its
+        // place (see the note in derive_core_config).
+        for name in ["macos-15-m-series-1728x1117", "windows-11-rtx4060-1920x1080"] {
+            let c = load(name).derive_core_config(1, &ctx());
+            assert!(c["noise"].get("clientRectsSeed").is_none(), "{name}");
+            assert_eq!(c["noise"]["clientRects"], "real", "{name}");
+            let mut forgot = c.clone();
+            forgot["noise"].as_object_mut().unwrap().remove("clientRects");
+            assert!(crate::fingerprint::check_core_config(&forgot).is_err(), "{name}: a missing seed went unnoticed");
         }
     }
 

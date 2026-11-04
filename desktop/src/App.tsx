@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright 2026 Bogdan Shapovalov and the Fury authors
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useI18n, type Key } from "./i18n";
-import { api, ApiError, type LocalProxy, type Me, type MirrorStatus, type Profile, type Project, type Shell, type UpdateProgress, type WarmProgress } from "./api";
+import { api, ApiError, type LocalProxy, type Me, type MirrorStatus, type Profile, type Project, type Shell, type UpdateProgress, type WarmProgress, type Farm } from "./api";
 import { Login } from "./components/Login";
 import { ProfileDialog } from "./components/ProfileDialog";
 import { BulkProfiles } from "./components/BulkProfiles";
@@ -29,6 +29,8 @@ import { CsvImport } from "./components/CsvImport";
 import { AntidetectImport } from "./components/AntidetectImport";
 import { useTheme } from "./theme";
 import { exitSharing } from "./consistency";
+import { setStage as saveStage } from "./status";
+import { OUR_SERVERS, versionNewer } from "./defaults";
 import { AppBackground } from "./components/simprint/AppBackground";
 import { SimprintSidebar } from "./components/simprint/SimprintSidebar";
 import { SimprintTitlebar } from "./components/simprint/SimprintTitlebar";
@@ -42,6 +44,8 @@ import { SimprintBulkBar } from "./components/simprint/SimprintBulkBar";
  *  taskbar icon, canvas fixes and "about 150 MB" (13.10.2026). A build with
  *  no line of its own gets a plain one; the size is shown by the download. */
 const CORE_WHAT: Record<string, Key> = {
+  "0.4.14": "app.coreWhat0414",
+  "0.4.12": "app.coreWhat0412",
   "0.3.8": "app.coreWhat038",
   "0.3.7": "app.coreWhat037",
 };
@@ -87,6 +91,17 @@ export function App() {
   const [dismissedUpdate, setDismissedUpdate] = useState<string | null>(() => {
     try {
       return localStorage.getItem("fury.update.dismissed");
+    } catch {
+      return null;
+    }
+  });
+  // The team server's version against the newest release, for the people
+  // who can update it: owners and admins of a server that is not ours. The
+  // tester who runs his own heard of server updates only when told
+  // (14.10.2026). A server without `server_version` predates 0.4.2.
+  const [dismissedServer, setDismissedServer] = useState<string | null>(() => {
+    try {
+      return localStorage.getItem("fury.serverUpdate.dismissed");
     } catch {
       return null;
     }
@@ -202,6 +217,67 @@ export function App() {
       clearInterval(h);
     };
   }, [shell?.agent_ready]);
+  // Farming plans (agent/src/farm.rs). The agent starts local sessions on
+  // its own; a team one needs this window -- the lock and the keys are here --
+  // so while it is open it claims the due ones and starts them the way the
+  // Warm button does. It also sets the stage a finished profile asked for.
+  const [farms, setFarms] = useState<{ now_ms: number; farms: Farm[] } | null>(null);
+  const profilesNow = useRef<Profile[]>([]);
+  profilesNow.current = profiles;
+  useEffect(() => {
+    if (!shell?.agent_ready) return;
+    let stop = false;
+    const tick = async () => {
+      try {
+        for (const d of await api.farmDue()) {
+          let plan;
+          try {
+            plan = await api.farmClaim(d.farm_id, d.profile_id);
+          } catch {
+            continue; // no longer due: another window, or the hours ran out
+          }
+          try {
+            const r = await api.warmStart([{ id: d.profile_id, origin: d.origin }], plan);
+            const refused = r.refused.find((x) => x.id === d.profile_id);
+            if (refused) await api.farmFail(d.farm_id, d.profile_id, say({ code: refused.code, message: refused.reason }));
+          } catch (e) {
+            await api.farmFail(d.farm_id, d.profile_id, say(e));
+          }
+        }
+        const list = await api.farmList();
+        for (const f of list.farms) {
+          for (const [pid, tr] of Object.entries(f.tracks)) {
+            if (!tr.stage_pending) continue;
+            const p = profilesNow.current.find((x) => x.id === pid);
+            if (!p) continue; // not in the list being shown; next time
+            // Only over the stage the plan set: one the operator changed by
+            // hand since ("banned") is theirs.
+            if ((p.status ?? "") === "warming") {
+              try {
+                await saveStage(p, tr.stage_pending);
+              } catch {
+                continue;
+              }
+            }
+            await api.farmStageApplied(f.id, pid);
+          }
+        }
+        if (!stop) setFarms(list.farms.length > 0 ? list : null);
+      } catch {
+        if (!stop) setFarms(null);
+      }
+    };
+    void tick();
+    const h = setInterval(() => void tick(), 20_000);
+    return () => {
+      stop = true;
+      clearInterval(h);
+    };
+  }, [shell?.agent_ready]);
+  const refreshFarms = async () => {
+    const list = await api.farmList();
+    setFarms(list.farms.length > 0 ? list : null);
+  };
   useEffect(() => {
     if (!shell?.agent_ready) return;
     let stop = false;
@@ -231,6 +307,10 @@ export function App() {
   const [notice, setNotice] = useState<{ text: string; forProfile: string | null } | null>(null);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  /** Which settings tab opens. "Connect a server" in Users means the team
+   *  tab; it opened on General, one more click away from the only field that
+   *  matters there, and a tester could not find where to sign in (14.10.2026). */
+  const [settingsTab, setSettingsTab] = useState<"general" | "team">("general");
   // Applied at the root before anything renders, so the first paint is already
   // the right theme rather than a flash of the wrong one.
   useTheme();
@@ -406,6 +486,7 @@ export function App() {
   if (signingUp) {
     return (
       <Signup
+        version={shell.version}
         onDone={() => {
           setSigningUp(false);
           void api.shell().then(setShell);
@@ -419,6 +500,7 @@ export function App() {
   if (enrolling) {
     return (
       <Enrol
+        version={shell.version}
         onDone={() => {
           setEnrolling(false);
           void api.shell().then(setShell);
@@ -432,6 +514,7 @@ export function App() {
   if (!local && !shell.signed_in) {
     return shell.server_url ? (
       <Login
+        version={shell.version}
         onSuccess={() => void api.shell().then(setShell)}
         onEnrol={() => setEnrolling(true)}
         onSignup={() => setSigningUp(true)}
@@ -440,6 +523,7 @@ export function App() {
       />
     ) : (
       <ServerSetup
+        version={shell.version}
         onDone={setShell}
         onSignup={() => setSigningUp(true)}
         onEnrol={() => setEnrolling(true)}
@@ -459,6 +543,7 @@ export function App() {
   if (!local && !shell.org_key_ready) {
     return (
       <Login
+        version={shell.version}
         onSuccess={() => void api.shell().then(setShell)}
         onEnrol={() => setEnrolling(true)}
         onSignup={() => setSigningUp(true)}
@@ -724,7 +809,7 @@ export function App() {
 
   const commands: Command[] = [
     { id: "act:new", label: t("cmd.newProfile"), run: () => setEditing(null) },
-    { id: "act:settings", label: t("cmd.settings"), run: () => setSettingsOpen(true) },
+    { id: "act:settings", label: t("cmd.settings"), run: () => { setSettingsTab("general"); setSettingsOpen(true); } },
     { id: "act:trash", label: t("cmd.trash"), run: () => setView("trash") },
   ];
 
@@ -825,7 +910,7 @@ export function App() {
         view={view}
         onView={setView}
         onNewProfile={() => setEditing(null)}
-        onSettings={() => setSettingsOpen(true)}
+        onSettings={() => { setSettingsTab("general"); setSettingsOpen(true); }}
         onRenameProject={async (p) => {
           const name = await ask({
             title: t("proj.rename"),
@@ -1018,6 +1103,74 @@ export function App() {
           </div>
         )}
 
+        {farms && (
+          <div className="notice" role="status" style={{ display: "block" }}>
+            {farms.farms.map((f) => {
+              const tracks = f.targets.map((x) => f.tracks[x.id]);
+              const daysDone = Math.min(...tracks.map((tr) => tr?.days_done ?? 0));
+              const finished = tracks.every((tr) => (tr?.days_done ?? 0) >= f.spec.days);
+              const sites = tracks.reduce((n, tr) => n + (tr?.sites ?? 0), 0);
+              const running = tracks.some((tr) => tr?.sessions.some((s) => s.started_ms && !s.ended));
+              const next = Math.min(
+                ...tracks.flatMap((tr) => (tr?.sessions ?? []).filter((s) => !s.started_ms && !s.ended).map((s) => s.at_ms)),
+              );
+              const errors = f.targets
+                .map((x) => ({ name: x.name, err: f.tracks[x.id]?.last_error }))
+                .filter((x) => x.err);
+              const when = (ms: number) => {
+                const d = new Date(ms);
+                const hm = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+                return d.toDateString() === new Date().toDateString() ? hm : `${d.toLocaleDateString([], { day: "numeric", month: "short" })} ${hm}`;
+              };
+              return (
+                <div key={f.id} style={{ marginBottom: "var(--s-1)" }}>
+                  <div className="row" style={{ alignItems: "baseline" }}>
+                    <strong style={{ flexShrink: 0 }}>{f.spec.name || t("farm.untitled")}</strong>
+                    <span className="muted small" style={{ flex: 1, minWidth: 0 }}>
+                      {t("farm.profiles", { n: f.targets.length })}
+                      {" · "}
+                      {finished ? t("farm.finished") : t("farm.dayOf", { done: daysDone, days: f.spec.days })}
+                      {" · "}
+                      {t("farm.sitesRead", { n: sites })}
+                      {!finished && (f.paused
+                        ? ` · ${t("farm.paused")}`
+                        : running
+                          ? ` · ${t("farm.running")}`
+                          : Number.isFinite(next)
+                            ? ` · ${t("farm.next", { at: when(next) })}`
+                            : "")}
+                    </span>
+                    {!finished && (
+                      <button className="ghost" onClick={async () => { await api.farmPause(f.id, !f.paused); await refreshFarms(); }}>
+                        {f.paused ? t("farm.resume") : t("farm.pause")}
+                      </button>
+                    )}
+                    <button
+                      className="ghost"
+                      onClick={async () => {
+                        if (!finished && (await ask({ title: t("farm.deleteAsk"), detail: t("farm.deleteBody"), confirmLabel: t("farm.delete"), danger: true })) === null) return;
+                        await api.farmDelete(f.id);
+                        await refreshFarms();
+                      }}
+                    >
+                      {finished ? t("warm.dismiss") : t("farm.delete")}
+                    </button>
+                  </div>
+                  {errors.length > 0 && (
+                    <div className="hint" title={errors.map((x) => `${x.name}: ${x.err}`).join("\n")}>
+                      {t("farm.lastError", { name: errors[0].name, err: errors[0].err ?? "" })}
+                      {errors.length > 1 ? ` (+${errors.length - 1})` : ""}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+            {farms.farms.some((f) => f.targets.some((x) => x.origin !== "local")) && (
+              <div className="hint">{t("farm.teamNeedsWindow")}</div>
+            )}
+          </div>
+        )}
+
         {(mirror || mirrorNote) && (
           <div className="notice" role="status" style={{ display: "block" }}>
             {mirror && (
@@ -1181,6 +1334,60 @@ export function App() {
           </div>
         )}
 
+        {/* The team server behind the newest release. Shown to owners and
+            admins of a server we do not run, once per release; the steps are
+            docs/14-team-server.md, "Обновление". */}
+        {(() => {
+          const latest = (update?.latest ?? update?.current ?? "").replace(/^v/, "");
+          const host = (() => {
+            try {
+              return shell?.server_url ? new URL(shell.server_url).hostname : "";
+            } catch {
+              return "";
+            }
+          })();
+          if (!me || !latest || !host || OUR_SERVERS.includes(host)) return null;
+          if (me.role !== "owner" && me.role !== "admin") return null;
+          if (me.server_version && !versionNewer(latest, me.server_version)) return null;
+          // Without a version the server is older than 0.4.2; only worth
+          // saying once a release that reports one exists.
+          if (!me.server_version && !versionNewer(latest, "0.4.1")) return null;
+          if (dismissedServer === latest) return null;
+          return (
+            <div className="notice" role="status">
+              <div style={{ flex: 1 }}>
+                <strong>
+                  {me.server_version
+                    ? t("app.serverUpdate", { host, version: me.server_version, latest })
+                    : t("app.serverUpdateUnknown", { host, latest })}
+                </strong>
+                <div className="muted" style={{ marginTop: "var(--s-1)" }}>{t("app.serverUpdateHow", { latest })}</div>
+              </div>
+              <button
+                className="ghost"
+                onClick={() =>
+                  void api.openUrl("https://github.com/furyteamtop/fury-antidetect-browser/blob/main/docs/14-team-server.md")
+                }
+              >
+                {t("app.serverUpdateSteps")}
+              </button>
+              <button
+                className="ghost"
+                onClick={() => {
+                  try {
+                    localStorage.setItem("fury.serverUpdate.dismissed", latest);
+                  } catch {
+                    /* a private window: dismissed for this session only */
+                  }
+                  setDismissedServer(latest);
+                }}
+              >
+                {t("app.updateLater")}
+              </button>
+            </div>
+          );
+        })()}
+
         {/* The right Chrome, an older build of it -- agent/src/main.rs,
             core_stale. Profiles keep launching; this only offers the build
             the application expects, and says what the old one lacks. A
@@ -1264,7 +1471,7 @@ export function App() {
         {/* No project selected is not the same as a project with no profiles,
             and saying the latter to someone who has been granted nothing sends
             them looking for a profile list that was never theirs. */}
-        {view === "proxies" && <Proxies profiles={profiles} />}
+        {view === "proxies" && <Proxies profiles={profiles} local={local} myEmail={me?.email ?? null} />}
         {view === "extensions" && <ExtensionsView profiles={profiles} />}
         {view === "assistants" && <AssistantsView />}
 
@@ -1272,8 +1479,9 @@ export function App() {
           <Users
             projects={projects}
             local={local}
+            serverUrl={shell.server_url}
             onSignOut={signOut}
-            onConnect={() => setSettingsOpen(true)}
+            onConnect={() => { setSettingsTab("team"); setSettingsOpen(true); }}
           />
         )}
 
@@ -1459,6 +1667,7 @@ export function App() {
         {settingsOpen && (
           <Settings
             shell={shell}
+            initialTab={settingsTab}
             hasProject={active !== null}
             onExport={exportProject}
             onImport={importProject}
@@ -1478,6 +1687,7 @@ export function App() {
         {editing !== undefined && (
           <ProfileDialog
             projectId={active?.id ?? null}
+            teamProjects={projects.filter((p) => p.origin === "team")}
             editing={editing}
             origin={newOrigin}
             canChoose={canChooseOrigin}
@@ -1529,6 +1739,7 @@ export function App() {
             onStarted={(note) => {
               setMirrorNote(note);
               void refreshProfiles();
+              void refreshFarms();
             }}
             onClose={() => setWarmFor(null)}
           />

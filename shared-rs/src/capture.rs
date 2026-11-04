@@ -81,6 +81,34 @@ fn ua_template(ua: &str) -> String {
 }
 
 /// Build a persona from a capture, or say why the capture cannot produce one.
+/// The WebGL parameters a persona carries: the numbers and ranges patch 0031
+/// answers from it, which a WebGL1 and a WebGL2 context report alike. The
+/// windows-11 and macOS personas, written by hand, carry exactly these.
+const WEBGL_PARAMS: &[&str] = &[
+    "ALIASED_LINE_WIDTH_RANGE",
+    "ALIASED_POINT_SIZE_RANGE",
+    "ALPHA_BITS",
+    "BLUE_BITS",
+    "DEPTH_BITS",
+    "GREEN_BITS",
+    "MAX_COMBINED_TEXTURE_IMAGE_UNITS",
+    "MAX_CUBE_MAP_TEXTURE_SIZE",
+    "MAX_FRAGMENT_UNIFORM_VECTORS",
+    "MAX_RENDERBUFFER_SIZE",
+    "MAX_TEXTURE_IMAGE_UNITS",
+    "MAX_TEXTURE_SIZE",
+    "MAX_VARYING_VECTORS",
+    "MAX_VERTEX_ATTRIBS",
+    "MAX_VERTEX_TEXTURE_IMAGE_UNITS",
+    "MAX_VERTEX_UNIFORM_VECTORS",
+    "MAX_VIEWPORT_DIMS",
+    "RED_BITS",
+    "SAMPLES",
+    "SAMPLE_BUFFERS",
+    "STENCIL_BITS",
+    "SUBPIXEL_BITS",
+];
+
 pub fn from_capture(dump: &Value, id: &str, weight: f64) -> Result<Value, String> {
     // A capture from a browser that is already spoofing describes a
     // description. Fury sets automation.hideTraces, so webdriver reads false
@@ -159,19 +187,84 @@ pub fn from_capture(dump: &Value, id: &str, weight: f64) -> Result<Value, String
         })
         .unwrap_or_default();
 
-    let webgl_params = dump
-        .get("webgl")
-        .and_then(|w| w.get("webgl2"))
-        .and_then(|w| w.get("params"))
-        .cloned()
-        .unwrap_or_else(|| json!({}));
-    let webgl_extensions: Vec<String> = dump
-        .get("webgl")
-        .and_then(|w| w.get("webgl2"))
-        .and_then(|w| w.get("extensions"))
-        .and_then(|v| v.as_str())
-        .map(|s| s.split(',').map(str::to_string).collect())
+    // Only what patch 0031 answers from the persona AND reads the same in a
+    // WebGL1 and a WebGL2 context. The core applies one map to both, so a
+    // string like VERSION, taken from the webgl2 block, made every WebGL1
+    // context call itself "WebGL 2.0" -- a pair no real browser produces.
+    // Found 14.10.2026 measuring the first phone capture against the core;
+    // the GTX 950 persona had carried it since 13.09. VENDOR and RENDERER are
+    // Blink constants the persona writes itself, and the webgl2-only limits
+    // are not read at all.
+    let webgl_params: serde_json::Map<String, Value> = ["webgl2", "webgl1"]
+        .iter()
+        .find_map(|ctx| dump.get("webgl")?.get(ctx)?.get("params")?.as_object())
+        .map(|params| {
+            params
+                .iter()
+                .filter(|(k, v)| WEBGL_PARAMS.contains(&k.as_str()) && !v.is_null())
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect()
+        })
         .unwrap_or_default();
+    let extensions_of = |ctx: &str| -> Vec<String> {
+        dump.get("webgl")
+            .and_then(|w| w.get(ctx))
+            .and_then(|w| w.get("extensions"))
+            .and_then(|v| v.as_str())
+            .map(|s| s.split(',').filter(|e| !e.is_empty()).map(str::to_string).collect())
+            .unwrap_or_default()
+    };
+    // Each context's own list, and the WebGL2 one again as the fallback an
+    // older core reads for both.
+    let webgl1_extensions = extensions_of("webgl1");
+    let webgl2_extensions = extensions_of("webgl2");
+    let webgl_extensions =
+        if webgl2_extensions.is_empty() { webgl1_extensions.clone() } else { webgl2_extensions.clone() };
+
+    // A phone GPU's shader precision is its own (persona.rs, shader_precision);
+    // a desktop's is the one every desktop answers, so the host's is right and
+    // nothing is carried. The WebGL1 block: both captured phones answer the
+    // same in WebGL2.
+    let shader_precision: serde_json::Map<String, Value> = if android {
+        dump.get("webgl")
+            .and_then(|w| w.get("webgl1"))
+            .and_then(|w| w.get("precision"))
+            .and_then(|p| p.as_object())
+            .map(|p| p.iter().filter(|(_, v)| v.is_string()).map(|(k, v)| (k.clone(), v.clone())).collect())
+            .unwrap_or_default()
+    } else {
+        Default::default()
+    };
+
+    // The WebGPU adapter as the machine reported it. Without this block the
+    // core answers with the HOST's adapter: an Android persona on a Mac said
+    // "apple / metal-3" beside a Qualcomm WebGL renderer. The features narrow
+    // the host's set (patch 0032), so a feature the real device lacked is not
+    // offered either.
+    let webgpu = dump
+        .get("webgpu")
+        .filter(|w| w.get("vendor").and_then(|v| v.as_str()).is_some_and(|v| !v.is_empty()))
+        .map(|w| {
+            let text = |k: &str| w.get(k).and_then(|v| v.as_str()).unwrap_or_default().to_string();
+            let limits: serde_json::Map<String, Value> = w
+                .get("limits")
+                .and_then(|l| l.as_object())
+                .map(|l| l.iter().filter(|(_, v)| v.is_number()).map(|(k, v)| (k.clone(), v.clone())).collect())
+                .unwrap_or_default();
+            let features: Vec<String> = text("features")
+                .split(',')
+                .filter(|f| !f.is_empty())
+                .map(str::to_string)
+                .collect();
+            json!({
+                "vendor": text("vendor"),
+                "architecture": text("architecture"),
+                "device": text("device"),
+                "description": text("description"),
+                "limits": limits,
+                "features": features,
+            })
+        });
 
     // A phone carries what a desktop has no field for. Android Chrome leaves
     // architecture and bitness empty in the hints, and says "Mobile" in the
@@ -183,9 +276,18 @@ pub fn from_capture(dump: &Value, id: &str, weight: f64) -> Result<Value, String
             "connection": s(dump, "engine.misc.connectionKind")
                 .filter(|k| k == "wifi" || k == "cellular")
                 .unwrap_or_else(|| "cellular".into()),
+            "voices": android_voice_locales(dump),
         })
     });
     let (arch_default, bitness_default) = if android { ("", "") } else { ("x86", "64") };
+
+    // The release, not platformVersion: on Windows that is 7.0.0 for a
+    // Windows 10 machine (see PersonaOs::display_version).
+    let platform_version = s(dump, "clientHints.platformVersion").unwrap_or_default();
+    let os_version = match crate::persona::windows_release(&platform_version) {
+        Some(release) if !mac && !android => release.to_string(),
+        _ => platform_version,
+    };
 
     let mut persona = json!({
         "id": id,
@@ -194,7 +296,7 @@ pub fn from_capture(dump: &Value, id: &str, weight: f64) -> Result<Value, String
         "source": "capture",
         "os": {
             "name": if mac { "macOS" } else if android { "Android" } else { "Windows" },
-            "version": s(dump, "clientHints.platformVersion").unwrap_or_default(),
+            "version": os_version,
             "arch": if android { "arm64".to_string() } else { s(dump, "clientHints.architecture").unwrap_or_else(|| "x86".into()) },
             "user_agent_template": ua_template(&ua),
             "platform": platform,
@@ -208,6 +310,9 @@ pub fn from_capture(dump: &Value, id: &str, weight: f64) -> Result<Value, String
             "webgl_renderer": renderer,
             "webgl_params": webgl_params,
             "webgl_extensions": webgl_extensions,
+            "webgl1_extensions": webgl1_extensions,
+            "webgl2_extensions": webgl2_extensions,
+            "shader_precision": shader_precision,
         },
         "screen": {
             "width": n(dump, "screen.width").unwrap_or(0.0) as u32,
@@ -238,15 +343,104 @@ pub fn from_capture(dump: &Value, id: &str, weight: f64) -> Result<Value, String
         "voices": voices,
         "media_devices": media_devices,
     });
+    // Absent rather than empty, as the persona itself writes them.
+    if let Some(gpu) = persona["gpu"].as_object_mut() {
+        gpu.retain(|k, v| {
+            !matches!(k.as_str(), "webgl1_extensions" | "webgl2_extensions" | "shader_precision")
+                || v.as_array().is_some_and(|a| !a.is_empty())
+                || v.as_object().is_some_and(|o| !o.is_empty())
+        });
+    }
+    if let Some(g) = webgpu {
+        persona["gpu"]["webgpu"] = g;
+    }
     if let Some(m) = mobile {
         persona["mobile"] = m;
+        // The status bar, reserved on some handsets and not on others.
+        if let Some(top) = n(dump, "screen.availTop") {
+            persona["screen"]["avail_top"] = json!(top as u32);
+        }
     }
     Ok(persona)
+}
+
+/// A phone's voice locales, in the order Chrome on Android lists them.
+///
+/// The probe sorts voices by name; Chrome lists one per locale in the order
+/// `Locale.getAvailableLocales()` returns them, which is ICU's, sorted by the
+/// locale id: language, then script, then country, with the current ISO codes
+/// where Java still writes the withdrawn ones (in, iw, ji). The first is the
+/// default voice, and on both captured phones that is "as_IN", which this
+/// order puts first.
+fn android_voice_locales(dump: &Value) -> Vec<String> {
+    let mut locales: Vec<String> = s(dump, "speech.names")
+        .map(|joined| {
+            joined
+                .split('~')
+                .filter_map(|entry| entry.split('|').nth(1).map(str::to_string))
+                .filter(|l| !l.is_empty())
+                .collect()
+        })
+        .unwrap_or_default();
+    let icu_id = |java: &str| -> String {
+        let mut parts = java.split('_');
+        let language = match parts.next().unwrap_or_default() {
+            "in" => "id",
+            "iw" => "he",
+            "ji" => "yi",
+            other => other,
+        }
+        .to_string();
+        let mut country = String::new();
+        let mut script = String::new();
+        for part in parts {
+            if let Some(sc) = part.strip_prefix('#') {
+                script = sc.to_string();
+            } else if country.is_empty() {
+                country = part.to_string();
+            }
+        }
+        [language, script, country].into_iter().filter(|p| !p.is_empty()).collect::<Vec<_>>().join("_")
+    };
+    locales.sort_by_key(|l| icu_id(l));
+    locales.dedup();
+    locales
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The first phone capture, converted. Measured against the core it
+    /// showed two things the converter got wrong for every persona built
+    /// from a capture (14.10.2026): the webgl2 block's VERSION went into the
+    /// map the core answers BOTH contexts from, and the WebGPU adapter was
+    /// left out, so the host's answered.
+    #[test]
+    fn a_phone_capture_keeps_its_gpu_and_only_the_shared_webgl_numbers() {
+        let dump: Value = serde_json::from_str(include_str!(
+            "../../tools/detect-suite/baselines/chrome-155-android-realme-rmx5131-redacted.json"
+        ))
+        .unwrap();
+        let p = from_capture(&dump, "android-test", 0.02).unwrap();
+        let params = p["gpu"]["webgl_params"].as_object().unwrap();
+        for absent in ["VERSION", "SHADING_LANGUAGE_VERSION", "VENDOR", "RENDERER", "MAX_SAMPLES"] {
+            assert!(!params.contains_key(absent), "{absent} would be answered in both contexts");
+        }
+        assert!(params.keys().all(|k| WEBGL_PARAMS.contains(&k.as_str())));
+        assert_eq!(params["MAX_TEXTURE_SIZE"], 8192);
+        assert_eq!(params.len(), WEBGL_PARAMS.len(), "the phone reported every one of them");
+
+        let gpu = &p["gpu"]["webgpu"];
+        assert_eq!(gpu["vendor"], "qualcomm");
+        assert_eq!(gpu["architecture"], "adreno-7xx");
+        assert_eq!(gpu["limits"]["maxStorageBufferBindingSize"], 134217728);
+        assert!(gpu["features"].as_array().unwrap().iter().any(|f| f == "texture-compression-astc"));
+
+        let persona: crate::Persona = serde_json::from_value(p).unwrap();
+        persona.validate().unwrap();
+        assert!(persona.is_phone());
+    }
 
     #[test]
     fn the_user_agent_becomes_a_template() {

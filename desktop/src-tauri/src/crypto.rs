@@ -76,6 +76,45 @@ pub fn enrol(password: &str, creates_org: bool) -> anyhow::Result<Enrolment> {
     })
 }
 
+/// Eight digits from a member's public key, for reading out to whoever lets
+/// them in.
+///
+/// Why it exists: the key is handed over to the public key the SERVER lists
+/// for a member, and an invitation code works for whoever types it first. A
+/// code that leaked enrolled a stranger as the invitee, and nothing in Users
+/// told the two apart (14.10.2026). The newcomer's app computes these digits
+/// from the key it generated itself and keeps; the owner's from the key the
+/// server lists. The same digits mean the person on the other end of the
+/// conversation is the one whose key is about to be trusted, and that the
+/// server did not swap it on the way.
+///
+/// SHA-256 under a label, first eight bytes, eight decimal digits: 27 bits,
+/// plenty for a comparison an attacker cannot repeat (they would need a key
+/// matching digits they do not know, before the owner asks).
+pub fn verify_code(public_key: &str) -> anyhow::Result<String> {
+    use sha2::{Digest, Sha256};
+    let pk = key32("the public key", unb64("public_key", public_key)?)?;
+    let mut h = Sha256::new();
+    h.update(b"fury verify code v1\0");
+    h.update(pk);
+    let d = h.finalize();
+    let n = u64::from_be_bytes(d[..8].try_into().expect("eight bytes")) % 100_000_000;
+    Ok(format!("{:04}-{:04}", n / 10_000, n % 10_000))
+}
+
+/// One's own public key, from the password, at a sign-in that holds no
+/// organisation key yet: the moment `verify_code` is needed on this side, and
+/// the only one at which the private key can be opened.
+pub fn own_public_key(password: &str, kdf_salt: &str, wrapped_private_key: &str) -> anyhow::Result<String> {
+    let salt = unb64("kdf_salt", kdf_salt)?;
+    let uk = keys::user_key(password, &salt)?;
+    let secret = key32(
+        "the wrapped private key",
+        keys::unwrap(&uk, &unb64("wrapped_private_key", wrapped_private_key)?)?,
+    )?;
+    Ok(b64(&keys::public_from_secret(&secret)))
+}
+
 /// Recover the organisation key at sign-in.
 ///
 /// Returns `Ok(None)` for an account that has enrolled but not yet been handed
@@ -181,6 +220,43 @@ pub fn rewrap_data_key(old: &[u8; 32], new: &[u8; 32], wrapped_hex: &str) -> any
     Ok(hex(&keys::wrap(new, &dek)))
 }
 
+/// Move a bundle's data key from one profile key to another.
+///
+/// The stored form is the agent's (`agent/src/bundle.rs`): the shared prefix,
+/// then base64. A bundle without the prefix is sealed under the machine that
+/// packed it, has nothing to do with the organisation key, and is never handed
+/// here -- the server lists only prefixed ones.
+pub fn rewrap_bundle_key(old: &[u8; 32], new: &[u8; 32], stored: &str) -> anyhow::Result<String> {
+    let rest = stored
+        .strip_prefix(keys::SHARED_BUNDLE_PREFIX)
+        .ok_or_else(|| anyhow::anyhow!("the bundle key is not sealed under a profile key"))?;
+    let dek = keys::unwrap(old, &unb64("wrapped_dek", rest)?)?;
+    Ok(format!("{}{}", keys::SHARED_BUNDLE_PREFIX, b64(&keys::wrap(new, &dek))))
+}
+
+/// The key a profile's cookies are encrypted with.
+///
+/// Stored, wrapped under the profile key, once the organisation key has been
+/// rotated (migration 0020); derived from the profile key, as patch 0110 has
+/// always done, before that. The two agree at the moment a rotation writes it
+/// down -- the stored value IS the derived one, carried across -- so a profile
+/// never sees its cookie key change.
+pub fn cookie_key(
+    profile_key: &[u8; 32],
+    profile_id: &str,
+    wrapped_hex: Option<&str>,
+) -> anyhow::Result<[u8; 32]> {
+    match wrapped_hex {
+        Some(w) => key32("the cookie key", keys::unwrap(profile_key, &unhex("wrapped_cookie_key", w)?)?),
+        None => Ok(keys::os_crypt_key(profile_key, profile_id)),
+    }
+}
+
+/// A cookie key wrapped under a profile key, as the server stores it.
+pub fn wrap_cookie_key(profile_key: &[u8; 32], cookie_key: &[u8; 32]) -> String {
+    hex(&keys::wrap(profile_key, cookie_key))
+}
+
 /// Open a data key wrapped under the organisation key.
 ///
 /// The first half of `rewrap_data_key`, needed on its own by sharing: the key
@@ -218,6 +294,53 @@ pub fn wrap_for_member(org_key: &[u8; 32], member_public_key: &str) -> anyhow::R
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// What a rotation does to one profile, end to end on the key side: the
+    /// bundle key moves to the new profile key, and the cookie key the browser
+    /// is handed afterwards is the one it had before.
+    #[test]
+    fn a_rotation_moves_the_bundle_key_and_keeps_the_cookie_key() {
+        let (old_ork, new_ork) = (keys::new_org_key(), keys::new_org_key());
+        let id = "01a010f3-69c8-7a72-bc3d-4d71698a5b4f";
+        let (old_p, new_p) = (profile_key(&old_ork, id), profile_key(&new_ork, id));
+
+        // As the agent seals it.
+        let dek = keys::new_org_key();
+        let stored = format!("{}{}", keys::SHARED_BUNDLE_PREFIX, b64(&keys::wrap(&old_p, &dek)));
+        let moved = rewrap_bundle_key(&old_p, &new_p, &stored).unwrap();
+        let opened = keys::unwrap(&new_p, &unb64("", moved.strip_prefix(keys::SHARED_BUNDLE_PREFIX).unwrap()).unwrap()).unwrap();
+        assert_eq!(opened, dek);
+        assert!(rewrap_bundle_key(&new_p, &old_p, &stored).is_err(), "opened under the wrong key");
+
+        // Before any rotation nothing is stored and the key is derived.
+        let before = cookie_key(&old_p, id, None).unwrap();
+        let wrapped = wrap_cookie_key(&new_p, &before);
+        assert_eq!(cookie_key(&new_p, id, Some(&wrapped)).unwrap(), before);
+        // Derived from the new profile key it would differ -- the bug.
+        assert_ne!(cookie_key(&new_p, id, None).unwrap(), before);
+
+        // And a second rotation carries the stored one on again.
+        let newer_p = profile_key(&keys::new_org_key(), id);
+        let again = wrap_cookie_key(&newer_p, &cookie_key(&new_p, id, Some(&wrapped)).unwrap());
+        assert_eq!(cookie_key(&newer_p, id, Some(&again)).unwrap(), before);
+    }
+
+    #[test]
+    fn the_newcomer_and_the_owner_compute_the_same_verification_code() {
+        let e = enrol("a password nobody else has", false).unwrap();
+        // The newcomer: from the key opened with the password at a later
+        // sign-in. The owner: from the key as enrolment published it.
+        let opened = own_public_key("a password nobody else has", &e.kdf_salt, &e.wrapped_private_key).unwrap();
+        assert_eq!(opened, e.public_key);
+        let code = verify_code(&e.public_key).unwrap();
+        assert_eq!(verify_code(&opened).unwrap(), code);
+        assert!(code.len() == 9 && code.as_bytes()[4] == b'-' && code.replace('-', "").bytes().all(|b| b.is_ascii_digit()), "{code}");
+
+        // Somebody else's key, as a stranger with the leaked code would have.
+        let other = enrol("another password entirely", false).unwrap();
+        assert_ne!(verify_code(&other.public_key).unwrap(), code);
+        assert!(own_public_key("the wrong password", &e.kdf_salt, &e.wrapped_private_key).is_err());
+    }
 
     #[test]
     fn an_owner_can_sign_in_again_and_get_the_same_organisation_key() {

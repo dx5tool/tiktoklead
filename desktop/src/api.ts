@@ -138,11 +138,13 @@ export interface Profile {
 }
 
 /** A named list of domains the relay refuses — or, with `@allow-only` on its
- *  first line, the only domains it permits. */
+ *  first line, the only domains it permits; or, with `@local`, hosts on this
+ *  machine's own network that every profile here reaches directly. */
 export interface DomainList {
   name: string;
   domains: number;
   allow_only: boolean;
+  local: boolean;
 }
 
 export interface LoginOutcome {
@@ -186,6 +188,67 @@ export interface WarmPlan {
   dwell_seconds: [number, number];
   follow_link: boolean;
   close_after: boolean;
+  /** Set on a farming session: the run reports back to its plan. */
+  farm_id?: string;
+}
+
+/** A warm-up on a schedule, over days. See agent/src/farm.rs. */
+export interface FarmSpec {
+  name: string;
+  urls: string[];
+  days: number;
+  sites_per_day: [number, number];
+  /** Local hours, [from, to), in each profile's own timezone. */
+  hours: [number, number];
+  dwell_seconds: [number, number];
+  follow_link: boolean;
+  at_once: number;
+  set_stage: boolean;
+}
+
+export interface FarmTarget {
+  id: string;
+  name: string;
+  origin: Origin;
+  timezone: string | null;
+}
+
+export type FarmOutcome =
+  | { kind: "done"; sites: number; cookies: number }
+  | { kind: "failed"; error: string }
+  | { kind: "skipped"; why: string };
+
+export interface FarmSession {
+  at_ms: number;
+  urls: string[];
+  started_ms?: number | null;
+  ended?: FarmOutcome | null;
+}
+
+export interface FarmTrack {
+  days_done: number;
+  day?: string | null;
+  sessions: FarmSession[];
+  sites: number;
+  cookies?: number | null;
+  last_error?: string | null;
+  stage_pending?: string | null;
+}
+
+export interface Farm {
+  id: string;
+  created_ms: number;
+  spec: FarmSpec;
+  targets: FarmTarget[];
+  tracks: Record<string, FarmTrack>;
+  paused: boolean;
+}
+
+export interface FarmDue {
+  farm_id: string;
+  profile_id: string;
+  name: string;
+  origin: Origin;
 }
 
 export interface WarmProgress {
@@ -202,6 +265,17 @@ export interface WarmProgress {
   started_at_ms: number;
 }
 
+/** A role the organisation named itself: a set of project rights given to
+ *  people project by project. Changing it changes everyone on it. */
+export interface AccessRole {
+  id: string;
+  name: string;
+  permissions: Perm[];
+  updated_at: string;
+  /** How many project grants follow it. */
+  grants: number;
+}
+
 export interface OrgDomainList {
   id: string;
   name: string;
@@ -209,6 +283,7 @@ export interface OrgDomainList {
   updated_at: string;
   domains: number;
   allow_only: boolean;
+  local: boolean;
 }
 
 export interface MirrorStatus {
@@ -337,6 +412,8 @@ export interface Persona {
   screen: string;
   weight: number;
   source: string | null;
+  /** Not built in: captured here, fetched from the team, or FURY_PERSONAS. */
+  own?: boolean;
 }
 
 /** A machine in this computer's personas folder: captured here, or an
@@ -354,14 +431,15 @@ export interface Preview {
   timezone: string;
   hardware_concurrency: number;
   device_memory: number;
-  screen: string;
+  /** null when the profile reports the monitor it runs on (no screen pinned). */
+  screen: string | null;
   gpu_vendor: string;
   gpu_renderer: string;
   client_hints_platform: string;
   chrome_version: string;
   client_hints: string;
-  avail: string;
-  device_pixel_ratio: number;
+  avail: string | null;
+  device_pixel_ratio: number | null;
   color_depth: number;
   max_touch_points: number;
   /** null when the persona has no WebGPU adapter data. */
@@ -412,6 +490,14 @@ export interface LocalProxy {
   port: number;
   username: string | null;
   password: string | null;
+  /** A team proxy: its login and password are on the server, sealed, and
+   *  never sent here. Blank fields in the form keep them. */
+  sealed?: boolean;
+  /** A team proxy: who added it, by email; null when nobody is recorded. */
+  added_by?: string | null;
+  /** A team proxy: whether this account may change or delete it. `false` only
+   *  when the server said so; absent from an older server, which does not. */
+  may_change?: boolean | null;
   last_country: string | null;
   last_ip: string | null;
   /** The exit's zone from the last check; absent from a server-side proxy. */
@@ -427,6 +513,8 @@ export interface Me {
   email: string;
   org_id: string;
   role: "owner" | "admin" | "manager" | "member";
+  /** The team server's own version. Missing on servers before 0.4.2. */
+  server_version?: string;
 }
 
 /** What the shell knows before anyone signs in. */
@@ -575,6 +663,9 @@ export type Invitation = {
   organization: string;
   role: string;
   creates_org_key: boolean;
+  /** The server sends six digits to `email` and wants them back before the
+   *  account is made (server 0018). Absent on an older server. */
+  email_check?: boolean;
 };
 
 export type UpdateProgress = {
@@ -701,14 +792,31 @@ export const api = {
   signup: (url: string, email: string, password: string, orgName: string): Promise<Me> =>
     cmd<Me>("signup", { url, email, password, orgName }),
 
-  async enrol(url: string, code: string, password: string, createsOrg: boolean): Promise<Me> {
+  async enrol(url: string, code: string, password: string, createsOrg: boolean, emailProof?: string | null): Promise<Me> {
     if (!isDesktop) {
       return Promise.reject(
         new ApiError(0, "Enrolment generates keys in Rust and is desktop-only."),
       );
     }
-    return cmd<Me>("enrol", { url, code, password, createsOrg });
+    return cmd<Me>("enrol", { url, code, password, createsOrg, emailProof: emailProof ?? null });
   },
+
+  /** Ask for the letter with six digits. `sent` false means the last one went
+   *  out under a minute ago: wait `retry_after` seconds. */
+  invitationEmail: (url: string, code: string, lang: string): Promise<{ sent: boolean; retry_after: number }> =>
+    cmd("invitation_email", { url, code, lang }),
+  /** The six digits in, the proof that `enrol` carries out. */
+  invitationEmailVerify: (url: string, code: string, emailCode: string): Promise<{ email_proof: string }> =>
+    cmd("invitation_email_verify", { url, code, emailCode }),
+  /** Eight digits from a member's public key as the server lists it, to
+   *  compare with what that person's own Fury shows (crypto::verify_code). */
+  verifyCode: (publicKey: string): Promise<string> => cmd<string>("verify_code", { publicKey }),
+  /** This installation's own code, from the key it made or opened itself.
+   *  Null when it has not seen that key (see own_verify_code). */
+  ownVerifyCode: (): Promise<string | null> => cmd<string | null>("own_verify_code"),
+  /** What a server says before anyone signs in. Empty from an old one. */
+  serverInfo: (url: string): Promise<{ open_signup?: boolean; email_check?: boolean }> =>
+    cmd("server_info", { url }),
 
   /** A sign-in comes back as an identity, or as a challenge when the
    *  organisation wants a code first — then `loginTotp` finishes it. */
@@ -828,13 +936,43 @@ export const api = {
     cmd("hand_over_key", { userId, publicKey }),
 
   grants: (projectId: string): Promise<{
-    granted: { user_id: string; email: string; role: string; permissions: Perm[]; domain_lists?: string[] }[];
+    granted: {
+      user_id: string;
+      email: string;
+      role: string;
+      permissions: Perm[];
+      domain_lists?: string[];
+      access_role?: string | null;
+    }[];
     implicit: { user_id: string; email: string; role: string }[];
   }> => cmd("grants", { projectId }),
 
-  /** `domainLists` undefined keeps what the grant already carries. */
-  grantAccess: (projectId: string, userId: string, permissions: Perm[], domainLists?: string[]): Promise<unknown> =>
-    cmd("grant_access", { projectId, userId, permissions, domainLists: domainLists ?? null }),
+  /** `domainLists` undefined keeps what the grant already carries. So does
+   *  `accessRole` undefined; `null` unlinks the grant from its role, so the
+   *  `permissions` sent stand on their own; an id links it, and the server
+   *  takes the role's boxes instead of `permissions`. */
+  grantAccess: (
+    projectId: string,
+    userId: string,
+    permissions: Perm[],
+    domainLists?: string[],
+    accessRole?: string | null,
+  ): Promise<unknown> =>
+    cmd("grant_access", {
+      projectId,
+      userId,
+      permissions,
+      domainLists: domainLists ?? null,
+      accessRole: accessRole ?? null,
+      link: accessRole !== undefined,
+    }),
+
+  /** The organisation's own roles (server 0017) — readable by every member,
+   *  written by owners and admins. */
+  accessRoles: (): Promise<AccessRole[]> => cmd<AccessRole[]>("access_roles"),
+  saveAccessRole: (id: string | null, name: string, permissions: Perm[]): Promise<{ id: string; grants_rewritten: number }> =>
+    cmd("save_access_role", { id, name, permissions }),
+  deleteAccessRole: (id: string): Promise<unknown> => cmd("delete_access_role", { id }),
 
   /** The organisation's domain lists — readable by every member, written by
    *  owners and admins, attached to grants. */
@@ -848,7 +986,7 @@ export const api = {
 
   /** Remove a member and replace the organisation key. Pass null to rotate
    *  without removing anyone — after a lost laptop, say. */
-  removeMember: (userId: string | null): Promise<{ generation: number }> =>
+  removeMember: (userId: string | null): Promise<{ generation: number; unreadable?: number }> =>
     cmd("remove_member", { userId }),
 
   /** AI assistants over MCP: which are connected, and connecting them. See
@@ -1085,14 +1223,33 @@ export const api = {
   mirrorStatus: (): Promise<MirrorStatus> => cmd<MirrorStatus>("mirror_status"),
   mirrorTyping: (on: boolean): Promise<unknown> => cmd("mirror_typing", { on }),
 
+  /** Saved local proxies whose password the keychain will not open now
+   *  (they read back blank); `retry` asks the keychain again. */
+  vaultStatus: (retry = false): Promise<{ available: boolean; unreadable: string[] }> =>
+    cmd("vault_status", { retry }),
+
   // ---- warming ------------------------------------------------------------
 
-  warmStart: (profileIds: string[], plan: WarmPlan): Promise<{ started: string[]; refused: Refusal[] }> =>
-    cmd("warm_start", { profileIds, plan }),
+  /** A team profile is opened by the shell first, lock and all, with the
+   *  debugging port; a local one by the agent. */
+  warmStart: (profiles: { id: string; origin: Origin }[], plan: WarmPlan): Promise<{ started: string[]; refused: Refusal[] }> =>
+    cmd("warm_start", { profiles, plan }),
   warmStatus: (): Promise<WarmProgress[]> => cmd<WarmProgress[]>("warm_status"),
   warmStop: (id: string): Promise<unknown> => cmd("warm_stop", { id }),
   warmClear: (): Promise<unknown> => cmd("warm_clear"),
   warmDefaults: (): Promise<{ urls: string[] }> => cmd("warm_defaults"),
+
+  // ---- farming: warm-ups on a schedule -----------------------------------
+
+  farmList: (): Promise<{ now_ms: number; farms: Farm[] }> => cmd("farm_list"),
+  farmCreate: (spec: FarmSpec, targets: FarmTarget[]): Promise<{ id: string }> => cmd("farm_create", { spec, targets }),
+  farmDelete: (id: string): Promise<unknown> => cmd("farm_delete", { id }),
+  farmPause: (id: string, paused: boolean): Promise<unknown> => cmd("farm_pause", { id, paused }),
+  farmDue: (): Promise<FarmDue[]> => cmd<FarmDue[]>("farm_due"),
+  /** Marks the session started and returns the warm-up plan to run it with. */
+  farmClaim: (farmId: string, profileId: string): Promise<WarmPlan> => cmd<WarmPlan>("farm_claim", { farmId, profileId }),
+  farmFail: (farmId: string, profileId: string, error: string): Promise<unknown> => cmd("farm_fail", { farmId, profileId, error }),
+  farmStageApplied: (farmId: string, profileId: string): Promise<unknown> => cmd("farm_stage_applied", { farmId, profileId }),
 
   // ---- this machine as a persona ----------------------------------------
 
@@ -1142,6 +1299,11 @@ export const api = {
   installExtensionMany: (profileIds: string[], crxB64: string): Promise<{
     extension: Extension | null; installed: string[]; skipped: { id: string; reason: string }[];
   }> => cmd("install_extension_many", { profileIds, crxB64 }),
+  /** One profile's extension with its storage -- so signed in -- into others.
+   *  Every browser involved must be closed; see ext::copy_with_state. */
+  copyExtensionWithState: (fromProfileId: string, extId: string, profileIds: string[]): Promise<{
+    extension: Extension | null; installed: string[]; skipped: { id: string; reason: string }[];
+  }> => cmd("copy_extension_with_state", { fromProfileId, extId, profileIds }),
   removeExtension: (profileId: string, id: string): Promise<unknown> =>
     cmd("remove_extension", { profileId, id }),
   extensionCatalogue: (): Promise<CatalogueEntry[]> => cmd("extension_catalogue"),

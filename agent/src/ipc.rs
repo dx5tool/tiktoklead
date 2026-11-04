@@ -57,6 +57,34 @@ struct Response {
     code: Option<&'static str>,
 }
 
+/// What a team launch is handed in place of this machine's vault.
+struct TeamKeys {
+    /// Wraps the bundle's data key. Derived by the shell from the organisation
+    /// key; never the organisation key itself.
+    profile_key: [u8; 32],
+    /// What the browser encrypts cookies with. Carried, not derived, once the
+    /// organisation key has been rotated -- see migration 0020.
+    cookie_key: Option<[u8; 32]>,
+    key_generation: Option<i32>,
+}
+
+/// A 32-byte key passed as 64 hex characters, or absent.
+fn key_param(params: &serde_json::Value, name: &str) -> anyhow::Result<Option<[u8; 32]>> {
+    let Some(v) = params.get(name).and_then(|v| v.as_str()) else {
+        return Ok(None);
+    };
+    let bytes: Option<Vec<u8>> = (v.len() == 64 && v.bytes().all(|b| b.is_ascii_hexdigit())).then(|| {
+        (0..64)
+            .step_by(2)
+            .filter_map(|i| u8::from_str_radix(&v[i..i + 2], 16).ok())
+            .collect()
+    });
+    bytes
+        .and_then(|b| <[u8; 32]>::try_from(b).ok())
+        .map(Some)
+        .ok_or_else(|| anyhow::anyhow!("{name} must be 64 hex characters"))
+}
+
 /// A failure with a name the interface can translate.
 ///
 /// Carried through `anyhow` like any other error and recovered by downcast at
@@ -86,9 +114,33 @@ fn refusal(id: &str, e: &anyhow::Error) -> serde_json::Value {
 /// (12.10.2026). The check goes through the relay now (`relay::via`), whose
 /// error names the cause; this reads the relay's error when there is one and
 /// reqwest's when the proxy was fine and the request after it was not.
-async fn check_failure(upstream: &crate::relay::Upstream, endpoint: &str, e: &reqwest::Error) -> (&'static str, String) {
+async fn check_failure(upstream: &crate::relay::Upstream, endpoint: &str, e: Option<&reqwest::Error>) -> (&'static str, String) {
     use crate::relay::RelayError;
-    if e.is_timeout() {
+    // A WireGuard peer does not refuse anything: a wrong key, a revoked config
+    // or a blocked port all look like silence, because the peer drops a
+    // handshake it cannot authenticate without a word. And "try the other
+    // type (socks5 / http)" means nothing for a tunnel.
+    if let crate::relay::Upstream::WireGuard(tunnel, _) = upstream {
+        // Asked of the tunnel rather than read off the error: the resolver
+        // inside the tunnel gives up before the check's own timeout, so a
+        // silent peer used to come back as "the tunnel is up, check DNS" —
+        // measured on the 0.3.18 release agent against a port that never
+        // answers (14.10.2026).
+        if !tunnel.answered() {
+            return ("wgSilent", "The WireGuard server did not answer.".into());
+        }
+        return match crate::relay::explain(upstream.clone(), endpoint).await {
+            Some(RelayError::ConnectRejected { reason, .. }) => {
+                ("wgTunnel", format!("The tunnel is up but could not reach the checker ({reason})."))
+            }
+            Some(other) => ("wgTunnel", format!("The tunnel failed ({other}).")),
+            None => match e {
+                Some(e) => reqwest_failure(e),
+                None => ("other", "The check failed: the IP checker answered 502 Bad Gateway.".into()),
+            },
+        };
+    }
+    if e.is_some_and(|e| e.is_timeout()) {
         return ("timeout", "The proxy did not answer in time.".into());
     }
     match crate::relay::explain(upstream.clone(), endpoint).await {
@@ -107,7 +159,10 @@ async fn check_failure(upstream: &crate::relay::Upstream, endpoint: &str, e: &re
         Some(other) => return ("connect", format!("Could not connect to the proxy ({other}).")),
         None => {}
     }
-    reqwest_failure(e)
+    match e {
+        Some(e) => reqwest_failure(e),
+        None => ("other", "The check failed: the IP checker answered 502 Bad Gateway.".into()),
+    }
 }
 
 fn reqwest_failure(e: &reqwest::Error) -> (&'static str, String) {
@@ -135,6 +190,10 @@ struct Running {
     /// shell from the organisation key. Absent for a profile that lives only
     /// here, which uses this machine's vault instead.
     profile_key: Option<[u8; 32]>,
+    /// The organisation key generation `profile_key` comes from, as the shell
+    /// checked it. Sent with the bundle so a server whose key has been
+    /// replaced since refuses it instead of storing what nobody can open.
+    key_generation: Option<i32>,
     /// Proof that this machine is the one running the browser. The server
     /// requires it on upload, so it has to outlive the heartbeat that also
     /// uses it — the push happens after the browser is already gone.
@@ -191,6 +250,8 @@ pub struct Agent {
     mirror: Arc<crate::mirror::Hub>,
     /// Profiles being warmed — visiting a list of sites. See warm.rs.
     warmer: Arc<crate::warm::Warmer>,
+    /// Farming plans: warm-ups on a schedule, over days. See farm.rs.
+    farms: Arc<Mutex<crate::farm::Farms>>,
     /// A handle back to the Arc this agent lives in, for background work
     /// that outlives the IPC call that started it — a warm-up closing its
     /// browser through `stop`, so a team profile still pushes its bundle.
@@ -306,11 +367,97 @@ impl Agent {
             core_download: Default::default(),
             mirror: crate::mirror::Hub::new(),
             warmer: crate::warm::Warmer::new(),
+            farms: Arc::new(Mutex::new(crate::farm::Farms::load(paths::farms_file()))),
             exit_when_idle: std::sync::atomic::AtomicBool::new(false),
             me: std::sync::OnceLock::new(),
         });
         let _ = agent.me.set(Arc::downgrade(&agent));
         Ok(agent)
+    }
+
+    /// Start a warm-up on a browser that is running with its debugging port.
+    ///
+    /// Closing afterwards goes through the same path the Close button takes,
+    /// so a team profile still pushes its bundle — the cookies it just
+    /// collected are the point. A farming session closes even after an error:
+    /// nobody is there to close it, and an open profile is one the next
+    /// session leaves alone. One the operator stopped stays open; they stopped
+    /// it to look.
+    async fn start_warm(&self, id: &str, name: &str, ws: &str, plan: crate::warm::Plan) -> anyhow::Result<()> {
+        let agent = self.me.get().and_then(|w| w.upgrade());
+        let farms = Arc::clone(&self.farms);
+        let pid = id.to_string();
+        let close = plan.close_after;
+        let farm_id = plan.farm_id.clone();
+        self.warmer
+            .start(id, name, ws, plan, move |last| {
+                Box::pin(async move {
+                    if let Some(fid) = &farm_id {
+                        farms.lock().await.report(fid, &pid, &last);
+                    }
+                    let close = close && !last.stopped && (last.error.is_none() || farm_id.is_some());
+                    if let (true, Some(agent)) = (close, agent) {
+                        let _ = agent.stop(&pid).await;
+                    }
+                })
+            })
+            .await
+    }
+
+    /// Profiles with a browser open on this machine right now.
+    async fn open_ids(&self) -> std::collections::HashSet<String> {
+        self.running.lock().await.keys().cloned().collect()
+    }
+
+    /// The farming loop: every half minute, close days that are over, plan
+    /// the next ones, and start the local sessions that are due. Team sessions
+    /// wait for the shell (`farm.due`). See farm.rs.
+    pub fn start_farming(self: &Arc<Self>) {
+        let me = Arc::downgrade(self);
+        tokio::spawn(async move {
+            let mut tick = tokio::time::interval(std::time::Duration::from_secs(30));
+            loop {
+                tick.tick().await;
+                let Some(agent) = me.upgrade() else { return };
+                let open = agent.open_ids().await;
+                let starts = {
+                    let mut rng = <rand::rngs::StdRng as rand::SeedableRng>::from_entropy();
+                    agent.farms.lock().await.step(chrono::Utc::now(), &open, &mut rng)
+                };
+                for s in starts {
+                    let fid = s.plan.farm_id.clone().unwrap_or_default();
+                    if let Err(e) = agent.farm_local(&s).await {
+                        tracing::warn!(profile = %s.profile_id, error = %e, "a farming session did not start");
+                        agent.farms.lock().await.fail(&fid, &s.profile_id, &e.to_string());
+                    }
+                }
+            }
+        });
+    }
+
+    /// Open a local profile with its debugging port and warm it.
+    async fn farm_local(&self, s: &crate::farm::Start) -> anyhow::Result<()> {
+        self.launch(&s.profile_id, None, None, None, None, true).await?;
+        let ws = self
+            .running
+            .lock()
+            .await
+            .get(&s.profile_id)
+            .and_then(|r| r.ws_endpoint.clone())
+            .ok_or_else(|| anyhow::anyhow!("no debugging port after launch"))?;
+        let name = self
+            .store
+            .profiles(None)
+            .await?
+            .into_iter()
+            .find(|p| p.id == s.profile_id)
+            .map(|p| p.name)
+            .unwrap_or_else(|| s.name.clone());
+        if let Err(e) = self.start_warm(&s.profile_id, &name, &ws, s.plan.clone()).await {
+            let _ = self.stop(&s.profile_id).await;
+            return Err(e);
+        }
+        Ok(())
     }
 
     /// Where the browser is, looked up now rather than remembered.
@@ -419,7 +566,18 @@ impl Agent {
         tracing::info!(agent = %endpoint, "agent listening");
 
         loop {
-            let stream = listener.accept().await?;
+            // Out of descriptors is waited out, not returned. Returning it
+            // ended the process, and with it every open profile's relay: a
+            // tester's agent restarted 39 times in a day this way, 18.10.2026.
+            let stream = match listener.accept().await {
+                Ok(s) => s,
+                Err(e) if fury_platform::is_out_of_descriptors(&e) => {
+                    tracing::warn!(error = %e, "agent socket: out of file descriptors, waiting");
+                    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+                    continue;
+                }
+                Err(e) => return Err(e.into()),
+            };
             let agent = Arc::clone(&self);
             tokio::spawn(async move {
                 if let Err(e) = agent.handle_connection(stream).await {
@@ -755,6 +913,7 @@ impl Agent {
                             "name": name,
                             "domains": parsed.len(),
                             "allow_only": parsed.is_allow_only(),
+                            "local": parsed.is_local(),
                         }));
                     }
                 }
@@ -771,7 +930,7 @@ impl Agent {
                 // launch.
                 let parsed = crate::blocklist::Blocklist::parse(&text);
                 std::fs::write(&file, text)?;
-                Ok(json!({ "name": name, "domains": parsed.len(), "allow_only": parsed.is_allow_only() }))
+                Ok(json!({ "name": name, "domains": parsed.len(), "allow_only": parsed.is_allow_only(), "local": parsed.is_local() }))
             }
 
             // The text as written, for the editor. A list is a file the
@@ -1055,6 +1214,110 @@ impl Agent {
                 Ok(json!({ "removed": true }))
             }
 
+            // One profile's extension, signed in, into others: the extension
+            // and its storage are copied, so the copies are logged in wherever
+            // the source is. ext::copy_with_state says what was measured.
+            //
+            // Every browser involved must be closed: LevelDB copied from under
+            // a running browser is a snapshot of half a write, and one copied
+            // into a running browser is overwritten on its next flush.
+            //
+            // A team profile takes two more rules, both about the launch that
+            // follows, which pulls the server's bundle and writes it over this
+            // directory file by file (bundle::unpack):
+            //   - it must already be on this machine (`held`). Otherwise that
+            //     first pull writes the server's copy of the same LevelDB over
+            //     ours, and two databases mixed file by file are one corrupt
+            //     database.
+            //   - it is marked unsynced at the version it holds. The next launch
+            //     then keeps the local copy if nobody uploaded since, and if
+            //     somebody did, moves ours aside whole and takes theirs whole --
+            //     never the mix. The next close uploads the copy as usual.
+            "extensions.copy_with_state" => {
+                let from = str_param(&params, "from_profile_id")?;
+                let ext_id = str_param(&params, "ext_id")?;
+                let ids: Vec<String> = params
+                    .get("profile_ids")
+                    .and_then(|v| v.as_array())
+                    .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
+                    .unwrap_or_default();
+                // Ids go into paths: a local id is the store's, a team id must
+                // look like the UUID it is.
+                let is_known = |id: &str| uuid::Uuid::parse_str(id).is_ok();
+                if !is_known(&from) {
+                    anyhow::bail!("{from:?} is not a profile id");
+                }
+                let running = self.running.lock().await;
+                if running.contains_key(&from) {
+                    anyhow::bail!("source_open");
+                }
+                let source = paths::profile_dir(&from);
+                let mut installed = Vec::new();
+                let mut skipped = Vec::new();
+                let mut about: Option<crate::ext::Installed> = None;
+                for id in ids {
+                    if id == from {
+                        continue;
+                    }
+                    if !is_known(&id) {
+                        skipped.push(json!({ "id": id, "reason": "not a profile id" }));
+                        continue;
+                    }
+                    if running.contains_key(&id) {
+                        skipped.push(json!({ "id": id, "reason": "open" }));
+                        continue;
+                    }
+                    let team_held = if self.store.profile(&id).await?.is_some() {
+                        None
+                    } else {
+                        match crate::unsynced::held(&id) {
+                            Some(v) => Some(v),
+                            None => {
+                                skipped.push(json!({ "id": id, "reason": "not_here" }));
+                                continue;
+                            }
+                        }
+                    };
+                    match crate::ext::copy_with_state(&source, &paths::profile_dir(&id), &ext_id) {
+                        Ok(x) => {
+                            // An existing marker already names the version this
+                            // copy grew from; replacing it would forget a session
+                            // that never reached the server.
+                            if let Some(v) = team_held {
+                                if crate::unsynced::base(&id).is_none() {
+                                    crate::unsynced::mark(&id, v);
+                                }
+                            }
+                            about.get_or_insert(x);
+                            installed.push(id);
+                        }
+                        // Not installed in the source is the same answer for
+                        // every target; the batch stops rather than repeating it.
+                        Err(e) if e.to_string() == "not_installed" => anyhow::bail!("not_installed"),
+                        Err(e) => skipped.push(json!({ "id": id, "reason": format!("{e:#}") })),
+                    }
+                }
+                Ok(json!({
+                    "extension": about.map(|x| json!({ "id": x.id, "name": x.name, "version": x.version })),
+                    "installed": installed,
+                    "skipped": skipped,
+                }))
+            }
+
+            // Saved proxies whose secrets read back blank, and asking the
+            // keychain again. See Vault::retry.
+            "vault.status" | "vault.retry" => {
+                let available = if method == "vault.retry" {
+                    // Off the runtime: the keychain may put up a dialog and
+                    // block until it is answered.
+                    let vault = std::sync::Arc::clone(self.store.vault_handle());
+                    tokio::task::spawn_blocking(move || vault.retry()).await?
+                } else {
+                    self.store.vault_available()
+                };
+                Ok(json!({ "available": available, "unreadable": self.store.unreadable_proxies().await? }))
+            }
+
             "proxies.upsert" => {
                 let proxy: Proxy = serde_json::from_value(params)?;
                 Ok(json!({ "id": self.store.upsert_proxy(&proxy).await? }))
@@ -1188,7 +1451,22 @@ impl Agent {
                 let via = crate::relay::via(upstream.clone(), std::time::Duration::from_secs(15)).await?;
 
                 let started = std::time::Instant::now();
-                let body: serde_json::Value = match via.client().get(&endpoint).send().await {
+                let sent = via.client().get(&endpoint).send().await;
+                let body: serde_json::Value = match sent {
+                    // The relay says an upstream failure with a 502. Over
+                    // https that is a failed CONNECT and an Err below; over a
+                    // plain http checker it is a response, and was taken for
+                    // a pass with no IP: a fake proxy that refused the login
+                    // "passed" (13.10.2026).
+                    Ok(res) if res.status() == reqwest::StatusCode::BAD_GATEWAY => {
+                        let (code, error) = check_failure(&upstream, &endpoint, None).await;
+                        return Ok(json!({
+                            "ok": false,
+                            "error": error,
+                            "error_code": code,
+                            "suggested_kind": serde_json::Value::Null,
+                        }));
+                    }
                     Ok(res) => res.json().await.unwrap_or(serde_json::Value::Null),
                     Err(e) => {
                         // Before reporting silence, find out whether the far
@@ -1206,7 +1484,7 @@ impl Agent {
                         if let Some(kind) = suggested {
                             tracing::info!(kind, "the proxy answers on another protocol");
                         }
-                        let (code, error) = check_failure(&upstream, &endpoint, &e).await;
+                        let (code, error) = check_failure(&upstream, &endpoint, Some(&e)).await;
                         return Ok(json!({
                             "ok": false,
                             "error": error,
@@ -1340,8 +1618,16 @@ impl Agent {
                         anyhow::anyhow!("this proxy has no rotation link")
                     })?;
 
+                // reqwest cannot reach a WireGuard peer; a relay of our own
+                // can, and stops when `_relay` goes at the end of this arm.
+                let (route, _relay) = if proxy.kind == "wireguard" {
+                    let (addr, guard) = crate::relay::loopback(crate::parse_upstream(&proxy.url())?).await?;
+                    (addr, Some(guard))
+                } else {
+                    (proxy.url(), None)
+                };
                 let client = reqwest::Client::builder()
-                    .proxy(reqwest::Proxy::all(&proxy.url())?)
+                    .proxy(reqwest::Proxy::all(&route)?)
                     .timeout(std::time::Duration::from_secs(30))
                     .build()?;
 
@@ -1475,8 +1761,8 @@ impl Agent {
                     format!("{pattern} {{n}}")
                 };
 
-                // Absent means "spread them over the catalogue by how common
-                // each machine is" — see catalogue::pick_weighted.
+                // Absent means "spread them over this computer's OS's machines
+                // by how common each is" — see catalogue::pick_weighted_on.
                 let pick_persona = template.persona_id.trim().is_empty();
 
                 let mut made = Vec::new();
@@ -1487,7 +1773,11 @@ impl Agent {
                     p.fp_seed = 0;
                     p.name = pattern.replace("{n}", &i.to_string());
                     if pick_persona {
-                        p.persona_id = fury_shared::catalogue::pick_weighted(rand::random()).id;
+                        p.persona_id = fury_shared::catalogue::pick_weighted_on(
+                            rand::random(),
+                            fury_shared::catalogue::host_os(),
+                        )
+                        .id;
                     }
                     match self.store.upsert_profile(&p).await {
                         Ok(id) => made.push(id),
@@ -1610,24 +1900,17 @@ impl Agent {
                         }
                     }
                     let ws = self.running.lock().await.get(&id).and_then(|r| r.ws_endpoint.clone());
-                    let name = self.store.profiles(None).await?.into_iter().find(|p| p.id == id).map(|p| p.name).unwrap_or_else(|| id.clone());
+                    // A team profile is not in the store; the shell that
+                    // opened it passes its name.
+                    let name = match params.get("names").and_then(|n| n.get(&id)).and_then(|v| v.as_str()) {
+                        Some(n) => n.to_string(),
+                        None => self.store.profiles(None).await?.into_iter().find(|p| p.id == id).map(|p| p.name).unwrap_or_else(|| id.clone()),
+                    };
                     let Some(ws) = ws else {
                         refused.push(json!({ "id": id, "reason": "no debugging port after launch" }));
                         continue;
                     };
-                    // Closing afterwards goes through the same path the
-                    // Close button takes, so a team profile still pushes its
-                    // bundle — the cookies it just collected are the point.
-                    let agent = self.me.get().and_then(|w| w.upgrade());
-                    let pid = id.clone();
-                    let r = self.warmer.start(&id, &name, &ws, plan.clone(), move |close| {
-                        Box::pin(async move {
-                            if let (true, Some(agent)) = (close, agent) {
-                                let _ = agent.stop(&pid).await;
-                            }
-                        })
-                    }).await;
-                    match r {
+                    match self.start_warm(&id, &name, &ws, plan.clone()).await {
                         Ok(()) => started.push(id),
                         Err(e) => refused.push(refusal(&id, &e)),
                     }
@@ -1648,6 +1931,62 @@ impl Agent {
             }
 
             "warm.defaults" => Ok(json!({ "urls": crate::warm::DEFAULT_URLS })),
+
+            // Farming: warm-ups on a schedule, over days. See farm.rs.
+            "farm.list" => {
+                let farms = self.farms.lock().await;
+                Ok(json!({ "now_ms": chrono::Utc::now().timestamp_millis(), "farms": farms.list }))
+            }
+            "farm.create" => {
+                let spec: crate::farm::Spec = serde_json::from_value(params.get("spec").cloned().unwrap_or_default())
+                    .map_err(|e| anyhow::anyhow!("plan: {e}"))?;
+                let mut targets: Vec<crate::farm::Target> =
+                    serde_json::from_value(params.get("targets").cloned().unwrap_or_default())
+                        .map_err(|e| anyhow::anyhow!("profiles: {e}"))?;
+                // A local profile's clock is known here, and may have changed
+                // since the shell's list was drawn.
+                let local = self.store.profiles(None).await?;
+                let proxies = self.store.proxies().await?;
+                for t in targets.iter_mut().filter(|t| t.is_local()) {
+                    if let Some(p) = local.iter().find(|p| p.id == t.id) {
+                        t.name = p.name.clone();
+                        let exit = p.proxy.as_ref().and_then(|x| proxies.iter().find(|q| q.id == x.id)).and_then(|q| q.last_timezone.clone());
+                        t.timezone = p.timezone.clone().or(exit).or(t.timezone.take());
+                    }
+                }
+                let id = self.farms.lock().await.create(spec, targets, chrono::Utc::now().timestamp_millis().max(0) as u64)?;
+                Ok(json!({ "id": id }))
+            }
+            "farm.delete" => {
+                let id = str_param(&params, "id")?;
+                Ok(json!({ "deleted": self.farms.lock().await.delete(&id) }))
+            }
+            "farm.pause" => {
+                let id = str_param(&params, "id")?;
+                let paused = params.get("paused").and_then(|v| v.as_bool()).unwrap_or(true);
+                Ok(json!({ "found": self.farms.lock().await.pause(&id, paused) }))
+            }
+            "farm.due" => {
+                let open = self.open_ids().await;
+                Ok(serde_json::to_value(self.farms.lock().await.due(chrono::Utc::now(), &open))?)
+            }
+            "farm.claim" => {
+                let (farm, profile) = (str_param(&params, "farm_id")?, str_param(&params, "profile_id")?);
+                let open = self.open_ids().await;
+                let plan = self.farms.lock().await.claim(&farm, &profile, chrono::Utc::now(), &open)?;
+                Ok(serde_json::to_value(plan)?)
+            }
+            "farm.fail" => {
+                let (farm, profile) = (str_param(&params, "farm_id")?, str_param(&params, "profile_id")?);
+                let error = params.get("error").and_then(|v| v.as_str()).unwrap_or("could not start");
+                self.farms.lock().await.fail(&farm, &profile, error);
+                Ok(json!({ "ok": true }))
+            }
+            "farm.stage_applied" => {
+                let (farm, profile) = (str_param(&params, "farm_id")?, str_param(&params, "profile_id")?);
+                self.farms.lock().await.stage_applied(&farm, &profile);
+                Ok(json!({ "ok": true }))
+            }
 
             "mirror.stop" => {
                 self.mirror.stop().await;
@@ -1808,7 +2147,28 @@ impl Agent {
                         .cloned()
                         .unwrap_or(serde_json::Value::Null)
                 };
+                let real_screen = get("screen.size").as_str() == Some("real");
 
+                // The raw value is what sites read and stays as it is; on
+                // Windows it is not the release (7.0.0 is Windows 10 1809),
+                // so the release is named beside it. "Windows 7.0.0" alone
+                // read as a bug (13.10.2026).
+                let client_hints = {
+                    let platform = get("clientHints.platform").as_str().unwrap_or("").to_string();
+                    let version = get("clientHints.platformVersion").as_str().unwrap_or("").to_string();
+                    let release = if platform == "Windows" {
+                        fury_shared::persona::windows_release_name(&version)
+                            .map(|r| format!(" ({r})"))
+                            .unwrap_or_default()
+                    } else {
+                        String::new()
+                    };
+                    format!(
+                        "{platform} {version}{release} · {} · {}-bit",
+                        get("clientHints.architecture").as_str().unwrap_or(""),
+                        get("clientHints.bitness").as_str().unwrap_or("")
+                    )
+                };
                 Ok(json!({
                     "user_agent": get("navigator.userAgent"),
                     "platform": get("navigator.platform"),
@@ -1816,11 +2176,14 @@ impl Agent {
                     "timezone": get("locale.timezone"),
                     "hardware_concurrency": get("navigator.hardwareConcurrency"),
                     "device_memory": get("navigator.deviceMemory"),
-                    "screen": format!(
+                    // Null when the profile reports the monitor it runs on
+                    // (overrides::MONITOR_KEYS): the panel says so instead of
+                    // showing the persona's size, which nothing reports.
+                    "screen": (!real_screen).then(|| format!(
                         "{}×{}",
                         get("screen.width").as_i64().unwrap_or(0),
                         get("screen.height").as_i64().unwrap_or(0)
-                    ),
+                    )),
                     "gpu_vendor": get("gpu.webglParams.UNMASKED_VENDOR_WEBGL"),
                     "gpu_renderer": get("gpu.webglParams.UNMASKED_RENDERER_WEBGL"),
                     "client_hints_platform": get("clientHints.platform"),
@@ -1830,18 +2193,12 @@ impl Agent {
                     // reader concluded there were 10 things spoofed (docs/12,
                     // audit of 12.09.2026).
                     "chrome_version": get("clientHints.fullVersion"),
-                    "client_hints": format!(
-                        "{} {} · {} · {}-bit",
-                        get("clientHints.platform").as_str().unwrap_or(""),
-                        get("clientHints.platformVersion").as_str().unwrap_or(""),
-                        get("clientHints.architecture").as_str().unwrap_or(""),
-                        get("clientHints.bitness").as_str().unwrap_or("")
-                    ),
-                    "avail": format!(
+                    "client_hints": client_hints,
+                    "avail": (!real_screen).then(|| format!(
                         "{}×{}",
                         get("screen.availWidth").as_i64().unwrap_or(0),
                         get("screen.availHeight").as_i64().unwrap_or(0)
-                    ),
+                    )),
                     "device_pixel_ratio": get("screen.devicePixelRatio"),
                     "color_depth": get("screen.colorDepth"),
                     "max_touch_points": get("navigator.maxTouchPoints"),
@@ -2109,7 +2466,7 @@ impl Agent {
                 // mean somebody else uploaded to the same fresh id, which is
                 // worth failing on rather than overwriting.
                 let version = server
-                    .push_bundle(&remote_id, &sealed.bytes, &sealed.wrapped_key, &sealed.sha256, 0, &lock_token)
+                    .push_bundle(&remote_id, &sealed.bytes, &sealed.wrapped_key, &sealed.sha256, 0, &lock_token, None)
                     .await?;
 
                 Ok(json!({ "bytes": sealed.bytes.len(), "version": version }))
@@ -2173,21 +2530,19 @@ impl Agent {
                 // Hex, because it is a key and hex is what the rest of this
                 // protocol uses for one. Absent means "use this machine's
                 // vault", which is what a local profile wants.
-                let profile_key = params
-                    .get("profile_key")
-                    .and_then(|v| v.as_str())
-                    .map(|v| {
-                        let bytes: Option<Vec<u8>> = (v.len() == 64
-                            && v.bytes().all(|b| b.is_ascii_hexdigit()))
-                        .then(|| {
-                            (0..64)
-                                .step_by(2)
-                                .filter_map(|i| u8::from_str_radix(&v[i..i + 2], 16).ok())
-                                .collect()
-                        });
-                        bytes
-                            .and_then(|b| <[u8; 32]>::try_from(b).ok())
-                            .ok_or_else(|| anyhow::anyhow!("profile_key must be 64 hex characters"))
+                let team = key_param(&params, "profile_key")?
+                    .map(|profile_key| -> anyhow::Result<TeamKeys> {
+                        Ok(TeamKeys {
+                            profile_key,
+                            // From a shell older than carried cookie keys: the
+                            // derivation it would have made, which is right until
+                            // the organisation's first rotation.
+                            cookie_key: key_param(&params, "cookie_key")?,
+                            key_generation: params
+                                .get("key_generation")
+                                .and_then(|v| v.as_i64())
+                                .map(|g| g as i32),
+                        })
                     })
                     .transpose()?;
                 // Off unless asked for. A debugging port nobody requested is a
@@ -2198,7 +2553,7 @@ impl Agent {
                     server,
                     lock_token,
                     inline,
-                    profile_key,
+                    team,
                     cdp,
                 )
                 .await
@@ -2305,7 +2660,7 @@ impl Agent {
     /// same one and the answer is this machine — asked directly, because there
     /// is nothing in between.
     async fn resolve_exit(
-        url: Option<&str>,
+        upstream: Option<crate::relay::Upstream>,
         checker_url: Option<&str>,
     ) -> anyhow::Result<ExitFacts> {
         let endpoint = checker_url
@@ -2318,8 +2673,8 @@ impl Agent {
         // Through the relay, as the profile's own traffic and the check go:
         // see `relay::via`. Held in `via` until the body is read.
         let timeout = std::time::Duration::from_secs(15);
-        let via = match url {
-            Some(u) => Some(crate::relay::via(crate::parse_upstream(u)?, timeout).await?),
+        let via = match upstream {
+            Some(u) => Some(crate::relay::via(u, timeout).await?),
             None => None,
         };
         let direct;
@@ -2383,9 +2738,11 @@ impl Agent {
         server: Option<crate::sync::Server>,
         lock_token: Option<String>,
         inline: Option<Profile>,
-        profile_key: Option<[u8; 32]>,
+        team: Option<TeamKeys>,
         cdp: bool,
     ) -> anyhow::Result<serde_json::Value> {
+        let profile_key = team.as_ref().map(|t| t.profile_key);
+        let key_generation = team.as_ref().and_then(|t| t.key_generation);
         // The lock is renewed from here, before the exit check and the bundle
         // pull, either of which can take longer than the lock lives. Aborted by
         // the guard if the launch fails, so a lock is never kept alive for a
@@ -2491,50 +2848,6 @@ impl Agent {
             }
         })?;
 
-        let upstream = match proxy {
-            Some(p) => crate::parse_upstream(&p.url())?,
-            // Still through the relay: the blocklist, the start page and the
-            // refusal to reach this machine's own services all live there, and
-            // a browser pointed straight at the network would have none of them.
-            None => {
-                tracing::warn!(
-                    profile = %profile.name,
-                    "opening with no proxy: this profile is allowed to, and every site it \
-                     visits sees this machine's own address"
-                );
-                crate::relay::Upstream::Direct
-            }
-        };
-        // The profile's lists, unioned. Read at launch rather than held in
-        // memory: a list edited between launches should take effect on the
-        // next one without anything having to notice it changed.
-        let blocked = {
-            let mut all = load_blocklists(&profile.blocklists);
-            // The organisation's lists, by grant. Same parser, same merge rule
-            // — a whitelist among them narrows, a blocklist subtracts — and
-            // nothing the operator's own machine holds can loosen them.
-            for l in &profile.inline_lists {
-                all.merge(crate::blocklist::Blocklist::parse(&l.body));
-            }
-            std::sync::Arc::new(all)
-        };
-        let relay = crate::relay::Relay::new(upstream).blocking(blocked);
-        let start_page = relay.start_url();
-        let (relay_port, relay_task) = relay.serve(0).await?;
-        // The detect-suite probe, on the relay's own loopback address rather
-        // than on `fury.invalid`, and the difference is not cosmetic: loopback
-        // is a potentially trustworthy origin, so the page is a secure context
-        // and `navigator.deviceMemory`, `navigator.gpu`, `enumerateDevices()`
-        // and service workers all exist in it — every one is absent on plain
-        // http, which is why the start page shows "?" for memory. The browser
-        // still reaches the address through the relay (`<-loopback>` removed
-        // the bypass) and the relay recognises its own port. Same token as the
-        // start page; see `Relay::route`.
-        let probe_url = format!(
-            "http://127.0.0.1:{relay_port}/{}/probe/",
-            start_page.trim_end_matches('/').rsplit('/').next().unwrap_or_default()
-        );
-
         // The persona as this profile presents it, with anything the operator
         // pinned by hand applied and the whole re-validated: an override that
         // makes an impossible machine is refused here exactly like a bad
@@ -2556,6 +2869,62 @@ impl Agent {
                 errs.iter().map(|e| e.to_string()).collect::<Vec<_>>().join("\n  ")
             );
         }
+
+        let upstream = match proxy {
+            // The persona's OS goes with it: through WireGuard the site's view
+            // of this machine's TCP is ours to make, and it has to be the same
+            // machine the User-Agent describes (`syn_shape`).
+            Some(p) => crate::parse_upstream(&p.url())?
+                .for_os(crate::syn_shape::Os::from_persona(&persona.os.name)),
+            // Still through the relay: the blocklist, the start page and the
+            // refusal to reach this machine's own services all live there, and
+            // a browser pointed straight at the network would have none of them.
+            None => {
+                tracing::warn!(
+                    profile = %profile.name,
+                    "opening with no proxy: this profile is allowed to, and every site it \
+                     visits sees this machine's own address"
+                );
+                crate::relay::Upstream::Direct
+            }
+        };
+        // The profile's lists, unioned. Read at launch rather than held in
+        // memory: a list edited between launches should take effect on the
+        // next one without anything having to notice it changed.
+        let blocked = {
+            let mut all = load_blocklists(&profile.blocklists);
+            // This machine's `@local` lists, whichever profile this is,
+            // personal or team: what is reachable on the local network is a
+            // fact about the machine, not about a profile. Only ever local
+            // entries, so nothing here can loosen what follows.
+            all.merge(load_local_lists());
+            // The organisation's lists, by grant. Same parser, same merge rule
+            // — a whitelist among them narrows, a blocklist subtracts — and
+            // nothing the operator's own machine holds can loosen them.
+            for l in &profile.inline_lists {
+                all.merge(crate::blocklist::Blocklist::parse(&l.body));
+            }
+            std::sync::Arc::new(all)
+        };
+        // Kept for the exit lookup below, which has to leave the same way —
+        // through WireGuard, the very same tunnel (`wg_stack::Shared`).
+        let exit_upstream = proxy.map(|_| upstream.clone());
+        let relay = crate::relay::Relay::new(upstream).blocking(blocked);
+        let start_page = relay.start_url();
+        let (relay_port, relay_task) = relay.serve(0).await?;
+        // The detect-suite probe, on the relay's own loopback address rather
+        // than on `fury.invalid`, and the difference is not cosmetic: loopback
+        // is a potentially trustworthy origin, so the page is a secure context
+        // and `navigator.deviceMemory`, `navigator.gpu`, `enumerateDevices()`
+        // and service workers all exist in it — every one is absent on plain
+        // http, which is why the start page shows "?" for memory. The browser
+        // still reaches the address through the relay (`<-loopback>` removed
+        // the bypass) and the relay recognises its own port. Same token as the
+        // start page; see `Relay::route`.
+        let probe_url = format!(
+            "http://127.0.0.1:{relay_port}/{}/probe/",
+            start_page.trim_end_matches('/').rsplit('/').next().unwrap_or_default()
+        );
 
         // A profile that pins neither its timezone nor its languages follows its
         // exit for both, and both come out of one lookup.
@@ -2591,7 +2960,7 @@ impl Agent {
             // where every request from this profile is about to go anyway.
             let exit_started = std::time::Instant::now();
             let resolved = Self::resolve_exit(
-                proxy.map(|p| p.url()).as_deref(),
+                exit_upstream.clone(),
                 proxy.and_then(|p| p.checker_url.as_deref()),
             )
             .await;
@@ -2736,20 +3105,32 @@ impl Agent {
         // be caught HERE, before the browser sees the directory, because after
         // that the damage is done and saved. Refusing to launch is the only
         // answer that leaves the data intact.
-        let os_crypt_key = profile_key
-            .map(|k| fury_shared::keys::os_crypt_key(&k, &profile.id));
+        let os_crypt_key = team.as_ref().map(|t| {
+            t.cookie_key
+                .unwrap_or_else(|| fury_shared::keys::os_crypt_key(&t.profile_key, &profile.id))
+        });
         let key_marker = dir.join("Fury Key Id");
         if let Some(key) = os_crypt_key.as_ref() {
             let want = fury_shared::keys::key_fingerprint(key);
             if let Ok(found) = std::fs::read_to_string(&key_marker) {
                 let found = found.trim();
                 if !found.is_empty() && found != want {
-                    anyhow::bail!(
-                        "this profile's cookies were encrypted with a different key, and \
-                         opening it now would make the browser delete them. That happens when \
-                         the organisation key has been replaced since the profile was last \
-                         used. Ask an owner to hand you the current key, then try again"
-                    );
+                    // Coded, because this one lands in the Open banner: it
+                    // reached a Russian window as the English sentence below.
+                    return Err(Coded {
+                        code: "err.cookieKeyChanged",
+                        // Since 0.3.20 a rotation carries the cookie key over
+                        // (migration 0020) and a retired organisation key is
+                        // caught by the shell before it gets here, so what is
+                        // left is a profile last opened before a rotation made
+                        // by an older Fury, which did not.
+                        message: "this profile's cookies were saved under a key that no longer \
+                                  exists: the organisation key was replaced by a version of Fury \
+                                  that did not carry the cookie key over. Opening the profile \
+                                  would make the browser delete those cookies, so it was not opened"
+                            .into(),
+                    }
+                    .into());
                 }
             }
         }
@@ -2915,6 +3296,7 @@ impl Agent {
                 relay: relay_task,
                 server: server.map(|s| (s, pulled_version)),
                 profile_key,
+                key_generation,
                 lock_token,
                 heartbeat,
             },
@@ -3049,6 +3431,7 @@ impl Agent {
                             &sealed.sha256,
                             base,
                             &token,
+                            entry.key_generation,
                         )
                         .await;
                     let push_ms = push_started.elapsed().as_millis() as u64;
@@ -3184,6 +3567,26 @@ fn load_blocklists(names: &[String]) -> crate::blocklist::Blocklist {
         if let Ok(path) = blocklist_path(name) {
             if let Ok(body) = std::fs::read_to_string(&path) {
                 all.merge(crate::blocklist::Blocklist::parse(&body));
+            }
+        }
+    }
+    all
+}
+
+/// Every `@local` list in this machine's list directory, unioned. Applied to
+/// every launch on this machine, so nobody has to tick one on each profile and
+/// a team profile, which has no lists of its own here, gets them too.
+fn load_local_lists() -> crate::blocklist::Blocklist {
+    let mut all = crate::blocklist::Blocklist::default();
+    let Ok(entries) = std::fs::read_dir(paths::blocklists_dir()) else { return all };
+    for path in entries.flatten().map(|e| e.path()) {
+        if path.extension().and_then(|e| e.to_str()) != Some("txt") {
+            continue;
+        }
+        if let Ok(body) = std::fs::read_to_string(&path) {
+            let list = crate::blocklist::Blocklist::parse(&body);
+            if list.is_local() {
+                all.merge(list);
             }
         }
     }
@@ -3369,6 +3772,7 @@ mod exit_check_tests {
                 child,
                 server: None,
                 profile_key: None,
+                key_generation: None,
                 lock_token: None,
                 heartbeat: None,
                 relay_port: 0,
@@ -3396,7 +3800,7 @@ mod exit_check_tests {
     #[tokio::test]
     async fn a_dead_proxy_means_no_answer_rather_than_a_direct_one() {
         // Port 9 discards. Nothing is listening for SOCKS5 there.
-        let err = super::Agent::resolve_exit(Some("socks5://127.0.0.1:9"), None)
+        let err = super::Agent::resolve_exit(Some(crate::parse_upstream("socks5://127.0.0.1:9").unwrap()), None)
             .await
             .expect_err("the exit check answered through a proxy that does not exist");
         let msg = err.to_string();

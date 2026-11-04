@@ -566,6 +566,9 @@ pub struct Me {
     pub email: String,
     pub org_id: String,
     pub role: String,
+    /// Absent from servers before 0.4.2, which is itself the answer: older.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub server_version: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -667,6 +670,22 @@ async fn finish_login(state: &State<'_, AppState>, ok: LoginOk, email: &str, pas
                     ),
                 ));
             }
+        }
+    }
+
+    // Waiting to be let in: the one state where the verification code is
+    // shown, and the password is in hand to open our own key for it. Costs a
+    // second key derivation, so only here.
+    if ok.wrapped_ork.is_none() {
+        match crypto::own_public_key(password, &ok.kdf_salt, &ok.wrapped_private_key) {
+            Ok(key) => {
+                let mut s = state.settings.lock().unwrap();
+                if let Some(server) = s.server_url.clone() {
+                    s.own_public_key = Some(settings::OwnPublicKey { server, email: email.to_string(), key });
+                    let _ = s.save(&state.config_dir);
+                }
+            }
+            Err(e) => tracing::warn!(error = %e, "could not open our own key for the verification code"),
         }
     }
 
@@ -791,6 +810,86 @@ pub async fn invitation(state: State<'_, AppState>, url: String, code: String) -
         .map_err(|e| ApiErr::local(format!("The server answered something unexpected: {e}")))
 }
 
+/// Send the six digits that confirm an invited address (server 0018). Before
+/// anyone has an account, so the address comes with the call, as for
+/// `invitation`. `lang` is the interface's, for the letter.
+#[tauri::command]
+pub async fn invitation_email(state: State<'_, AppState>, url: String, code: String, lang: String) -> R<serde_json::Value> {
+    let base = settings::normalise_server_url(&url).map_err(ApiErr::local)?;
+    let sanitised: String = code.chars().filter(|c| c.is_ascii_alphanumeric()).collect();
+    let resp = state
+        .http
+        .post(format!("{base}/v1/auth/enroll/{sanitised}/email"))
+        .json(&serde_json::json!({ "lang": lang }))
+        .send()
+        .await
+        .map_err(|e| ApiErr::local(format!("Could not reach {base}: {e}")))?;
+    unauthenticated_answer(resp).await
+}
+
+/// The six digits in, a one-time proof out, which `enrol` then carries.
+#[tauri::command]
+pub async fn invitation_email_verify(
+    state: State<'_, AppState>,
+    url: String,
+    code: String,
+    email_code: String,
+) -> R<serde_json::Value> {
+    let base = settings::normalise_server_url(&url).map_err(ApiErr::local)?;
+    let sanitised: String = code.chars().filter(|c| c.is_ascii_alphanumeric()).collect();
+    let resp = state
+        .http
+        .post(format!("{base}/v1/auth/enroll/{sanitised}/email/verify"))
+        .json(&serde_json::json!({ "email_code": email_code }))
+        .send()
+        .await
+        .map_err(|e| ApiErr::local(format!("Could not reach {base}: {e}")))?;
+    unauthenticated_answer(resp).await
+}
+
+/// A pre-account call's answer: the body, or the server's own message with its
+/// status, so the interface can tell "wrong code" from "expired".
+async fn unauthenticated_answer(resp: reqwest::Response) -> R<serde_json::Value> {
+    let status = resp.status().as_u16();
+    let body: serde_json::Value = resp.json().await.unwrap_or(serde_json::Value::Null);
+    if status == 404 {
+        return Err(ApiErr::local(
+            "This invitation is not valid. It may have been used already, or expired.",
+        ));
+    }
+    if status >= 400 {
+        return Err(ApiErr {
+            status,
+            message: body
+                .get("message")
+                .and_then(|m| m.as_str())
+                .unwrap_or("The server refused.")
+                .to_string(),
+            body,
+            code: None,
+        });
+    }
+    Ok(body)
+}
+
+/// What a server says about itself before anyone signs in: open sign-ups, and
+/// whether invited addresses are confirmed by email. An old server that does
+/// not know the second answers without it, which reads as no.
+#[tauri::command]
+pub async fn server_info(state: State<'_, AppState>, url: String) -> R<serde_json::Value> {
+    let base = settings::normalise_server_url(&url).map_err(ApiErr::local)?;
+    let resp = state
+        .http
+        .get(format!("{base}/v1/server"))
+        .send()
+        .await
+        .map_err(|e| ApiErr::local(format!("Could not reach {base}: {e}")))?;
+    if !resp.status().is_success() {
+        return Ok(serde_json::json!({}));
+    }
+    Ok(resp.json().await.unwrap_or(serde_json::json!({})))
+}
+
 /// Whether a server takes open sign-ups, asked before anyone has an account.
 ///
 /// Unauthenticated on purpose: the launcher has to know whether to offer the
@@ -903,6 +1002,9 @@ pub async fn enrol(
     code: String,
     password: String,
     creates_org: bool,
+    // The proof from `invitation_email_verify`, on a server that confirms the
+    // invited address by email.
+    email_proof: Option<String>,
 ) -> R<Me> {
     let base = settings::normalise_server_url(&url).map_err(ApiErr::local)?;
 
@@ -927,6 +1029,7 @@ pub async fn enrol(
             "kdf_salt": e.kdf_salt,
             "wrapped_ork": e.wrapped_ork,
             "machine_name": settings::machine_name(),
+            "email_proof": email_proof,
         }))
         .send()
         .await
@@ -980,10 +1083,39 @@ pub async fn enrol(
     {
         let mut s = state.settings.lock().unwrap();
         s.last_email = Some(me.email.clone());
+        // What the code on the waiting screen is computed from: the key made
+        // here a moment ago, not what the server will later say it is.
+        s.own_public_key = Some(settings::OwnPublicKey {
+            server: base.clone(),
+            email: me.email.clone(),
+            key: e.public_key.clone(),
+        });
         let _ = s.save(&state.config_dir);
     }
 
     Ok(me)
+}
+
+/// The verification code for a member's public key as the server lists it,
+/// for the owner's "Let them in" dialog (crypto::verify_code).
+#[tauri::command]
+pub fn verify_code(public_key: String) -> R<String> {
+    crypto::verify_code(&public_key).map_err(|e| ApiErr::local(e.to_string()))
+}
+
+/// This installation's own verification code, for the "waiting to be let in"
+/// screen. None when the key it was computed from belongs to another server
+/// or address, or was never seen here (an account made on another machine,
+/// before the next sign-in with the password).
+#[tauri::command]
+pub fn own_verify_code(state: State<'_, AppState>) -> R<Option<String>> {
+    let s = state.settings.lock().unwrap();
+    let Some(own) = s.own_public_key.as_ref() else { return Ok(None) };
+    let current = (s.server_url.as_deref(), s.last_email.as_deref());
+    if current != (Some(own.server.as_str()), Some(own.email.as_str())) {
+        return Ok(None);
+    }
+    crypto::verify_code(&own.key).map(Some).map_err(|e| ApiErr::local(e.to_string()))
 }
 
 #[tauri::command]
@@ -1457,9 +1589,28 @@ pub async fn launch(
         return Ok(serde_json::json!({ "launched": true, "pid": out.get("pid") }));
     }
 
+    let (grant, out) = take_and_launch(&state, &profile_id, force, false).await?;
+
+    Ok(serde_json::json!({
+        "launched": true,
+        "pid": out.get("pid"),
+        "expires_at": grant.expires_at,
+        "restrictions": grant.restrictions,
+    }))
+}
+
+/// Take a team profile's lock and start its browser on it; the lock is given
+/// back if the browser does not start. `cdp` opens the debugging port, which
+/// warming drives the page through.
+async fn take_and_launch(
+    state: &AppState,
+    profile_id: &str,
+    force: bool,
+    cdp: bool,
+) -> R<(LockGrant, serde_json::Value)> {
     // A profile on a machine a colleague captured: the persona has to be
     // here before the agent looks it up by id.
-    sync_org_personas(&state).await;
+    sync_org_personas(state).await;
 
     let body = serde_json::json!({
         "machine_id": state.machine_id(),
@@ -1479,13 +1630,25 @@ pub async fn launch(
         .locks
         .lock()
         .unwrap()
-        .insert(profile_id.clone(), grant.lock_token.clone());
+        .insert(profile_id.to_string(), grant.lock_token.clone());
 
     // From here a failure has to release the lock. Leaving one behind on a
     // profile that never opened is the thing locks are supposed to prevent,
     // arrived at from the wrong direction — a colleague waiting ninety seconds
     // for a browser that does not exist.
-    let launched = launch_from_spec(&state, &grant).await;
+    //
+    // The agent is handed none of the team's restrictions, so a profile the
+    // team closed to automation is refused here, before a browser starts that
+    // warming could not drive.
+    let denied = cdp && grant.restrictions.get("deny_cdp").and_then(|v| v.as_bool()) == Some(true);
+    let launched = if denied {
+        Err(ApiErr::coded(
+            "err.cdpDenied",
+            "The team has closed automation over the debugging port for this profile, and warming works through it.",
+        ))
+    } else {
+        launch_from_spec(state, &grant, cdp).await
+    };
     if launched.is_err() {
         let _: R<serde_json::Value> = state
             .call(
@@ -1495,20 +1658,14 @@ pub async fn launch(
                 true,
             )
             .await;
-        state.locks.lock().unwrap().remove(&profile_id);
+        state.locks.lock().unwrap().remove(profile_id);
     }
-    let out = launched?;
-
-    Ok(serde_json::json!({
-        "launched": true,
-        "pid": out.get("pid"),
-        "expires_at": grant.expires_at,
-        "restrictions": grant.restrictions,
-    }))
+    Ok((grant, launched?))
 }
 
+
 /// Turn a launch spec into a running browser.
-async fn launch_from_spec(state: &AppState, grant: &LockGrant) -> R<serde_json::Value> {
+async fn launch_from_spec(state: &AppState, grant: &LockGrant, cdp: bool) -> R<serde_json::Value> {
     let spec = &grant.spec;
 
     let org_key = state
@@ -1519,12 +1676,41 @@ async fn launch_from_spec(state: &AppState, grant: &LockGrant) -> R<serde_json::
             )
         })?;
 
-    let credentials = crypto::open_proxy_credentials(
+    // Also the check that the key held here is the current one. A rotation
+    // re-wraps every proxy's data key under the new organisation key, so a
+    // proxy that will not open while the server is ahead of the generation
+    // this machine knows means a colleague removed somebody: the key here is
+    // retired, and a browser launched on it would seal its bundle under a
+    // profile key nobody else holds. Dropped, so the window asks for the
+    // password that opens the new one.
+    let held_generation = *state.ork_generation.lock().unwrap();
+    let credentials = match crypto::open_proxy_credentials(
         &org_key,
         &spec.proxy.credentials_enc,
         &spec.proxy.wrapped_dek,
-    )
-    .map_err(|e| ApiErr::local(format!("Could not open this proxy's credentials: {e}")))?;
+    ) {
+        Ok(c) => c,
+        Err(_) if spec.key_generation.is_some_and(|g| g > held_generation) => {
+            *state.org_key.lock().unwrap() = None;
+            state.session.forget_org_key();
+            return Err(ApiErr::coded(
+                "err.orgKeyReplaced",
+                "The organisation key was replaced since this machine last unlocked it — \
+                 somebody was removed from the team. Unlock with your password to take the new one.",
+            ));
+        }
+        Err(e) => return Err(ApiErr::local(format!("Could not open this proxy's credentials: {e}"))),
+    };
+    // Opened, so the key here is the generation the server named. Recorded:
+    // it is what this machine refuses to go back below at the next sign-in,
+    // and what the agent sends with the bundle.
+    if let Some(g) = spec.key_generation.filter(|g| *g > held_generation) {
+        let mut seen = state.ork_generation.lock().unwrap();
+        *seen = (*seen).max(g);
+        let mut s = state.settings.lock().unwrap();
+        s.ork_generation = *seen;
+        let _ = s.save(&state.config_dir);
+    }
 
     let seed = fury_shared::persona::seed::from_hex(&spec.fp_seed).ok_or_else(|| {
         ApiErr::local("The server sent a fingerprint seed this version cannot read.")
@@ -1571,6 +1757,16 @@ async fn launch_from_spec(state: &AppState, grant: &LockGrant) -> R<serde_json::
     // bundle it was asked for and no other — and so a colleague on a different
     // machine can open the same bundle, which is what a team profile is for.
     let profile_key = crypto::profile_key(&org_key, &spec.profile_id.to_string());
+    // Handed over explicitly rather than left to the agent to derive: after a
+    // rotation it is no longer derivable from the profile key, it is carried
+    // (migration 0020).
+    let cookie_key = crypto::cookie_key(
+        &profile_key,
+        &spec.profile_id.to_string(),
+        spec.wrapped_cookie_key.as_deref(),
+    )
+    .map_err(|e| ApiErr::local(format!("Could not open this profile's cookie key: {e}")))?;
+    let hex = |k: &[u8; 32]| k.iter().map(|b| format!("{b:02x}")).collect::<String>();
 
     Ok(crate::agent::call(
         "profile.launch",
@@ -1579,7 +1775,10 @@ async fn launch_from_spec(state: &AppState, grant: &LockGrant) -> R<serde_json::
             "profile": profile,
             "server": { "url": server, "token": token },
             "lock_token": grant.lock_token,
-            "profile_key": profile_key.iter().map(|b| format!("{b:02x}")).collect::<String>(),
+            "profile_key": hex(&profile_key),
+            "cookie_key": hex(&cookie_key),
+            "key_generation": spec.key_generation,
+            "cdp": cdp,
         }),
     )
     .await?)
@@ -1828,6 +2027,78 @@ pub async fn remove_member(
         proxies.push(serde_json::json!({ "id": id, "wrapped_dek": rewrapped }));
     }
 
+    // Everything under a profile key moves to the new profile key, and every
+    // saved login to the new organisation key. Until 14.10.2026 none of it
+    // did: removing a member left every bundle, cookie jar and saved login of
+    // the team under a key nobody held any more.
+    //
+    // What the old key does not open is named, not fatal. It is already lost
+    // -- an earlier rotation by a Fury that did not carry it over -- and one
+    // such profile must not block removing somebody for good. The server
+    // refuses anything left out WITHOUT being named.
+    let list = |name: &str| -> Vec<serde_json::Value> {
+        material.get(name).and_then(|v| v.as_array()).cloned().unwrap_or_default()
+    };
+    let text = |v: &serde_json::Value, k: &str| v.get(k).and_then(|x| x.as_str()).unwrap_or_default().to_string();
+    let mut unreadable: Vec<String> = Vec::new();
+
+    let mut cookie_keys = Vec::new();
+    for p in list("profiles") {
+        let id = text(&p, "id");
+        let wrapped = p.get("wrapped_cookie_key").and_then(|v| v.as_str());
+        match crypto::cookie_key(&crypto::profile_key(&old, &id), &id, wrapped) {
+            Ok(ck) => cookie_keys.push(serde_json::json!({
+                "profile_id": id,
+                "wrapped_cookie_key": crypto::wrap_cookie_key(&crypto::profile_key(&new_key, &id), &ck),
+            })),
+            Err(e) => {
+                tracing::warn!(profile = %id, error = %e, "the old key does not open this cookie key");
+                unreadable.push(id);
+            }
+        }
+    }
+
+    let mut bundles = Vec::new();
+    for b in list("bundles") {
+        let (id, profile_id) = (text(&b, "id"), text(&b, "profile_id"));
+        let moved = crypto::rewrap_bundle_key(
+            &crypto::profile_key(&old, &profile_id),
+            &crypto::profile_key(&new_key, &profile_id),
+            &text(&b, "wrapped_dek"),
+        );
+        match moved {
+            Ok(w) => bundles.push(serde_json::json!({ "id": id, "wrapped_dek": w })),
+            Err(e) => {
+                tracing::warn!(bundle = %id, profile = %profile_id, error = %e, "the old key does not open this bundle");
+                unreadable.push(id);
+            }
+        }
+    }
+
+    let mut credentials = Vec::new();
+    for c in list("credentials") {
+        let id = text(&c, "id");
+        match crypto::rewrap_data_key(&old, &new_key, &text(&c, "wrapped_dek")) {
+            Ok(w) => credentials.push(serde_json::json!({ "id": id, "wrapped_dek": w })),
+            Err(e) => {
+                tracing::warn!(credential = %id, error = %e, "the old key does not open this saved login");
+                unreadable.push(id);
+            }
+        }
+    }
+
+    let mut shares = Vec::new();
+    for g in list("shares") {
+        let profile_id = text(&g, "profile_id");
+        let wrapped = crypto::wrap_for_member(&crypto::profile_key(&new_key, &profile_id), &text(&g, "public_key"))
+            .map_err(|e| ApiErr::local(format!("Could not seal profile {profile_id} for the person it was given to: {e}")))?;
+        shares.push(serde_json::json!({
+            "profile_id": profile_id,
+            "user_id": text(&g, "user_id"),
+            "wrapped_key": wrapped,
+        }));
+    }
+
     let out: serde_json::Value = state
         .call(
             reqwest::Method::POST,
@@ -1837,6 +2108,11 @@ pub async fn remove_member(
                 "members": members,
                 "proxies": proxies,
                 "generation": generation,
+                "cookie_keys": cookie_keys,
+                "bundles": bundles,
+                "credentials": credentials,
+                "shares": shares,
+                "unreadable": unreadable,
             })),
             true,
         )
@@ -1880,20 +2156,44 @@ pub async fn grant_access(
     // what the grant already carries, so the "let them in" button does not
     // strip lists an owner set on purpose.
     domain_lists: Option<Vec<String>>,
+    // The organisation role this grant follows. Only sent when `link` is set,
+    // because absent and null mean different things to the server: absent
+    // keeps the link it has, null unlinks (server 0017).
+    access_role: Option<String>,
+    link: Option<bool>,
 ) -> R<serde_json::Value> {
+    let mut body = serde_json::json!({
+        "user_id": user_id,
+        "permissions": permissions,
+        "expires_at": serde_json::Value::Null,
+        "domain_lists": domain_lists,
+    });
+    if link.unwrap_or(false) {
+        body["access_role"] = serde_json::json!(access_role);
+    }
     state
         .call(
             reqwest::Method::POST,
             &format!("/v1/projects/{project_id}/grants"),
-            Body::Json(serde_json::json!({
-                "user_id": user_id,
-                "permissions": permissions,
-                "expires_at": serde_json::Value::Null,
-                "domain_lists": domain_lists,
-            })),
+            Body::Json(body),
             true,
         )
         .await
+}
+
+// ---- the organisation's own roles -----------------------------------------
+
+#[tauri::command]
+pub async fn access_roles(state: State<'_, AppState>) -> R<serde_json::Value> {
+    state.call(reqwest::Method::GET, "/v1/org/access-roles", Body::None, true).await
+}
+#[tauri::command]
+pub async fn save_access_role(state: State<'_, AppState>, id: Option<String>, name: String, permissions: Vec<String>) -> R<serde_json::Value> {
+    state.call(reqwest::Method::POST, "/v1/org/access-roles", Body::Json(serde_json::json!({ "id": id, "name": name, "permissions": permissions })), true).await
+}
+#[tauri::command]
+pub async fn delete_access_role(state: State<'_, AppState>, id: String) -> R<serde_json::Value> {
+    state.call(reqwest::Method::DELETE, &format!("/v1/org/access-roles/{id}"), Body::None, true).await
 }
 
 // ---- the organisation's domain lists --------------------------------------
@@ -2237,10 +2537,28 @@ pub async fn proxies(
                     "rotate_url": serde_json::Value::Null,
                     "checker_url": serde_json::Value::Null,
                     "shared_with_profiles": p.shared_with_profiles,
+                    // The login and password exist, on the server, sealed: the
+                    // form says "saved" instead of showing two empty fields
+                    // that read as lost (tester, 15.10.2026).
+                    "sealed": true,
+                    // Who added it, and whether this account may change it:
+                    // the form says so on opening instead of refusing at Save
+                    // (tester, 20.10.2026). Null from an older server.
+                    "added_by": p.added_by,
+                    "may_change": p.may_change,
                 })
             })
             .collect(),
     ))
+}
+
+/// This machine's saved proxies whose secrets the keychain will not open now,
+/// and asking it again. Local proxies only: a team's are sealed under the
+/// organisation key, not the keychain.
+#[tauri::command]
+pub async fn vault_status(retry: bool) -> R<serde_json::Value> {
+    let method = if retry { "vault.retry" } else { "vault.status" };
+    Ok(crate::agent::call(method, serde_json::json!({})).await?)
 }
 
 /// Save a proxy.
@@ -2274,7 +2592,7 @@ pub async fn save_proxy(
     })?;
 
     let field = |k: &str| proxy.get(k).and_then(|v| v.as_str()).map(str::to_string);
-    let credentials = fury_shared::api::ProxyCredentials {
+    let mut credentials = fury_shared::api::ProxyCredentials {
         username: field("username").filter(|v| !v.is_empty()),
         password: field("password").filter(|v| !v.is_empty()),
     };
@@ -2294,6 +2612,26 @@ pub async fn save_proxy(
     let touching_credentials = id.is_empty()
         || credentials.username.is_some()
         || credentials.password.is_some();
+    // One half typed on an edit: the two are sealed together, so the other
+    // half has to come from what is stored, or it is sealed as nothing. A new
+    // password used to erase the login this way. WireGuard keeps its whole
+    // config in the password and has no login to keep.
+    let one_half = credentials.username.is_some() != credentials.password.is_some();
+    if !id.is_empty() && one_half && field("kind").as_deref() != Some("wireguard") {
+        let (_, stored) = stored_proxy_credentials(&state, &org_key, &id).await.map_err(|e| {
+            if e.status == 403 {
+                ApiErr::coded(
+                    "err.proxyBothHalves",
+                    "Type both the login and the password: they are saved together, and this \
+                     account may not read the stored ones to keep the half left blank.",
+                )
+            } else {
+                e
+            }
+        })?;
+        credentials.username = credentials.username.or(stored.username);
+        credentials.password = credentials.password.or(stored.password);
+    }
     if touching_credentials {
         let (credentials_enc, wrapped_dek) = crypto::seal_proxy_credentials(&org_key, &credentials)
             .map_err(|e| ApiErr::local(format!("Could not seal the credentials: {e}")))?;
@@ -2309,6 +2647,48 @@ pub async fn save_proxy(
             .call(reqwest::Method::PATCH, &format!("/v1/proxies/{id}"), Body::Json(body), true)
             .await
     }
+}
+
+/// The URL the agent's `parse_upstream` reads. A WireGuard proxy's secret is
+/// its whole .conf, sealed where a password goes, and the URL carries it there
+/// as unpadded base64url: the agent's `wireguard::url` and the interface's
+/// `proxyUrl.ts` build the same string.
+fn proxy_url(kind: &str, host: &str, port: i64, user: Option<String>, pass: Option<String>) -> String {
+    if kind == "wireguard" {
+        use base64::Engine;
+        let blob = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(pass.unwrap_or_default());
+        return format!("wireguard://wg:{blob}@{host}:{port}");
+    }
+    match (user, pass) {
+        (Some(u), Some(pw)) => format!("{kind}://{u}:{pw}@{host}:{port}"),
+        _ => format!("{kind}://{host}:{port}"),
+    }
+}
+
+/// A team proxy as the server stores it (kind, host, port), with its login
+/// and password opened here. Needs `reveal_secrets` on the server, and is
+/// recorded there as a reveal.
+async fn stored_proxy_credentials(
+    state: &State<'_, AppState>,
+    org_key: &[u8; 32],
+    id: &str,
+) -> R<(serde_json::Value, fury_shared::api::ProxyCredentials)> {
+    let sealed: serde_json::Value = state
+        .call(reqwest::Method::GET, &format!("/v1/proxies/{id}/credentials"), Body::None, true)
+        .await?;
+    let hex = |k: &str| -> R<Vec<u8>> {
+        let v = sealed.get(k).and_then(|v| v.as_str()).unwrap_or_default();
+        (0..v.len())
+            .step_by(2)
+            .map(|i| {
+                u8::from_str_radix(v.get(i..i + 2).unwrap_or(""), 16)
+                    .map_err(|_| ApiErr::local(format!("{k} is not hex")))
+            })
+            .collect()
+    };
+    let creds = crypto::open_proxy_credentials(org_key, &hex("credentials_enc")?, &hex("wrapped_dek")?)
+        .map_err(|e| ApiErr::local(format!("Could not open this proxy's credentials: {e}")))?;
+    Ok((sealed, creds))
 }
 
 /// The proxy as a URL the agent can dial. In local mode that is what the
@@ -2330,37 +2710,11 @@ async fn resolve_proxy_url(
                 )
             })?;
 
-            let sealed: serde_json::Value = state
-                .call(
-                    reqwest::Method::GET,
-                    &format!("/v1/proxies/{id}/credentials"),
-                    Body::None,
-                    true,
-                )
-                .await?;
-
-            let hex = |k: &str| -> R<Vec<u8>> {
-                let v = sealed.get(k).and_then(|v| v.as_str()).unwrap_or_default();
-                (0..v.len())
-                    .step_by(2)
-                    .map(|i| {
-                        u8::from_str_radix(v.get(i..i + 2).unwrap_or(""), 16)
-                            .map_err(|_| ApiErr::local(format!("{k} is not hex")))
-                    })
-                    .collect()
-            };
-            let creds =
-                crypto::open_proxy_credentials(&org_key, &hex("credentials_enc")?, &hex("wrapped_dek")?)
-                    .map_err(|e| {
-                        ApiErr::local(format!("Could not open this proxy's credentials: {e}"))
-                    })?;
+            let (sealed, creds) = stored_proxy_credentials(state, &org_key, &id).await?;
 
             let s = |k: &str| sealed.get(k).and_then(|v| v.as_str()).unwrap_or_default().to_string();
             let port = sealed.get("port").and_then(|v| v.as_i64()).unwrap_or(0);
-            match (creds.username, creds.password) {
-                (Some(u), Some(pw)) => format!("{}://{u}:{pw}@{}:{port}", s("kind"), s("host")),
-                _ => format!("{}://{}:{port}", s("kind"), s("host")),
-            }
+            proxy_url(&s("kind"), &s("host"), port, creds.username, creds.password)
         }
     };
     Ok(url)
@@ -2848,8 +3202,8 @@ pub async fn create_profiles(
     }
 
     let pattern = naming(&name_pattern, template.get("name").and_then(|v| v.as_str()));
-    // Absent means spread them across the catalogue by how common each machine
-    // is — see `catalogue::pick_weighted`. Picked here rather than on the
+    // Absent means spread them across this computer's OS's machines by how
+    // common each is — see `catalogue::pick_weighted_on`. Picked here rather than on the
     // server because the server has no reason to hold that policy.
     let pick = template
         .get("persona_id")
@@ -2866,7 +3220,11 @@ pub async fn create_profiles(
         one["name"] = serde_json::json!(pattern.replace("{n}", &i.to_string()));
         if pick {
             one["persona_id"] =
-                serde_json::json!(fury_shared::catalogue::pick_weighted(rand::random()).id);
+                serde_json::json!(fury_shared::catalogue::pick_weighted_on(
+                rand::random(),
+                fury_shared::catalogue::host_os(),
+            )
+            .id);
         }
         match save_profile(state.clone(), one, origin.clone()).await {
             Ok(v) => created.push(v),
@@ -3253,6 +3611,24 @@ pub async fn all_extensions_with(team: Vec<serde_json::Value>) -> R<serde_json::
     Ok(crate::agent::call("extensions.list_all", serde_json::json!({ "team": team })).await?)
 }
 
+/// One profile's extension, signed in, into others (agent: extensions.copy_with_state).
+///
+/// No team lock is taken: nothing leaves this machine here. The copy reaches
+/// the server when each profile is next opened and closed here, and the agent
+/// marks a team profile so that launch cannot mix the server's storage into it.
+#[tauri::command]
+pub async fn copy_extension_with_state(
+    from_profile_id: String,
+    ext_id: String,
+    profile_ids: Vec<String>,
+) -> R<serde_json::Value> {
+    Ok(crate::agent::call(
+        "extensions.copy_with_state",
+        serde_json::json!({ "from_profile_id": from_profile_id, "ext_id": ext_id, "profile_ids": profile_ids }),
+    )
+    .await?)
+}
+
 #[tauri::command]
 pub async fn remove_extension(profile_id: String, id: String) -> R<serde_json::Value> {
     Ok(crate::agent::call(
@@ -3481,9 +3857,59 @@ pub async fn mirror_typing(on: bool) -> R<serde_json::Value> {
 
 // ---- warming -----------------------------------------------------------------
 
+#[derive(Deserialize)]
+pub struct WarmTarget {
+    id: String,
+    origin: Option<String>,
+}
+
+/// Warm profiles. A local one the agent opens itself. A team one is opened
+/// here first, the way the Open button opens it -- lock, bundle, keys -- with
+/// the debugging port on; the agent then finds it running and drives it, and
+/// closing it afterwards goes through the agent's stop, which pushes the
+/// bundle and gives the lock back.
 #[tauri::command]
-pub async fn warm_start(profile_ids: Vec<String>, plan: serde_json::Value) -> R<serde_json::Value> {
-    Ok(crate::agent::call("warm.start", serde_json::json!({ "profile_ids": profile_ids, "plan": plan })).await?)
+pub async fn warm_start(
+    state: State<'_, AppState>,
+    profiles: Vec<WarmTarget>,
+    plan: serde_json::Value,
+) -> R<serde_json::Value> {
+    let open_here: Vec<String> = crate::agent::call::<serde_json::Value>("status", serde_json::json!({}))
+        .await
+        .ok()
+        .and_then(|s| s.get("running").cloned())
+        .and_then(|r| serde_json::from_value(r).ok())
+        .unwrap_or_default();
+    let mut ids = Vec::new();
+    let mut names = serde_json::Map::new();
+    let mut refused = Vec::new();
+    for p in profiles {
+        // Open here already: the agent warms it if it has the port, and
+        // refuses it by name if not. Taking the lock again would be refused
+        // as this machine's own.
+        if local_for(&state, p.origin.as_deref()) || open_here.contains(&p.id) {
+            ids.push(p.id);
+            continue;
+        }
+        match take_and_launch(&state, &p.id, false, true).await {
+            Ok((grant, _)) => {
+                // The agent's store has no record of a team profile; without
+                // this its progress line would read as an id.
+                names.insert(p.id.clone(), grant.spec.name.clone().into());
+                ids.push(p.id);
+            }
+            Err(e) => refused.push(serde_json::json!({ "id": p.id, "reason": e.message, "code": e.code })),
+        }
+    }
+    let mut out: serde_json::Value = crate::agent::call(
+        "warm.start",
+        serde_json::json!({ "profile_ids": ids, "plan": plan, "names": names }),
+    )
+    .await?;
+    if let Some(list) = out.get_mut("refused").and_then(|v| v.as_array_mut()) {
+        list.extend(refused);
+    }
+    Ok(out)
 }
 #[tauri::command]
 pub async fn warm_status() -> R<serde_json::Value> {
@@ -3500,6 +3926,46 @@ pub async fn warm_clear() -> R<serde_json::Value> {
 #[tauri::command]
 pub async fn warm_defaults() -> R<serde_json::Value> {
     Ok(crate::agent::call("warm.defaults", serde_json::json!({})).await?)
+}
+
+// ---- farming: warm-ups on a schedule (agent/src/farm.rs) ----------------------
+//
+// The agent keeps the plans and starts local sessions itself. A team session
+// it cannot open -- the lock, the bundle and the keys are here -- so the window
+// asks for due ones (`farm_due`), claims each and starts it through
+// `warm_start` above with the plan the claim returns.
+
+#[tauri::command]
+pub async fn farm_list() -> R<serde_json::Value> {
+    Ok(crate::agent::call("farm.list", serde_json::json!({})).await?)
+}
+#[tauri::command]
+pub async fn farm_create(spec: serde_json::Value, targets: serde_json::Value) -> R<serde_json::Value> {
+    Ok(crate::agent::call("farm.create", serde_json::json!({ "spec": spec, "targets": targets })).await?)
+}
+#[tauri::command]
+pub async fn farm_delete(id: String) -> R<serde_json::Value> {
+    Ok(crate::agent::call("farm.delete", serde_json::json!({ "id": id })).await?)
+}
+#[tauri::command]
+pub async fn farm_pause(id: String, paused: bool) -> R<serde_json::Value> {
+    Ok(crate::agent::call("farm.pause", serde_json::json!({ "id": id, "paused": paused })).await?)
+}
+#[tauri::command]
+pub async fn farm_due() -> R<serde_json::Value> {
+    Ok(crate::agent::call("farm.due", serde_json::json!({})).await?)
+}
+#[tauri::command]
+pub async fn farm_claim(farm_id: String, profile_id: String) -> R<serde_json::Value> {
+    Ok(crate::agent::call("farm.claim", serde_json::json!({ "farm_id": farm_id, "profile_id": profile_id })).await?)
+}
+#[tauri::command]
+pub async fn farm_fail(farm_id: String, profile_id: String, error: String) -> R<serde_json::Value> {
+    Ok(crate::agent::call("farm.fail", serde_json::json!({ "farm_id": farm_id, "profile_id": profile_id, "error": error })).await?)
+}
+#[tauri::command]
+pub async fn farm_stage_applied(farm_id: String, profile_id: String) -> R<serde_json::Value> {
+    Ok(crate::agent::call("farm.stage_applied", serde_json::json!({ "farm_id": farm_id, "profile_id": profile_id })).await?)
 }
 
 /// Write the server kit out to a directory the operator picks.

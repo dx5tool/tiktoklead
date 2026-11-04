@@ -325,7 +325,7 @@ export const SimprintSidebar: React.FC<SimprintSidebarProps> = ({
                   {shell.agent_ready ? "Agent Online" : "Agent Disconnected"}
                 </span>
               </div>
-              <span className="text-[10px] text-slate-500 font-mono">v0.3.9</span>
+              <span className="text-[10px] text-slate-500 font-mono">v{shell.version}</span>
             </div>
 
             {/* User / Machine details */}
@@ -353,7 +353,7 @@ export const SimprintSidebar: React.FC<SimprintSidebarProps> = ({
           <>
             {/* Collapsed Agent Status dot */}
             <div
-              title={shell.agent_ready ? "Agent Online (v0.3.9)" : "Agent Disconnected"}
+              title={shell.agent_ready ? `Agent Online (v${shell.version})` : "Agent Disconnected"}
               className="relative flex h-3 w-3 my-1 cursor-pointer"
             >
               {shell.agent_ready ? (

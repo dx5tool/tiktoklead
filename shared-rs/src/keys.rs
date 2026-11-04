@@ -131,6 +131,11 @@ pub fn new_keypair() -> Keypair {
     }
 }
 
+/// The public half of a keypair, from the private half.
+pub fn public_from_secret(secret: &[u8; KEY_LEN]) -> [u8; KEY_LEN] {
+    x25519_dalek::PublicKey::from(&x25519_dalek::StaticSecret::from(*secret)).to_bytes()
+}
+
 /// Seal a payload to a public key, with no signature from the sender.
 ///
 /// An ephemeral keypair per message, so the same ORK sealed twice to the same
@@ -261,6 +266,14 @@ fn getrandom(buf: &mut [u8]) {
 pub fn os_crypt_key(profile_key: &[u8; KEY_LEN], profile_id: &str) -> [u8; KEY_LEN] {
     subkey(profile_key, "fury-oscrypt-v1", profile_id)
 }
+
+/// The prefix of a bundle data key wrapped under a profile key, as the agent
+/// stores it and the server keeps it in `bundles.wrapped_dek`: this, then the
+/// standard base64 of `wrap(profile_key, dek)`. In one place because two
+/// processes write it -- the agent sealing a bundle, the shell re-wrapping it
+/// during a rotation -- and a rotation that spelled it differently would leave
+/// every bundle unopenable while looking like it had succeeded.
+pub const SHARED_BUNDLE_PREFIX: &str = "fury:ork1:";
 
 /// A name for a key that is safe to write down.
 ///
