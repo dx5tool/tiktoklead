@@ -1,6 +1,8 @@
 # FURY ANTIDETECT BROWSER — SIMPRINT UI REDESIGN
 > **Tài liệu Handoff & Kiến Trúc Dự Án dành cho AI LLM / Developer tiếp quản**  
-> *Phiên bản: v0.3.9 | Nhánh: `custom/simprint-ui` | Cập nhật gần nhất: 14/10/2026*
+> *Phiên bản: v0.4.20 | Nhánh: `custom/simprint-ui` | Cập nhật gần nhất: 04/11/2026*
+>
+> Đã merge upstream Fury `v0.4.20`: Farm schedule, WireGuard, Team/server, core `0.4.14` và các fix bảo mật đã có trong source. Giao diện Simprint được giữ nguyên.
 
 ---
 
