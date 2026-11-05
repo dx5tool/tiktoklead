@@ -101,10 +101,10 @@ export const SimprintProfileGrid: React.FC<SimprintProfileGridProps> = ({
         return (
           <div
             key={p.id}
-            className={`flex flex-col justify-between rounded-2xl p-4 bg-[#111827]/90 border transition-all duration-200 relative group shadow-lg ${
+            className={`flex flex-col justify-between rounded-2xl p-4 transition-all duration-200 relative group border ${
               isPicked
-                ? "border-cyan-500/80 bg-[#162136] shadow-cyan-500/10"
-                : "border-slate-800 hover:border-cyan-500/50 hover:shadow-cyan-500/10 hover:bg-[#141d2e]/90"
+                ? "border-cyan-500 bg-cyan-50/70 dark:bg-[#162136] shadow-sm dark:shadow-cyan-500/10"
+                : "bg-white dark:bg-[#111827]/90 border-slate-200 dark:border-slate-800 hover:border-cyan-500/50 hover:shadow-md dark:hover:shadow-cyan-500/10 hover:bg-slate-50 dark:hover:bg-[#141d2e]/90"
             }`}
           >
             {/* Card Top: Checkbox, Badges, Dropdown */}
@@ -116,7 +116,7 @@ export const SimprintProfileGrid: React.FC<SimprintProfileGridProps> = ({
                     aria-label={p.name}
                     checked={isPicked}
                     onChange={() => onToggle(p.id)}
-                    className="rounded border-slate-700 bg-slate-800 text-cyan-500 focus:ring-0 focus:ring-offset-0 cursor-pointer"
+                    className="rounded border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-cyan-600 dark:text-cyan-500 focus:ring-0 focus:ring-offset-0 cursor-pointer"
                   />
                   {open ? (
                     <SimprintBadge variant="emerald" dot pulse>
@@ -151,21 +151,21 @@ export const SimprintProfileGrid: React.FC<SimprintProfileGridProps> = ({
                   {/* 3-dot dropdown button */}
                   <button
                     onClick={() => setOpenDropdownId(isMenuOpen ? null : p.id)}
-                    className="p-1 rounded text-slate-400 hover:text-white hover:bg-slate-800 cursor-pointer"
+                    className="p-1 rounded text-slate-500 hover:text-slate-900 hover:bg-slate-200/60 dark:text-slate-400 dark:hover:text-white dark:hover:bg-slate-800 cursor-pointer !bg-transparent !border-0"
                   >
                     <MoreVertical size={14} />
                   </button>
 
                   {/* Dropdown Menu */}
                   {isMenuOpen && (
-                    <div className="absolute right-0 top-7 w-36 py-1.5 bg-slate-900 border border-slate-700/80 rounded-xl shadow-xl z-50 text-xs">
+                    <div className="absolute right-0 top-7 w-36 py-1.5 bg-white border border-slate-200 text-slate-800 shadow-xl dark:bg-slate-900 dark:border-slate-700/80 dark:text-slate-300 dark:shadow-2xl rounded-xl z-50 text-xs">
                       {onShare && (p.origin === "local" || p.permissions.includes("manage_access")) && (
                         <button
                           onClick={() => {
                             setOpenDropdownId(null);
                             onShare(p);
                           }}
-                          className="w-full flex items-center gap-2 px-3 py-1.5 text-slate-300 hover:bg-slate-800 hover:text-white cursor-pointer text-left"
+                          className="w-full flex items-center gap-2 px-3 py-1.5 text-slate-700 hover:text-slate-900 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white cursor-pointer text-left !bg-transparent !border-0"
                         >
                           <Share2 size={13} />
                           <span>{t("row.shareShort")}</span>
@@ -177,7 +177,7 @@ export const SimprintProfileGrid: React.FC<SimprintProfileGridProps> = ({
                             setOpenDropdownId(null);
                             onExtensions(p);
                           }}
-                          className="w-full flex items-center gap-2 px-3 py-1.5 text-slate-300 hover:bg-slate-800 hover:text-white cursor-pointer text-left"
+                          className="w-full flex items-center gap-2 px-3 py-1.5 text-slate-700 hover:text-slate-900 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white cursor-pointer text-left !bg-transparent !border-0"
                         >
                           <Puzzle size={13} />
                           <span>{t("ext.extensions")}</span>
@@ -189,7 +189,7 @@ export const SimprintProfileGrid: React.FC<SimprintProfileGridProps> = ({
                             setOpenDropdownId(null);
                             onClone(p);
                           }}
-                          className="w-full flex items-center gap-2 px-3 py-1.5 text-slate-300 hover:bg-slate-800 hover:text-white cursor-pointer text-left"
+                          className="w-full flex items-center gap-2 px-3 py-1.5 text-slate-700 hover:text-slate-900 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white cursor-pointer text-left !bg-transparent !border-0"
                         >
                           <Copy size={13} />
                           <span>{t("bp.clone")}</span>
@@ -202,7 +202,7 @@ export const SimprintProfileGrid: React.FC<SimprintProfileGridProps> = ({
                             setOpenDropdownId(null);
                             onDelete(p);
                           }}
-                          className="w-full flex items-center gap-2 px-3 py-1.5 text-rose-400 hover:bg-rose-500/10 cursor-pointer text-left disabled:opacity-40"
+                          className="w-full flex items-center gap-2 px-3 py-1.5 text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-500/10 cursor-pointer text-left disabled:opacity-40 !bg-transparent !border-0"
                         >
                           <Trash2 size={13} />
                           <span>{t("row.delete")}</span>
@@ -216,7 +216,7 @@ export const SimprintProfileGrid: React.FC<SimprintProfileGridProps> = ({
               {/* Profile Title & Metadata */}
               <div className="mb-3">
                 <div className="flex items-center gap-1.5">
-                  <h3 className="font-bold text-sm text-white group-hover:text-cyan-300 transition-colors truncate">
+                  <h3 className="font-bold text-sm text-slate-900 dark:text-white group-hover:text-cyan-600 dark:group-hover:text-cyan-300 transition-colors truncate">
                     {p.name}
                   </h3>
                   {hasServer && p.origin === "local" && (
@@ -232,7 +232,7 @@ export const SimprintProfileGrid: React.FC<SimprintProfileGridProps> = ({
                   )}
                   {verdict.level !== "ok" && (
                     <span
-                      className={verdict.level === "block" ? "text-rose-400 shrink-0" : "text-amber-400 shrink-0"}
+                      className={verdict.level === "block" ? "text-rose-500 shrink-0" : "text-amber-500 shrink-0"}
                       title={verdictText}
                     >
                       <AlertTriangle size={12} />
@@ -241,13 +241,13 @@ export const SimprintProfileGrid: React.FC<SimprintProfileGridProps> = ({
                 </div>
 
                 {/* Fingerprint spoof info */}
-                <div className="flex items-center gap-3 text-[11px] text-slate-400 mt-1">
+                <div className="flex items-center gap-3 text-[11px] text-slate-500 dark:text-slate-400 mt-1">
                   <div className="flex items-center gap-1">
-                    <Globe size={11} className="text-cyan-400/80" />
+                    <Globe size={11} className="text-cyan-600 dark:text-cyan-400/80" />
                     <span>Chrome 131</span>
                   </div>
                   <div className="flex items-center gap-1">
-                    <Cpu size={11} className="text-slate-500" />
+                    <Cpu size={11} className="text-slate-400 dark:text-slate-500" />
                     <span>Fury Core</span>
                   </div>
                 </div>
@@ -255,12 +255,12 @@ export const SimprintProfileGrid: React.FC<SimprintProfileGridProps> = ({
 
               {/* Proxy snippet */}
               <div
-                className={`p-2 rounded-xl bg-slate-900/60 border border-slate-800/80 text-[11px] mb-3 ${
+                className={`p-2 rounded-xl bg-slate-100 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800/80 text-[11px] mb-3 ${
                   p.proxy && onNetwork ? "cursor-pointer hover:border-cyan-500/40" : ""
                 }`}
                 onClick={() => p.proxy && onNetwork?.(p)}
               >
-                <div className="flex items-center justify-between text-slate-400 mb-0.5">
+                <div className="flex items-center justify-between text-slate-500 dark:text-slate-400 mb-0.5">
                   <span className="font-semibold uppercase tracking-wider text-[10px] text-slate-500 flex items-center gap-1">
                     <Network size={11} />
                     <span>Proxy</span>
@@ -268,12 +268,12 @@ export const SimprintProfileGrid: React.FC<SimprintProfileGridProps> = ({
                   <span>{p.proxy?.country ?? (p.proxy ? t("row.proxyUnchecked") : "Direct")}</span>
                 </div>
                 {p.proxy ? (
-                  <div className="font-mono text-slate-200 truncate flex items-center justify-between">
+                  <div className="font-mono text-slate-800 dark:text-slate-200 truncate flex items-center justify-between">
                     <span>{p.proxy.display}</span>
                     {!canReveal && <span className="text-[10px] text-slate-500 font-sans">({t("row.masked")})</span>}
                   </div>
                 ) : (
-                  <div className={p.allow_no_proxy ? "text-amber-400" : "text-rose-400"}>
+                  <div className={p.allow_no_proxy ? "text-amber-600 dark:text-amber-400 font-medium" : "text-rose-600 dark:text-rose-400 font-medium"}>
                     {p.allow_no_proxy ? t("row.noProxyAllowed") : t("row.noProxy")}
                   </div>
                 )}
@@ -284,7 +284,7 @@ export const SimprintProfileGrid: React.FC<SimprintProfileGridProps> = ({
                 {p.tags.map((tg) => (
                   <span
                     key={tg}
-                    className="px-1.5 py-0.2 rounded text-[10px] font-medium bg-cyan-950/40 text-cyan-400/90 border border-cyan-800/40"
+                    className="px-1.5 py-0.2 rounded text-[10px] font-medium bg-cyan-50 dark:bg-cyan-950/40 text-cyan-700 dark:text-cyan-400/90 border border-cyan-200 dark:border-cyan-800/40"
                   >
                     #{tg}
                   </span>
@@ -296,11 +296,11 @@ export const SimprintProfileGrid: React.FC<SimprintProfileGridProps> = ({
                       className="px-2 py-0.2 rounded text-[10px] font-medium border"
                       style={
                         hue === null
-                          ? { backgroundColor: "#1e293b", borderColor: "#334155", color: "#94a3b8" }
+                          ? { backgroundColor: "var(--stage-null-bg)", borderColor: "var(--stage-null-border)", color: "var(--stage-null-text)" }
                           : {
-                              background: `hsl(${hue} 45% 18%)`,
-                              borderColor: `hsl(${hue} 60% 30%)`,
-                              color: `hsl(${hue} 70% 85%)`,
+                              background: `hsl(${hue} var(--stage-sat) var(--stage-bg-lightness))`,
+                              borderColor: `hsl(${hue} 60% var(--stage-border-lightness))`,
+                              color: `hsl(${hue} 70% var(--stage-text-lightness))`,
                             }
                       }
                     >
@@ -314,14 +314,14 @@ export const SimprintProfileGrid: React.FC<SimprintProfileGridProps> = ({
             </div>
 
             {/* Card Footer: Action button & Quick tools */}
-            <div className="pt-3 border-t border-slate-800/80 flex items-center justify-between gap-2">
+            <div className="pt-3 border-t border-slate-200 dark:border-slate-800/80 flex items-center justify-between gap-2">
               <div className="flex items-center gap-1">
                 {onEdit && canEdit && (
                   <button
                     title={t("row.edit")}
                     disabled={busy}
                     onClick={() => onEdit(p)}
-                    className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+                    className="p-1.5 rounded-lg text-slate-500 hover:text-slate-900 hover:bg-slate-200/60 dark:text-slate-400 dark:hover:text-white dark:hover:bg-slate-800 transition-colors cursor-pointer !bg-transparent !border-0"
                   >
                     <Pencil size={13} />
                   </button>
@@ -331,7 +331,7 @@ export const SimprintProfileGrid: React.FC<SimprintProfileGridProps> = ({
                     title={t("ck.cookies")}
                     disabled={busy}
                     onClick={() => onCookies(p)}
-                    className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+                    className="p-1.5 rounded-lg text-slate-500 hover:text-slate-900 hover:bg-slate-200/60 dark:text-slate-400 dark:hover:text-white dark:hover:bg-slate-800 transition-colors cursor-pointer !bg-transparent !border-0"
                   >
                     <Cookie size={13} />
                   </button>
@@ -345,7 +345,7 @@ export const SimprintProfileGrid: React.FC<SimprintProfileGridProps> = ({
                     disabled={busy || starting || verdict.level === "block"}
                     title={verdict.level === "block" ? `${t("row.fixFirst")}: ${verdictText}` : undefined}
                     onClick={() => onLaunch(p)}
-                    className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl font-medium text-xs text-white bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 shadow-md shadow-cyan-500/20 disabled:opacity-40 transition-all cursor-pointer"
+                    className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl font-medium text-xs text-white bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 shadow-md shadow-cyan-500/20 disabled:opacity-40 transition-all cursor-pointer !border-0"
                   >
                     {starting ? (
                       <>
@@ -365,7 +365,7 @@ export const SimprintProfileGrid: React.FC<SimprintProfileGridProps> = ({
                   <button
                     disabled={busy}
                     onClick={() => onStop(p)}
-                    className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl font-medium text-xs text-rose-300 bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/30 transition-all cursor-pointer shadow-sm"
+                    className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl font-medium text-xs text-rose-600 dark:text-rose-300 bg-rose-50 dark:bg-rose-500/15 hover:bg-rose-100 dark:hover:bg-rose-500/25 border border-rose-200 dark:border-rose-500/30 transition-all cursor-pointer shadow-xs"
                   >
                     <Square size={12} fill="currentColor" />
                     <span>{t("row.close")}</span>
@@ -376,7 +376,7 @@ export const SimprintProfileGrid: React.FC<SimprintProfileGridProps> = ({
                   <button
                     disabled={busy || starting}
                     onClick={() => onLaunch(p, true)}
-                    className="px-2.5 py-1.5 rounded-xl font-medium text-xs text-amber-300 bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 cursor-pointer"
+                    className="px-2.5 py-1.5 rounded-xl font-medium text-xs text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-500/15 hover:bg-amber-100 dark:hover:bg-amber-500/25 border border-amber-200 dark:border-amber-500/30 cursor-pointer shadow-xs"
                   >
                     {t("row.takeOver")}
                   </button>

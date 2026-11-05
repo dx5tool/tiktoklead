@@ -92,7 +92,7 @@ export const SimprintBulkBar: React.FC<SimprintBulkBarProps> = ({
           <button
             disabled={busy}
             onClick={openMany}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-medium text-white bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 shadow-md shadow-cyan-500/20 disabled:opacity-50 transition-all cursor-pointer shrink-0"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-medium text-white bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 shadow-md shadow-cyan-500/20 disabled:opacity-50 transition-all cursor-pointer shrink-0 !border-0"
           >
             <Play size={13} fill="currentColor" />
             <span>{t("bar.openSelected", { n: openable.length })}</span>
@@ -104,7 +104,7 @@ export const SimprintBulkBar: React.FC<SimprintBulkBarProps> = ({
           <button
             disabled={busy}
             onClick={onCloseMany}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-medium text-rose-300 bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/30 disabled:opacity-50 transition-all cursor-pointer shrink-0"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-medium text-rose-300 !bg-rose-500/20 hover:!bg-rose-500/30 !border !border-rose-500/30 disabled:opacity-50 transition-all cursor-pointer shrink-0"
           >
             <Square size={13} />
             <span>{t("bar.closeSelected", { n: closable.length })}</span>
@@ -120,7 +120,7 @@ export const SimprintBulkBar: React.FC<SimprintBulkBarProps> = ({
               onChange={(e) => {
                 if (e.target.value) onMoveTo(e.target.value);
               }}
-              className="pl-7 pr-6 py-1.5 bg-slate-800/90 border border-slate-700 rounded-xl text-slate-200 text-xs focus:outline-none focus:border-cyan-500 cursor-pointer appearance-none"
+              className="pl-7 pr-6 py-1.5 !bg-slate-800 !border !border-slate-700 rounded-xl !text-slate-200 text-xs focus:outline-none focus:border-cyan-500 cursor-pointer appearance-none"
             >
               <option value="">{t("bar.moveTo")}</option>
               {filable.map((p) => (
@@ -143,7 +143,7 @@ export const SimprintBulkBar: React.FC<SimprintBulkBarProps> = ({
               onChange={(e) => {
                 if (e.target.value) onAssignProxy(e.target.value);
               }}
-              className="pl-7 pr-6 py-1.5 bg-slate-800/90 border border-slate-700 rounded-xl text-slate-200 text-xs focus:outline-none focus:border-cyan-500 cursor-pointer appearance-none"
+              className="pl-7 pr-6 py-1.5 !bg-slate-800 !border !border-slate-700 rounded-xl !text-slate-200 text-xs focus:outline-none focus:border-cyan-500 cursor-pointer appearance-none"
             >
               <option value="">{t("bar.proxyTo")}</option>
               <option value={"\u0000each"} disabled={freeProxies.length < chosen.length}>
@@ -165,7 +165,7 @@ export const SimprintBulkBar: React.FC<SimprintBulkBarProps> = ({
           <button
             disabled={busy}
             onClick={onWarm}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700/80 border border-slate-700 text-amber-300 transition-all cursor-pointer shrink-0"
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl !bg-slate-800 hover:!bg-slate-700/80 !border !border-slate-700 !text-amber-300 transition-all cursor-pointer shrink-0"
           >
             <Flame size={13} />
             <span>{t("warm.button", { n: chosen.length })}</span>
@@ -177,7 +177,7 @@ export const SimprintBulkBar: React.FC<SimprintBulkBarProps> = ({
           <button
             disabled={busy}
             onClick={onMirror}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700/80 border border-slate-700 text-cyan-300 transition-all cursor-pointer shrink-0"
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl !bg-slate-800 hover:!bg-slate-700/80 !border !border-slate-700 !text-cyan-300 transition-all cursor-pointer shrink-0"
           >
             <Layers size={13} />
             <span>{t("mir.start", { n: chosen.length })}</span>
@@ -189,7 +189,7 @@ export const SimprintBulkBar: React.FC<SimprintBulkBarProps> = ({
           <button
             disabled={busy}
             onClick={onShare}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700/80 border border-slate-700 text-slate-300 hover:text-white transition-all cursor-pointer shrink-0"
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl !bg-slate-800 hover:!bg-slate-700/80 !border !border-slate-700 !text-slate-300 hover:!text-white transition-all cursor-pointer shrink-0"
           >
             <Share2 size={13} />
             <span>{t("row.share")}</span>
@@ -201,7 +201,7 @@ export const SimprintBulkBar: React.FC<SimprintBulkBarProps> = ({
           <button
             disabled={busy}
             onClick={onUpload}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700/80 border border-slate-700 text-slate-300 hover:text-white transition-all cursor-pointer shrink-0"
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl !bg-slate-800 hover:!bg-slate-700/80 !border !border-slate-700 !text-slate-300 hover:!text-white transition-all cursor-pointer shrink-0"
           >
             <Upload size={13} />
             <span>{t("up.send")}</span>
@@ -214,7 +214,7 @@ export const SimprintBulkBar: React.FC<SimprintBulkBarProps> = ({
             <button
               disabled={busy}
               onClick={() => onClone(chosen[0])}
-              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700/80 border border-slate-700 text-slate-300 hover:text-white transition-all cursor-pointer shrink-0"
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl !bg-slate-800 hover:!bg-slate-700/80 !border !border-slate-700 !text-slate-300 hover:!text-white transition-all cursor-pointer shrink-0"
             >
               <Copy size={13} />
               <span>{t("bp.clone")}</span>
@@ -222,7 +222,7 @@ export const SimprintBulkBar: React.FC<SimprintBulkBarProps> = ({
             <button
               disabled={busy}
               onClick={() => onCookies(chosen[0])}
-              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700/80 border border-slate-700 text-slate-300 hover:text-white transition-all cursor-pointer shrink-0"
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl !bg-slate-800 hover:!bg-slate-700/80 !border !border-slate-700 !text-slate-300 hover:!text-white transition-all cursor-pointer shrink-0"
             >
               <Cookie size={13} />
               <span>{t("ck.cookies")}</span>
@@ -234,7 +234,7 @@ export const SimprintBulkBar: React.FC<SimprintBulkBarProps> = ({
         <button
           disabled={busy || closable.length > 0}
           onClick={onDeleteMany}
-          className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/25 text-rose-400 transition-all cursor-pointer shrink-0 disabled:opacity-40"
+          className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl !bg-rose-500/20 hover:!bg-rose-500/30 !border !border-rose-500/30 !text-rose-300 transition-all cursor-pointer shrink-0 disabled:opacity-40"
         >
           <Trash2 size={13} />
           <span>{t("bar.deleteSelected", { n: chosen.length })}</span>
@@ -244,7 +244,7 @@ export const SimprintBulkBar: React.FC<SimprintBulkBarProps> = ({
         <button
           onClick={onClear}
           title={t("bar.clearSelection")}
-          className="p-1.5 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-slate-400 hover:text-white transition-all cursor-pointer shrink-0"
+          className="p-1.5 rounded-xl !bg-slate-800/80 hover:!bg-slate-700 !text-slate-400 hover:!text-white transition-all cursor-pointer shrink-0 !border-0"
         >
           <X size={14} />
         </button>

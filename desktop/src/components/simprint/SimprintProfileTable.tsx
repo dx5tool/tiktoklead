@@ -1,4 +1,5 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   Play,
   Square,
@@ -28,6 +29,21 @@ function formatSize(bytes: number): string {
   return `${mb < 10 ? mb.toFixed(1) : Math.round(mb)} MB`;
 }
 
+/** 15:33:07, on the operator's own clock.
+ *
+ *  The column showed the date alone, so every profile opened today read as
+ *  "today" and the question the column exists to answer — how recently was
+ *  this one used — had no answer inside a day. Seconds rather than minutes
+ *  because two launches a minute apart are a different thing here: one is
+ *  the session still running, the other is a retry after it failed. */
+function clockOf(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return [d.getHours(), d.getMinutes(), d.getSeconds()]
+    .map((n) => String(n).padStart(2, "0"))
+    .join(":");
+}
+
 interface SimprintProfileTableProps {
   profiles: Profile[];
   me: Me | null;
@@ -44,6 +60,9 @@ interface SimprintProfileTableProps {
   onNetwork?: (p: Profile) => void;
   onClone?: (p: Profile) => void;
   onCookies?: (p: Profile) => void;
+  /** Save just the note beside a profile. Present only where the caller may
+   *  edit it; the pencil in that cell is hidden otherwise. */
+  onNotes?: (p: Profile, notes: string) => Promise<void>;
   personas?: Set<string> | null;
   sharing?: Map<string, number>;
   selected: Set<string>;
@@ -71,6 +90,7 @@ export const SimprintProfileTable: React.FC<SimprintProfileTableProps> = ({
   onNetwork,
   onClone,
   onCookies,
+  onNotes,
   personas,
   sharing,
   selected,
@@ -78,14 +98,106 @@ export const SimprintProfileTable: React.FC<SimprintProfileTableProps> = ({
   onToggleAll,
   showProject,
 }) => {
-  const { t } = useI18n();
+  const { t, say } = useI18n();
   const hasServer = !local;
 
   const tableRef = useRef<HTMLTableElement>(null);
   const [rowHeight, setRowHeight] = useState(60);
   const [range, setRange] = useState({ start: 0, end: WINDOW_FROM });
-  const [openDropdownId, setOpenDropdownId] = useState<string | null>(null);
+  // The row menu is drawn in a portal at fixed coordinates. Inside the table
+  // it was clipped by the two overflow boxes around it: opening it on the last
+  // visible row hid most of the menu behind the pane's edge, and every action
+  // added from here makes it taller (reported 04.11.2026). Fixed coordinates
+  // escape both, and the closing rules below — outside press, scroll, resize,
+  // Escape — keep it from outliving the row it belongs to.
+  const [menu, setMenu] = useState<{
+    id: string;
+    right: number;
+    top: number | null;
+    bottom: number | null;
+    maxHeight: number;
+  } | null>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  // The note beside a row, edited on its own. A row is where the note is read,
+  // so opening the whole profile to change a sentence was two screens for one
+  // field — and saving the whole row from there risks carrying stale fields
+  // back (see set_notes in the agent).
+  const [notesFor, setNotesFor] = useState<Profile | null>(null);
+  const [notesText, setNotesText] = useState("");
+  const [notesBusy, setNotesBusy] = useState(false);
+  const [notesError, setNotesError] = useState<string | null>(null);
   const windowed = profiles.length > WINDOW_FROM;
+
+  const toggleMenu = (id: string, trigger: HTMLElement) => {
+    if (menu?.id === id) {
+      setMenu(null);
+      return;
+    }
+    const r = trigger.getBoundingClientRect();
+    const viewW = document.documentElement.clientWidth;
+    const viewH = document.documentElement.clientHeight;
+    const below = viewH - r.bottom - 8;
+    const above = r.top - 8;
+    // Taller than today's four actions, so it flips up before it is cut off
+    // rather than after someone adds the fifth.
+    const want = 320;
+    const up = below < want && above > below;
+    setMenu({
+      id,
+      right: viewW - r.right,
+      top: up ? null : r.bottom + 4,
+      bottom: up ? viewH - r.top + 4 : null,
+      maxHeight: Math.max(120, up ? above : below),
+    });
+  };
+
+  useEffect(() => {
+    if (!menu) return;
+    const close = () => setMenu(null);
+    const away = (e: MouseEvent) => {
+      const target = e.target as Node;
+      if (menuRef.current?.contains(target)) return;
+      // A trigger press is the toggle's own business; closing here as well
+      // would reopen the menu on the click that follows.
+      if (target instanceof Element && target.closest("[data-menu-trigger]")) return;
+      setMenu(null);
+    };
+    const escape = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setMenu(null);
+    };
+    window.addEventListener("mousedown", away);
+    window.addEventListener("keydown", escape);
+    window.addEventListener("resize", close);
+    // The anchor is a rectangle measured once; any scroll makes it stale.
+    window.addEventListener("scroll", close, true);
+    return () => {
+      window.removeEventListener("mousedown", away);
+      window.removeEventListener("keydown", escape);
+      window.removeEventListener("resize", close);
+      window.removeEventListener("scroll", close, true);
+    };
+  }, [menu]);
+
+  const openNotes = (p: Profile) => {
+    setMenu(null);
+    setNotesFor(p);
+    setNotesText(p.notes ?? "");
+    setNotesError(null);
+  };
+
+  const saveNotes = async () => {
+    if (!notesFor || !onNotes) return;
+    setNotesBusy(true);
+    setNotesError(null);
+    try {
+      await onNotes(notesFor, notesText);
+      setNotesFor(null);
+    } catch (e) {
+      setNotesError(say(e));
+    } finally {
+      setNotesBusy(false);
+    }
+  };
 
   useEffect(() => {
     if (!windowed) return;
@@ -127,13 +239,20 @@ export const SimprintProfileTable: React.FC<SimprintProfileTableProps> = ({
   }
 
   const visible = windowed ? profiles.slice(range.start, range.end) : profiles;
-  const columns = 6 + (showProject ? 1 : 0);
+  const columns = 7 + (showProject ? 1 : 0);
+  // The row the open menu belongs to, resolved by id rather than kept as a
+  // copy: a poll can replace the row while the menu is open, and the actions
+  // must follow the freshest permissions and lock state.
+  const menuProfile = menu ? (profiles.find((p) => p.id === menu.id) ?? null) : null;
+  const menuIsOpen = menuProfile
+    ? isOpenHere(menuProfile, { local, userId: me?.user_id, machine: thisMachine })
+    : false;
 
   return (
-    <div className="w-full overflow-x-auto">
+    <div className="w-full overflow-x-auto bg-[var(--simprint-surface)] rounded-xl border border-[var(--simprint-border)] transition-colors duration-200">
       <table className="w-full text-left text-xs border-collapse select-none" ref={tableRef}>
         <thead>
-          <tr className="border-b border-slate-800/80 bg-slate-950/60 text-slate-400 font-semibold uppercase tracking-wider text-[11px]">
+          <tr className="border-b border-[var(--simprint-border)] bg-[var(--simprint-table-th)] text-slate-600 dark:text-slate-400 font-semibold uppercase tracking-wider text-[11px]">
             <th className="py-3 px-4 w-10">
               <input
                 type="checkbox"
@@ -143,7 +262,7 @@ export const SimprintProfileTable: React.FC<SimprintProfileTableProps> = ({
                   if (el) el.indeterminate = selected.size > 0 && selected.size < profiles.length;
                 }}
                 onChange={onToggleAll}
-                className="rounded border-slate-700 bg-slate-800 text-cyan-500 focus:ring-0 focus:ring-offset-0 cursor-pointer"
+                className="rounded border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-cyan-600 dark:text-cyan-500 focus:ring-0 focus:ring-offset-0 cursor-pointer"
               />
             </th>
             <th className="py-3 px-4">{t("col.name")}</th>
@@ -151,10 +270,11 @@ export const SimprintProfileTable: React.FC<SimprintProfileTableProps> = ({
             <th className="py-3 px-4">{t("col.proxy")}</th>
             <th className="py-3 px-4">{t("col.status")}</th>
             <th className="py-3 px-4">{t("col.lastOpened")}</th>
-            <th className="py-3 px-4 text-right pr-6">{t("ui.save") ? "Actions" : ""}</th>
+            <th className="py-3 px-4">{t("col.notes")}</th>
+            <th className="py-3 px-4 text-left">{t("ui.save") ? "Actions" : ""}</th>
           </tr>
         </thead>
-        <tbody className="divide-y divide-slate-800/50">
+        <tbody className="divide-y divide-[var(--simprint-border)]">
           {windowed && range.start > 0 && (
             <tr aria-hidden="true" style={{ height: range.start * rowHeight }}>
               <td colSpan={columns} className="p-0 border-0" />
@@ -164,7 +284,6 @@ export const SimprintProfileTable: React.FC<SimprintProfileTableProps> = ({
             const canLaunch = p.permissions.includes("launch");
             const canForce = p.permissions.includes("manage_access");
             const canReveal = p.permissions.includes("reveal_secrets");
-            const canDelete = p.permissions.includes("delete_profile");
             const canEdit = p.permissions.includes("edit_profile");
             const locked = p.lock !== null;
             const open = isOpenHere(p, { local, userId: me?.user_id, machine: thisMachine });
@@ -173,14 +292,15 @@ export const SimprintProfileTable: React.FC<SimprintProfileTableProps> = ({
             const verdict = assess(p, personas ?? null, sharedExitCount);
             const verdictText = verdict.notes.map((n) => t(n.key, n.vars)).join(" · ");
             const isPicked = selected.has(p.id);
-            const isMenuOpen = openDropdownId === p.id;
 
             return (
               <tr
                 key={p.id}
                 data-row
-                className={`transition-colors group hover:bg-slate-800/30 ${
-                  isPicked ? "bg-cyan-950/20" : ""
+                className={`transition-colors group border-b border-[var(--simprint-border)] ${
+                  isPicked
+                    ? "bg-cyan-50/80 dark:bg-cyan-950/20"
+                    : "bg-[var(--simprint-table-row)] hover:bg-[var(--simprint-table-row-hover)]"
                 }`}
               >
                 {/* Checkbox column */}
@@ -190,7 +310,7 @@ export const SimprintProfileTable: React.FC<SimprintProfileTableProps> = ({
                     aria-label={p.name}
                     checked={isPicked}
                     onChange={() => onToggle(p.id)}
-                    className="rounded border-slate-700 bg-slate-800 text-cyan-500 focus:ring-0 focus:ring-offset-0 cursor-pointer"
+                    className="rounded border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-cyan-600 dark:text-cyan-500 focus:ring-0 focus:ring-offset-0 cursor-pointer"
                   />
                 </td>
 
@@ -216,7 +336,7 @@ export const SimprintProfileTable: React.FC<SimprintProfileTableProps> = ({
                     })()}
 
                     {/* Profile Name */}
-                    <span className="font-semibold text-slate-100 group-hover:text-cyan-300 transition-colors">
+                    <span className="font-semibold text-slate-900 dark:text-slate-100 group-hover:text-cyan-600 dark:group-hover:text-cyan-300 transition-colors">
                       {p.name}
                     </span>
 
@@ -255,7 +375,7 @@ export const SimprintProfileTable: React.FC<SimprintProfileTableProps> = ({
                       {p.tags.map((tg) => (
                         <span
                           key={tg}
-                          className="px-1.5 py-0.2 rounded text-[10px] font-medium bg-cyan-950/40 text-cyan-400/90 border border-cyan-800/40"
+                          className="px-1.5 py-0.2 rounded text-[10px] font-medium bg-cyan-50 dark:bg-cyan-950/40 text-cyan-700 dark:text-cyan-400/90 border border-cyan-200 dark:border-cyan-800/40"
                         >
                           #{tg}
                         </span>
@@ -266,35 +386,35 @@ export const SimprintProfileTable: React.FC<SimprintProfileTableProps> = ({
 
                 {/* Project column */}
                 {showProject && (
-                  <td className="py-3 px-4 text-slate-400">
-                    {p.project_name ?? <span className="text-slate-600 italic">{t("col.noProject")}</span>}
+                  <td className="py-3 px-4 text-slate-500 dark:text-slate-400">
+                    {p.project_name ?? <span className="text-slate-400 dark:text-slate-600 italic">{t("col.noProject")}</span>}
                   </td>
                 )}
 
                 {/* Proxy column */}
                 <td
-                  className={`py-3 px-4 ${p.proxy && onNetwork ? "cursor-pointer hover:text-cyan-300" : ""}`}
+                  className={`py-3 px-4 ${p.proxy && onNetwork ? "cursor-pointer hover:text-cyan-600 dark:hover:text-cyan-300" : ""}`}
                   title={p.proxy && onNetwork ? t("net.current") : undefined}
                   onClick={() => p.proxy && onNetwork?.(p)}
                 >
                   {p.proxy ? (
                     <div>
-                      <div className="font-mono text-slate-200 text-xs flex items-center gap-1.5">
-                        <span className="h-1.5 w-1.5 rounded-full bg-cyan-400" />
+                      <div className="font-mono text-slate-800 dark:text-slate-200 text-xs flex items-center gap-1.5">
+                        <span className="h-1.5 w-1.5 rounded-full bg-cyan-500" />
                         <span>{p.proxy.display}</span>
+                        {!canReveal && <span className="text-[10px] text-slate-400 dark:text-slate-500 font-sans">({t("row.masked")})</span>}
                       </div>
                       <div className="text-[11px] text-slate-500 mt-0.5 flex items-center gap-1">
                         <span>{p.proxy.country ?? t("row.proxyUnchecked")}</span>
-                        {!canReveal && <span className="text-slate-600">· {t("row.masked")}</span>}
                         {sharedExitCount >= 2 && (
-                          <span className={sharedExitCount >= 3 ? "text-amber-400" : "text-slate-400"}>
+                          <span className={sharedExitCount >= 3 ? "text-amber-600 dark:text-amber-400 font-medium" : "text-slate-500 dark:text-slate-400"}>
                             · {t("row.sharedExit", { n: sharedExitCount })}
                           </span>
                         )}
                       </div>
                     </div>
                   ) : (
-                    <span className={p.allow_no_proxy ? "text-amber-400" : "text-rose-400"}>
+                    <span className={p.allow_no_proxy ? "text-amber-600 dark:text-amber-400" : "text-rose-600 dark:text-rose-400"}>
                       {p.allow_no_proxy ? t("row.noProxyAllowed") : t("row.noProxy")}
                     </span>
                   )}
@@ -330,11 +450,11 @@ export const SimprintProfileTable: React.FC<SimprintProfileTableProps> = ({
                           className="px-2 py-0.5 rounded text-[10px] font-medium border"
                           style={
                             hue === null
-                              ? { backgroundColor: "#1e293b", borderColor: "#334155", color: "#94a3b8" }
+                              ? { backgroundColor: "var(--stage-null-bg)", borderColor: "var(--stage-null-border)", color: "var(--stage-null-text)" }
                               : {
-                                  background: `hsl(${hue} 45% 18%)`,
-                                  borderColor: `hsl(${hue} 60% 30%)`,
-                                  color: `hsl(${hue} 70% 85%)`,
+                                  background: `hsl(${hue} var(--stage-sat) var(--stage-bg-lightness))`,
+                                  borderColor: `hsl(${hue} 60% var(--stage-border-lightness))`,
+                                  color: `hsl(${hue} 70% var(--stage-text-lightness))`,
                                 }
                           }
                         >
@@ -348,18 +468,50 @@ export const SimprintProfileTable: React.FC<SimprintProfileTableProps> = ({
                 </td>
 
                 {/* Last Opened */}
-                <td className="py-3 px-4 text-slate-400 text-[11px]">
-                  <div>{p.last_opened_at ? new Date(p.last_opened_at).toLocaleDateString() : t("row.never")}</div>
+                <td className="py-3 px-4 text-slate-500 dark:text-slate-400 text-[11px]">
+                  {p.last_opened_at ? (
+                    <>
+                      <div>{new Date(p.last_opened_at).toLocaleDateString()}</div>
+                      <div className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5 font-mono">{clockOf(p.last_opened_at)}</div>
+                    </>
+                  ) : (
+                    <div>{t("row.never")}</div>
+                  )}
                   {p.origin === "team" && p.bundle_bytes != null && (
-                    <div className="text-[10px] text-slate-500 mt-0.5" title={t("row.onServerWhat")}>
+                    <div className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5" title={t("row.onServerWhat")}>
                       {t("row.onServer", { size: formatSize(p.bundle_bytes) })}
                     </div>
                   )}
                 </td>
 
+                {/* Notes — the operator's own note on the account, beside the
+                    row it is about rather than only inside the editor. The
+                    pencil appears on hover and edits just this field. */}
+                <td className="py-3 px-4 text-slate-600 dark:text-slate-400 text-[11px]">
+                  <div className="group/notes inline-flex max-w-[220px] items-center gap-1 align-top">
+                    <span
+                      className={p.notes?.trim() ? "min-w-0 truncate text-slate-700 dark:text-slate-300" : "text-slate-400 dark:text-slate-600"}
+                      title={p.notes || undefined}
+                    >
+                      {p.notes?.trim() ? p.notes : "—"}
+                    </span>
+                    {onNotes && canEdit && (
+                      <button
+                        type="button"
+                        title={t("notes.editTitle")}
+                        aria-label={t("notes.editTitle")}
+                        onClick={() => openNotes(p)}
+                        className="shrink-0 rounded p-0.5 text-slate-400 hover:text-slate-700 hover:bg-slate-200/60 dark:hover:bg-slate-800 dark:hover:text-white opacity-0 transition-opacity focus:opacity-100 group-hover/notes:opacity-100 !bg-transparent !border-0"
+                      >
+                        <Pencil size={12} />
+                      </button>
+                    )}
+                  </div>
+                </td>
+
                 {/* Action Buttons */}
-                <td className="py-3 px-4 text-right pr-6">
-                  <div className="flex items-center justify-end gap-1.5 relative">
+                <td className="py-3 px-4">
+                  <div className="flex items-center justify-start gap-1.5">
                     {/* Launch button */}
                     {!open && !locked && canLaunch && (
                       <button
@@ -415,7 +567,7 @@ export const SimprintProfileTable: React.FC<SimprintProfileTableProps> = ({
                         title={t("row.edit")}
                         disabled={busy}
                         onClick={() => onEdit(p)}
-                        className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+                        className="p-1.5 rounded-lg text-slate-500 hover:text-slate-900 hover:bg-slate-200/60 dark:text-slate-400 dark:hover:text-white dark:hover:bg-slate-800 transition-colors cursor-pointer !bg-transparent !border-0 !p-1.5"
                       >
                         <Pencil size={13} />
                       </button>
@@ -427,75 +579,23 @@ export const SimprintProfileTable: React.FC<SimprintProfileTableProps> = ({
                         title={t("ck.cookies")}
                         disabled={busy}
                         onClick={() => onCookies(p)}
-                        className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+                        className="p-1.5 rounded-lg text-slate-500 hover:text-slate-900 hover:bg-slate-200/60 dark:text-slate-400 dark:hover:text-white dark:hover:bg-slate-800 transition-colors cursor-pointer !bg-transparent !border-0 !p-1.5"
                       >
                         <Cookie size={13} />
                       </button>
                     )}
 
-                    {/* More actions dropdown */}
+                    {/* More actions */}
                     <button
                       title="More options"
-                      onClick={() => setOpenDropdownId(isMenuOpen ? null : p.id)}
-                      className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+                      data-menu-trigger
+                      aria-haspopup="menu"
+                      aria-expanded={menu?.id === p.id}
+                      onClick={(e) => toggleMenu(p.id, e.currentTarget)}
+                      className="p-1.5 rounded-lg text-slate-500 hover:text-slate-900 hover:bg-slate-200/60 dark:text-slate-400 dark:hover:text-white dark:hover:bg-slate-800 transition-colors cursor-pointer !bg-transparent !border-0 !p-1.5"
                     >
                       <MoreHorizontal size={14} />
                     </button>
-
-                    {/* Dropdown Menu */}
-                    {isMenuOpen && (
-                      <div className="absolute right-0 top-10 w-40 py-1.5 bg-slate-900 border border-slate-700/80 rounded-xl shadow-xl z-50 text-xs text-left">
-                        {onShare && (p.origin === "local" || p.permissions.includes("manage_access")) && (
-                          <button
-                            onClick={() => {
-                              setOpenDropdownId(null);
-                              onShare(p);
-                            }}
-                            className="w-full flex items-center gap-2 px-3 py-1.5 text-slate-300 hover:bg-slate-800 hover:text-white cursor-pointer"
-                          >
-                            <Share2 size={13} />
-                            <span>{t("row.shareShort")}</span>
-                          </button>
-                        )}
-                        {onExtensions && canEdit && (
-                          <button
-                            onClick={() => {
-                              setOpenDropdownId(null);
-                              onExtensions(p);
-                            }}
-                            className="w-full flex items-center gap-2 px-3 py-1.5 text-slate-300 hover:bg-slate-800 hover:text-white cursor-pointer"
-                          >
-                            <Puzzle size={13} />
-                            <span>{t("ext.extensions")}</span>
-                          </button>
-                        )}
-                        {onClone && canEdit && (
-                          <button
-                            onClick={() => {
-                              setOpenDropdownId(null);
-                              onClone(p);
-                            }}
-                            className="w-full flex items-center gap-2 px-3 py-1.5 text-slate-300 hover:bg-slate-800 hover:text-white cursor-pointer"
-                          >
-                            <Copy size={13} />
-                            <span>{t("bp.clone")}</span>
-                          </button>
-                        )}
-                        {onDelete && canDelete && (
-                          <button
-                            disabled={busy || open}
-                            onClick={() => {
-                              setOpenDropdownId(null);
-                              onDelete(p);
-                            }}
-                            className="w-full flex items-center gap-2 px-3 py-1.5 text-rose-400 hover:bg-rose-500/10 cursor-pointer disabled:opacity-40"
-                          >
-                            <Trash2 size={13} />
-                            <span>{t("row.delete")}</span>
-                          </button>
-                        )}
-                      </div>
-                    )}
                   </div>
                 </td>
               </tr>
@@ -508,6 +608,125 @@ export const SimprintProfileTable: React.FC<SimprintProfileTableProps> = ({
           )}
         </tbody>
       </table>
+      {menu && menuProfile &&
+        createPortal(
+          <div
+            ref={menuRef}
+            role="menu"
+            className="fixed z-50 w-max min-w-48 max-w-[20rem] py-1.5 bg-white border border-slate-200 text-slate-800 shadow-xl dark:bg-slate-900 dark:border-slate-700/80 dark:text-slate-300 dark:shadow-2xl rounded-xl text-xs text-left overflow-y-auto"
+            style={{
+              right: menu.right,
+              maxHeight: menu.maxHeight,
+              ...(menu.top !== null ? { top: menu.top } : { bottom: menu.bottom ?? undefined }),
+            }}
+          >
+            {onShare && (menuProfile.origin === "local" || menuProfile.permissions.includes("manage_access")) && (
+              <button
+                role="menuitem"
+                onClick={() => {
+                  setMenu(null);
+                  onShare(menuProfile);
+                }}
+                className="w-full flex items-center gap-2 px-3 py-1.5 text-slate-700 hover:text-slate-900 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white cursor-pointer !bg-transparent !border-0"
+              >
+                <Share2 size={13} />
+                <span>{t("row.shareShort")}</span>
+              </button>
+            )}
+            {onExtensions && menuProfile.permissions.includes("edit_profile") && (
+              <button
+                role="menuitem"
+                onClick={() => {
+                  setMenu(null);
+                  onExtensions(menuProfile);
+                }}
+                className="w-full flex items-center gap-2 px-3 py-1.5 text-slate-700 hover:text-slate-900 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white cursor-pointer !bg-transparent !border-0"
+              >
+                <Puzzle size={13} />
+                <span>{t("ext.extensions")}</span>
+              </button>
+            )}
+            {onClone && menuProfile.permissions.includes("edit_profile") && (
+              <button
+                role="menuitem"
+                onClick={() => {
+                  setMenu(null);
+                  onClone(menuProfile);
+                }}
+                className="w-full flex items-center gap-2 px-3 py-1.5 text-slate-700 hover:text-slate-900 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white cursor-pointer !bg-transparent !border-0"
+              >
+                <Copy size={13} />
+                <span>{t("bp.clone")}</span>
+              </button>
+            )}
+            {onDelete && menuProfile.permissions.includes("delete_profile") && (
+              <button
+                role="menuitem"
+                disabled={busy || menuIsOpen}
+                onClick={() => {
+                  setMenu(null);
+                  onDelete(menuProfile);
+                }}
+                className="w-full flex items-center gap-2 px-3 py-1.5 text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-500/10 cursor-pointer disabled:opacity-40 !bg-transparent !border-0"
+              >
+                <Trash2 size={13} />
+                <span>{t("row.delete")}</span>
+              </button>
+            )}
+          </div>,
+          document.body,
+        )}
+      {notesFor &&
+        createPortal(
+          <div
+            className="scrim"
+            onMouseDown={(e) => {
+              if (e.target === e.currentTarget && !notesBusy) setNotesFor(null);
+            }}
+          >
+            <div
+              className="modal"
+              style={{ width: 560, height: "auto", maxHeight: "88vh" }}
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="notes-title"
+            >
+              <div className="modalHead">
+                <h2 id="notes-title">{t("notes.editTitle")}</h2>
+                <span className="muted small">{notesFor.name}</span>
+              </div>
+              <div className="form" style={{ paddingTop: "var(--s-4)" }}>
+                <div className="field">
+                  <label htmlFor="notes-text">{t("pd.notes")}</label>
+                  <div>
+                    <textarea
+                      id="notes-text"
+                      rows={10}
+                      autoFocus
+                      value={notesText}
+                      onChange={(e) => setNotesText(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Escape" && !notesBusy) setNotesFor(null);
+                      }}
+                      style={{ width: "100%" }}
+                    />
+                    {notesError && <p className="error">{notesError}</p>}
+                  </div>
+                </div>
+              </div>
+              <div className="modalFoot">
+                <div className="spacer" />
+                <button className="ghost" disabled={notesBusy} onClick={() => setNotesFor(null)}>
+                  {t("ui.cancel")}
+                </button>
+                <button className="primary" disabled={notesBusy} onClick={saveNotes}>
+                  {notesBusy ? t("ui.saving") : t("ui.save")}
+                </button>
+              </div>
+            </div>
+          </div>,
+          document.body,
+        )}
     </div>
   );
 };

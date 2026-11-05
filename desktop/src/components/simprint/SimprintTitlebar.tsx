@@ -184,7 +184,7 @@ export const SimprintTitlebar: React.FC<SimprintTitlebarProps> = ({
       data-tauri-drag-region
       onMouseDown={handleMouseDown}
       onDoubleClick={handleDoubleClick}
-      className="h-10 w-full min-h-[40px] flex items-center justify-between pl-3 pr-0 bg-[#0a0e1a]/95 border-b border-slate-800/80 select-none z-50 text-xs backdrop-blur-2xl shrink-0"
+      className="h-10 w-full min-h-[40px] flex items-center justify-between pl-3 pr-0 bg-[var(--simprint-header-bg)] border-b border-[var(--simprint-border)] select-none z-50 text-xs backdrop-blur-2xl shrink-0 transition-colors duration-200"
     >
       {/* Left side: Sidebar Toggle + Brand Logo + Breadcrumbs */}
       <div className="flex items-center gap-2">
@@ -192,7 +192,7 @@ export const SimprintTitlebar: React.FC<SimprintTitlebarProps> = ({
         <button
           onClick={onToggleSidebar}
           title={sidebarCollapsed ? "Expand Sidebar" : "Collapse Sidebar"}
-          className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800/80 transition-colors cursor-pointer"
+          className="p-1.5 rounded-lg text-slate-500 hover:text-slate-900 hover:bg-slate-200/60 dark:text-slate-400 dark:hover:text-white dark:hover:bg-slate-800/80 transition-colors cursor-pointer !bg-transparent !border-0"
         >
           {sidebarCollapsed ? <PanelLeft size={16} /> : <PanelLeftClose size={16} />}
         </button>
@@ -208,43 +208,43 @@ export const SimprintTitlebar: React.FC<SimprintTitlebarProps> = ({
           <div className="w-5 h-5 rounded-md bg-gradient-to-tr from-cyan-500 to-blue-600 flex items-center justify-center text-white shadow-sm shadow-cyan-500/30">
             <ShieldCheck size={13} className="text-white" />
           </div>
-          <span className="font-extrabold text-sm tracking-wider bg-gradient-to-r from-white to-slate-200 bg-clip-text text-transparent">
+          <span className="font-extrabold text-sm tracking-wider text-slate-900 dark:bg-gradient-to-r dark:from-white dark:to-slate-200 dark:bg-clip-text dark:text-transparent">
             Fury
           </span>
         </div>
 
-        <div className="h-4 w-px bg-slate-800 mx-1" />
+        <div className="h-4 w-px bg-slate-200 dark:bg-slate-800 mx-1" />
 
         {/* Breadcrumb Navigation */}
-        <nav className="flex items-center gap-1.5 text-slate-400" aria-label="Breadcrumb">
+        <nav className="flex items-center gap-1.5 text-slate-500 dark:text-slate-400" aria-label="Breadcrumb">
           <button
             onClick={() => {
               onSelectProject(null);
               onView("profiles");
             }}
             title="Home / All Profiles"
-            className="p-1 rounded hover:text-white hover:bg-slate-800/60 transition-colors cursor-pointer"
+            className="p-1 rounded text-slate-500 hover:text-slate-900 hover:bg-slate-200/60 dark:text-slate-400 dark:hover:text-white dark:hover:bg-slate-800/60 transition-colors cursor-pointer !bg-transparent !border-0"
           >
             <Home size={13} />
           </button>
 
-          <ChevronRight size={12} className="text-slate-600 shrink-0" />
+          <ChevronRight size={12} className="text-slate-400 dark:text-slate-600 shrink-0" />
 
           {/* Current Section */}
           <button
             onClick={() => onView(view)}
-            className="flex items-center gap-1.5 px-1.5 py-0.5 rounded text-slate-300 hover:text-white hover:bg-slate-800/60 transition-colors font-medium cursor-pointer"
+            className="flex items-center gap-1.5 px-1.5 py-0.5 rounded text-slate-700 hover:text-slate-900 hover:bg-slate-200/60 dark:text-slate-300 dark:hover:text-white dark:hover:bg-slate-800/60 transition-colors font-medium cursor-pointer !bg-transparent !border-0"
           >
-            <CurrentIcon size={13} className="text-cyan-400" />
+            <CurrentIcon size={13} className="text-cyan-600 dark:text-cyan-400" />
             <span>{sectionTitle}</span>
           </button>
 
           {/* Active Folder / Project if chosen */}
           {activeProject && view === "profiles" && (
             <>
-              <ChevronRight size={12} className="text-slate-600 shrink-0" />
-              <div className="flex items-center gap-1 px-1.5 py-0.5 rounded text-cyan-300 font-semibold bg-cyan-500/10 border border-cyan-500/30">
-                <Folder size={12} className="text-cyan-400" />
+              <ChevronRight size={12} className="text-slate-400 dark:text-slate-600 shrink-0" />
+              <div className="flex items-center gap-1 px-1.5 py-0.5 rounded text-cyan-700 dark:text-cyan-300 font-semibold bg-cyan-50 dark:bg-cyan-500/10 border border-cyan-200 dark:border-cyan-500/30">
+                <Folder size={12} className="text-cyan-600 dark:text-cyan-400" />
                 <span className="max-w-[140px] truncate">{activeProject.name}</span>
               </div>
             </>
@@ -262,7 +262,7 @@ export const SimprintTitlebar: React.FC<SimprintTitlebarProps> = ({
           <button
             onClick={onDownloadCore}
             title={coreDownloadRunning ? "Downloading core..." : "Update Available"}
-            className="p-1.5 rounded-lg text-cyan-400 hover:bg-cyan-500/15 transition-colors cursor-pointer"
+            className="p-1.5 rounded-lg text-cyan-600 dark:text-cyan-400 hover:bg-cyan-500/15 transition-colors cursor-pointer !bg-transparent !border-0"
           >
             <Download size={14} className={coreDownloadRunning ? "animate-bounce" : ""} />
           </button>
@@ -271,12 +271,12 @@ export const SimprintTitlebar: React.FC<SimprintTitlebarProps> = ({
         {/* Agent status / Notification Bell */}
         <div
           title={shell.agent_ready ? "Agent Online" : "Agent Disconnected"}
-          className="relative p-1.5 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-800/60 transition-colors cursor-pointer"
+          className="relative p-1.5 rounded-lg text-slate-500 hover:text-slate-900 hover:bg-slate-200/60 dark:text-slate-400 dark:hover:text-slate-200 dark:hover:bg-slate-800/60 transition-colors cursor-pointer !bg-transparent !border-0"
         >
           <Bell size={14} />
           <span
             className={`absolute top-1 right-1 h-2 w-2 rounded-full ${
-              shell.agent_ready ? "bg-emerald-400" : "bg-rose-500"
+              shell.agent_ready ? "bg-emerald-500" : "bg-rose-500"
             }`}
           />
         </div>
@@ -288,7 +288,7 @@ export const SimprintTitlebar: React.FC<SimprintTitlebarProps> = ({
               setUserMenuOpen(!userMenuOpen);
               setActiveSubmenu(null);
             }}
-            className="flex items-center gap-2 px-2.5 py-1 rounded-xl bg-slate-900/80 hover:bg-slate-800 border border-slate-800 text-slate-200 transition-colors cursor-pointer"
+            className="flex items-center gap-2 px-2.5 py-1 rounded-xl bg-slate-100 hover:bg-slate-200/80 border border-slate-200 text-slate-800 dark:bg-slate-900/80 dark:hover:bg-slate-800 dark:border-slate-800 dark:text-slate-200 transition-colors cursor-pointer"
           >
             <div className="w-4 h-4 rounded-full bg-gradient-to-tr from-cyan-500 to-blue-600 flex items-center justify-center text-[10px] font-bold text-white shadow-sm">
               😊
@@ -296,15 +296,15 @@ export const SimprintTitlebar: React.FC<SimprintTitlebarProps> = ({
             <span className="max-w-[120px] truncate text-xs font-medium">
               {displayName}
             </span>
-            <ChevronDown size={12} className="text-slate-500" />
+            <ChevronDown size={12} className="text-slate-400 dark:text-slate-500" />
           </button>
 
-          {/* User Menu Popup (Style matching Simprint Image #1) */}
+          {/* User Menu Popup */}
           {userMenuOpen && (
-            <div className="absolute right-0 top-10 w-60 py-1.5 bg-[#171b26]/98 border border-slate-800 rounded-2xl shadow-2xl backdrop-blur-2xl z-50 text-xs">
+            <div className="absolute right-0 top-10 w-60 py-1.5 bg-white border border-slate-200 text-slate-800 shadow-xl dark:bg-[#171b26]/98 dark:border-slate-800 dark:text-slate-200 dark:shadow-2xl rounded-2xl backdrop-blur-2xl z-50 text-xs">
               {/* Menu Header */}
-              <div className="px-4 py-2.5 border-b border-slate-800/80">
-                <div className="font-semibold text-slate-100 truncate">{displayName}</div>
+              <div className="px-4 py-2.5 border-b border-slate-100 dark:border-slate-800/80">
+                <div className="font-semibold text-slate-900 dark:text-slate-100 truncate">{displayName}</div>
                 <div className="text-base mt-0.5 select-none">😊</div>
               </div>
 
@@ -316,7 +316,7 @@ export const SimprintTitlebar: React.FC<SimprintTitlebarProps> = ({
                     setUserMenuOpen(false);
                     onSettings();
                   }}
-                  className="w-full flex items-center gap-3 px-4 py-2 text-slate-300 hover:text-white hover:bg-slate-800/70 transition-colors cursor-pointer text-left"
+                  className="w-full flex items-center gap-3 px-4 py-2 text-slate-700 hover:text-slate-900 hover:bg-slate-100 dark:text-slate-300 dark:hover:text-white dark:hover:bg-slate-800/70 transition-colors cursor-pointer text-left !bg-transparent !border-0"
                 >
                   <User size={15} className="text-slate-400" />
                   <span>Account & Security</span>
@@ -328,7 +328,7 @@ export const SimprintTitlebar: React.FC<SimprintTitlebarProps> = ({
                     setUserMenuOpen(false);
                     onSettings();
                   }}
-                  className="w-full flex items-center gap-3 px-4 py-2 text-slate-300 hover:text-white hover:bg-slate-800/70 transition-colors cursor-pointer text-left"
+                  className="w-full flex items-center gap-3 px-4 py-2 text-slate-700 hover:text-slate-900 hover:bg-slate-100 dark:text-slate-300 dark:hover:text-white dark:hover:bg-slate-800/70 transition-colors cursor-pointer text-left !bg-transparent !border-0"
                 >
                   <Settings size={15} className="text-slate-400" />
                   <span>General</span>
@@ -340,7 +340,7 @@ export const SimprintTitlebar: React.FC<SimprintTitlebarProps> = ({
                     setUserMenuOpen(false);
                     onView("assistants");
                   }}
-                  className="w-full flex items-center gap-3 px-4 py-2 text-slate-300 hover:text-white hover:bg-slate-800/70 transition-colors cursor-pointer text-left"
+                  className="w-full flex items-center gap-3 px-4 py-2 text-slate-700 hover:text-slate-900 hover:bg-slate-100 dark:text-slate-300 dark:hover:text-white dark:hover:bg-slate-800/70 transition-colors cursor-pointer text-left !bg-transparent !border-0"
                 >
                   <Fingerprint size={15} className="text-slate-400" />
                   <span>Browser & Automation</span>
@@ -352,7 +352,7 @@ export const SimprintTitlebar: React.FC<SimprintTitlebarProps> = ({
                     setUserMenuOpen(false);
                     onView("proxies");
                   }}
-                  className="w-full flex items-center gap-3 px-4 py-2 text-slate-300 hover:text-white hover:bg-slate-800/70 transition-colors cursor-pointer text-left"
+                  className="w-full flex items-center gap-3 px-4 py-2 text-slate-700 hover:text-slate-900 hover:bg-slate-100 dark:text-slate-300 dark:hover:text-white dark:hover:bg-slate-800/70 transition-colors cursor-pointer text-left !bg-transparent !border-0"
                 >
                   <Wifi size={15} className="text-slate-400" />
                   <span>Network & Sync</span>
@@ -364,7 +364,7 @@ export const SimprintTitlebar: React.FC<SimprintTitlebarProps> = ({
                     setUserMenuOpen(false);
                     onDownloadCore?.();
                   }}
-                  className="w-full flex items-center gap-3 px-4 py-2 text-slate-300 hover:text-white hover:bg-slate-800/70 transition-colors cursor-pointer text-left"
+                  className="w-full flex items-center gap-3 px-4 py-2 text-slate-700 hover:text-slate-900 hover:bg-slate-100 dark:text-slate-300 dark:hover:text-white dark:hover:bg-slate-800/70 transition-colors cursor-pointer text-left !bg-transparent !border-0"
                 >
                   <HardDrive size={15} className="text-slate-400" />
                   <span>Storage & Update</span>
@@ -377,7 +377,7 @@ export const SimprintTitlebar: React.FC<SimprintTitlebarProps> = ({
                     onSelectProject(null);
                     onView("profiles");
                   }}
-                  className="w-full flex items-center gap-3 px-4 py-2 text-slate-300 hover:text-white hover:bg-slate-800/70 transition-colors cursor-pointer text-left"
+                  className="w-full flex items-center gap-3 px-4 py-2 text-slate-700 hover:text-slate-900 hover:bg-slate-100 dark:text-slate-300 dark:hover:text-white dark:hover:bg-slate-800/70 transition-colors cursor-pointer text-left !bg-transparent !border-0"
                 >
                   <Building size={15} className="text-slate-400" />
                   <span>Workspace</span>
@@ -389,13 +389,13 @@ export const SimprintTitlebar: React.FC<SimprintTitlebarProps> = ({
                     setUserMenuOpen(false);
                     onView("users");
                   }}
-                  className="w-full flex items-center justify-between px-4 py-2 text-slate-300 hover:text-white hover:bg-slate-800/70 transition-colors cursor-pointer text-left"
+                  className="w-full flex items-center justify-between px-4 py-2 text-slate-700 hover:text-slate-900 hover:bg-slate-100 dark:text-slate-300 dark:hover:text-white dark:hover:bg-slate-800/70 transition-colors cursor-pointer text-left !bg-transparent !border-0"
                 >
                   <div className="flex items-center gap-3">
                     <Users size={15} className="text-slate-400" />
                     <span>Team</span>
                   </div>
-                  <ChevronRight size={13} className="text-slate-500" />
+                  <ChevronRight size={13} className="text-slate-400 dark:text-slate-500" />
                 </button>
 
                 {/* 8. Language Submenu */}
@@ -405,29 +405,29 @@ export const SimprintTitlebar: React.FC<SimprintTitlebarProps> = ({
                 >
                   <button
                     onClick={() => setActiveSubmenu(activeSubmenu === "language" ? null : "language")}
-                    className={`w-full flex items-center justify-between px-4 py-2 transition-colors cursor-pointer text-left ${
+                    className={`w-full flex items-center justify-between px-4 py-2 transition-colors cursor-pointer text-left !bg-transparent !border-0 ${
                       activeSubmenu === "language"
-                        ? "bg-slate-800 text-cyan-400 font-medium"
-                        : "text-slate-300 hover:text-white hover:bg-slate-800/70"
+                        ? "bg-slate-100 dark:bg-slate-800 text-cyan-600 dark:text-cyan-400 font-medium"
+                        : "text-slate-700 hover:text-slate-900 hover:bg-slate-100 dark:text-slate-300 dark:hover:text-white dark:hover:bg-slate-800/70"
                     }`}
                   >
                     <div className="flex items-center gap-3">
-                      <Languages size={15} className={activeSubmenu === "language" ? "text-cyan-400" : "text-slate-400"} />
+                      <Languages size={15} className={activeSubmenu === "language" ? "text-cyan-600 dark:text-cyan-400" : "text-slate-400"} />
                       <span>Language</span>
                     </div>
-                    <ChevronRight size={13} className="text-slate-500" />
+                    <ChevronRight size={13} className="text-slate-400 dark:text-slate-500" />
                   </button>
 
                   {activeSubmenu === "language" && (
-                    <div className="absolute right-full top-0 mr-1.5 w-36 py-1.5 bg-[#171b26]/98 border border-slate-800 rounded-xl shadow-2xl backdrop-blur-2xl z-50">
+                    <div className="absolute right-full top-0 mr-1.5 w-36 py-1.5 bg-white border border-slate-200 text-slate-800 shadow-xl dark:bg-[#171b26]/98 dark:border-slate-800 dark:text-slate-200 dark:shadow-2xl rounded-xl backdrop-blur-2xl z-50">
                       <button
                         onClick={() => {
                           setLanguage("en");
                           setUserMenuOpen(false);
                           setActiveSubmenu(null);
                         }}
-                        className={`w-full flex items-center justify-between px-3.5 py-2 text-xs text-left hover:bg-slate-800 cursor-pointer ${
-                          language === "en" ? "text-cyan-400 font-semibold" : "text-slate-300"
+                        className={`w-full flex items-center justify-between px-3.5 py-2 text-xs text-left hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer !bg-transparent !border-0 ${
+                          language === "en" ? "text-cyan-600 dark:text-cyan-400 font-semibold" : "text-slate-700 dark:text-slate-300"
                         }`}
                       >
                         <span>English</span>
@@ -439,8 +439,8 @@ export const SimprintTitlebar: React.FC<SimprintTitlebarProps> = ({
                           setUserMenuOpen(false);
                           setActiveSubmenu(null);
                         }}
-                        className={`w-full flex items-center justify-between px-3.5 py-2 text-xs text-left hover:bg-slate-800 cursor-pointer ${
-                          language === "ru" ? "text-cyan-400 font-semibold" : "text-slate-300"
+                        className={`w-full flex items-center justify-between px-3.5 py-2 text-xs text-left hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer !bg-transparent !border-0 ${
+                          language === "ru" ? "text-cyan-600 dark:text-cyan-400 font-semibold" : "text-slate-700 dark:text-slate-300"
                         }`}
                       >
                         <span>Русский</span>
@@ -452,8 +452,8 @@ export const SimprintTitlebar: React.FC<SimprintTitlebarProps> = ({
                           setUserMenuOpen(false);
                           setActiveSubmenu(null);
                         }}
-                        className={`w-full flex items-center justify-between px-3.5 py-2 text-xs text-left hover:bg-slate-800 cursor-pointer ${
-                          language === "system" ? "text-cyan-400 font-semibold" : "text-slate-300"
+                        className={`w-full flex items-center justify-between px-3.5 py-2 text-xs text-left hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer !bg-transparent !border-0 ${
+                          language === "system" ? "text-cyan-600 dark:text-cyan-400 font-semibold" : "text-slate-700 dark:text-slate-300"
                         }`}
                       >
                         <span>System</span>
@@ -463,36 +463,36 @@ export const SimprintTitlebar: React.FC<SimprintTitlebarProps> = ({
                   )}
                 </div>
 
-                {/* 9. Theme Submenu (Highlighted in blue like Image #1) */}
+                {/* 9. Theme Submenu */}
                 <div
                   className="relative"
                   onMouseEnter={() => setActiveSubmenu("theme")}
                 >
                   <button
                     onClick={() => setActiveSubmenu(activeSubmenu === "theme" ? null : "theme")}
-                    className={`w-full flex items-center justify-between px-4 py-2 transition-colors cursor-pointer text-left ${
+                    className={`w-full flex items-center justify-between px-4 py-2 transition-colors cursor-pointer text-left !bg-transparent !border-0 ${
                       activeSubmenu === "theme"
-                        ? "bg-blue-600/35 text-blue-300 font-medium"
-                        : "text-slate-300 hover:text-white hover:bg-slate-800/70"
+                        ? "bg-blue-50 text-blue-700 dark:bg-blue-600/35 dark:text-blue-300 font-medium"
+                        : "text-slate-700 hover:text-slate-900 hover:bg-slate-100 dark:text-slate-300 dark:hover:text-white dark:hover:bg-slate-800/70"
                     }`}
                   >
                     <div className="flex items-center gap-3">
-                      <Palette size={15} className={activeSubmenu === "theme" ? "text-blue-400" : "text-slate-400"} />
+                      <Palette size={15} className={activeSubmenu === "theme" ? "text-blue-600 dark:text-blue-400" : "text-slate-400"} />
                       <span>Theme</span>
                     </div>
-                    <ChevronRight size={13} className="text-slate-500" />
+                    <ChevronRight size={13} className="text-slate-400 dark:text-slate-500" />
                   </button>
 
                   {activeSubmenu === "theme" && (
-                    <div className="absolute right-full top-0 mr-1.5 w-36 py-1.5 bg-[#171b26]/98 border border-slate-800 rounded-xl shadow-2xl backdrop-blur-2xl z-50">
+                    <div className="absolute right-full top-0 mr-1.5 w-36 py-1.5 bg-white border border-slate-200 text-slate-800 shadow-xl dark:bg-[#171b26]/98 dark:border-slate-800 dark:text-slate-200 dark:shadow-2xl rounded-xl backdrop-blur-2xl z-50">
                       <button
                         onClick={() => {
                           setTheme("light");
                           setUserMenuOpen(false);
                           setActiveSubmenu(null);
                         }}
-                        className={`w-full flex items-center justify-between px-3.5 py-2 text-xs text-left hover:bg-slate-800 cursor-pointer ${
-                          theme === "light" ? "text-cyan-400 font-semibold" : "text-slate-300"
+                        className={`w-full flex items-center justify-between px-3.5 py-2 text-xs text-left hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer !bg-transparent !border-0 ${
+                          theme === "light" ? "text-cyan-600 dark:text-cyan-400 font-semibold" : "text-slate-700 dark:text-slate-300"
                         }`}
                       >
                         <div className="flex items-center gap-2">
@@ -507,12 +507,12 @@ export const SimprintTitlebar: React.FC<SimprintTitlebarProps> = ({
                           setUserMenuOpen(false);
                           setActiveSubmenu(null);
                         }}
-                        className={`w-full flex items-center justify-between px-3.5 py-2 text-xs text-left hover:bg-slate-800 cursor-pointer ${
-                          theme === "dark" ? "text-cyan-400 font-semibold" : "text-slate-300"
+                        className={`w-full flex items-center justify-between px-3.5 py-2 text-xs text-left hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer !bg-transparent !border-0 ${
+                          theme === "dark" ? "text-cyan-600 dark:text-cyan-400 font-semibold" : "text-slate-700 dark:text-slate-300"
                         }`}
                       >
                         <div className="flex items-center gap-2">
-                          <Moon size={14} className={theme === "dark" ? "text-cyan-400" : ""} />
+                          <Moon size={14} className={theme === "dark" ? "text-cyan-600 dark:text-cyan-400" : ""} />
                           <span>Dark</span>
                         </div>
                         {theme === "dark" && <Check size={13} />}
@@ -523,8 +523,8 @@ export const SimprintTitlebar: React.FC<SimprintTitlebarProps> = ({
                           setUserMenuOpen(false);
                           setActiveSubmenu(null);
                         }}
-                        className={`w-full flex items-center justify-between px-3.5 py-2 text-xs text-left hover:bg-slate-800 cursor-pointer ${
-                          theme === "system" ? "text-cyan-400 font-semibold" : "text-slate-300"
+                        className={`w-full flex items-center justify-between px-3.5 py-2 text-xs text-left hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer !bg-transparent !border-0 ${
+                          theme === "system" ? "text-cyan-600 dark:text-cyan-400 font-semibold" : "text-slate-700 dark:text-slate-300"
                         }`}
                       >
                         <div className="flex items-center gap-2">
@@ -538,7 +538,7 @@ export const SimprintTitlebar: React.FC<SimprintTitlebarProps> = ({
                 </div>
 
                 {/* Divider */}
-                <div className="my-1.5 border-t border-slate-800/80" />
+                <div className="my-1.5 border-t border-slate-100 dark:border-slate-800/80" />
 
                 {/* 10. Switch User / Sign Out */}
                 <button
@@ -550,7 +550,7 @@ export const SimprintTitlebar: React.FC<SimprintTitlebarProps> = ({
                       onSettings();
                     }
                   }}
-                  className="w-full flex items-center gap-3 px-4 py-2 text-rose-400 hover:bg-rose-500/10 transition-colors text-xs text-left cursor-pointer"
+                  className="w-full flex items-center gap-3 px-4 py-2 text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-500/10 transition-colors text-xs text-left cursor-pointer !bg-transparent !border-0"
                 >
                   <LogOut size={15} />
                   <span>Switch User</span>
@@ -564,31 +564,31 @@ export const SimprintTitlebar: React.FC<SimprintTitlebarProps> = ({
         <button
           onClick={onPaletteOpen}
           title="Command Palette (Ctrl+K)"
-          className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800/60 transition-colors cursor-pointer"
+          className="p-1.5 rounded-lg text-slate-500 hover:text-slate-900 hover:bg-slate-200/60 dark:text-slate-400 dark:hover:text-white dark:hover:bg-slate-800/60 transition-colors cursor-pointer !bg-transparent !border-0"
         >
           <Grip size={15} />
         </button>
 
         {/* Window controls (Minimize, Maximize, Close) */}
-        <div className="flex items-center h-10 ml-2 border-l border-slate-800/80">
+        <div className="flex items-center h-10 ml-2 border-l border-slate-200 dark:border-slate-800/80">
           <button
             onClick={handleMinimize}
             title="Minimize"
-            className="w-12 h-10 flex items-center justify-center text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+            className="w-12 h-10 flex items-center justify-center text-slate-500 hover:text-slate-900 hover:bg-slate-200/70 dark:text-slate-400 dark:hover:text-white dark:hover:bg-slate-800 transition-colors cursor-pointer !bg-transparent !border-0"
           >
             <Minus size={15} />
           </button>
           <button
             onClick={handleMaximize}
             title="Maximize"
-            className="w-12 h-10 flex items-center justify-center text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+            className="w-12 h-10 flex items-center justify-center text-slate-500 hover:text-slate-900 hover:bg-slate-200/70 dark:text-slate-400 dark:hover:text-white dark:hover:bg-slate-800 transition-colors cursor-pointer !bg-transparent !border-0"
           >
             <Square size={13} />
           </button>
           <button
             onClick={handleClose}
             title="Close"
-            className="w-12 h-10 flex items-center justify-center text-slate-400 hover:text-white hover:bg-rose-600 active:bg-rose-700 transition-colors cursor-pointer"
+            className="w-12 h-10 flex items-center justify-center text-slate-500 dark:text-slate-400 hover:text-white hover:bg-rose-600 active:bg-rose-700 transition-colors cursor-pointer !bg-transparent !border-0"
           >
             <X size={15} />
           </button>

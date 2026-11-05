@@ -457,6 +457,13 @@ export function App() {
     }
   }, [active, ready, me?.user_id]);
 
+  // One field, written on its own: see save_notes in commands.rs. A note
+  // edited from the table must not carry the row's other fields back with it.
+  const saveNotes = async (p: Profile, notes: string) => {
+    await api.setNotes(p.id, notes, p.origin);
+    await refreshProfiles();
+  };
+
   useEffect(() => {
     void refreshProfiles();
     // A browser can be closed from its own window, and in team mode a colleague
@@ -871,7 +878,7 @@ export function App() {
   const dl = shell?.core_download ?? null;
 
   return (
-    <div className="app relative overflow-hidden flex flex-col h-screen w-screen bg-[#090d16] text-slate-100">
+    <div className="app relative overflow-hidden flex flex-col h-screen w-screen bg-[var(--simprint-bg)] text-[var(--simprint-text)]">
       <AppBackground />
       {askDialog}
       <SimprintTitlebar
@@ -1517,6 +1524,7 @@ export function App() {
                 launching={launching}
                 onLaunch={onLaunch}
                 onStop={onStop}
+                onNotes={saveNotes}
               />
             ) : (
               <SimprintProfileGrid
@@ -1551,6 +1559,7 @@ export function App() {
                 launching={launching}
                 onLaunch={onLaunch}
                 onStop={onStop}
+                onNotes={saveNotes}
                 onEdit={setEditing}
                 onExtensions={setExtFor}
                 onShare={local ? undefined : (p) => setSharing([p])}
@@ -1687,7 +1696,7 @@ export function App() {
         {editing !== undefined && (
           <ProfileDialog
             projectId={active?.id ?? null}
-            teamProjects={projects.filter((p) => p.origin === "team")}
+            projects={projects}
             editing={editing}
             origin={newOrigin}
             canChoose={canChooseOrigin}

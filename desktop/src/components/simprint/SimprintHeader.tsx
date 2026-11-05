@@ -87,11 +87,11 @@ export const SimprintHeader: React.FC<SimprintHeaderProps> = ({
   };
 
   return (
-    <header className="flex flex-col gap-3 px-6 py-3.5 border-b border-slate-800/80 bg-slate-950/50 backdrop-blur-xl select-none z-10">
+    <header className="flex flex-col gap-3 px-6 py-3.5 border-b border-[var(--simprint-border)] bg-[var(--simprint-header-bg)] backdrop-blur-xl select-none z-10 transition-colors duration-200">
       {/* Top row: Title, Badges, View Toggle */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div className="flex items-center gap-3">
-          <h1 className="text-xl font-bold text-white tracking-tight">{title}</h1>
+          <h1 className="text-xl font-bold text-slate-900 dark:text-white tracking-tight">{title}</h1>
           <SimprintBadge variant="slate" title={t("app.profileCount", { n: totalCount })}>
             Total: {totalCount}
           </SimprintBadge>
@@ -103,13 +103,13 @@ export const SimprintHeader: React.FC<SimprintHeaderProps> = ({
         </div>
 
         {/* View switcher: Segmented Table / Grid */}
-        <div className="flex items-center bg-slate-900/80 border border-slate-800 rounded-xl p-0.5">
+        <div className="flex items-center bg-slate-100 border border-slate-200 dark:bg-slate-900/80 dark:border-slate-800 rounded-xl p-0.5">
           <button
             onClick={() => onViewModeChange("table")}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all cursor-pointer ${
               viewMode === "table"
-                ? "bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 shadow-sm"
-                : "text-slate-400 hover:text-white"
+                ? "bg-white text-cyan-700 border border-slate-300 shadow-xs dark:bg-cyan-500/20 dark:text-cyan-300 dark:border-cyan-500/40"
+                : "text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white !bg-transparent !border-0"
             }`}
             title="Table View"
           >
@@ -120,8 +120,8 @@ export const SimprintHeader: React.FC<SimprintHeaderProps> = ({
             onClick={() => onViewModeChange("grid")}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all cursor-pointer ${
               viewMode === "grid"
-                ? "bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 shadow-sm"
-                : "text-slate-400 hover:text-white"
+                ? "bg-white text-cyan-700 border border-slate-300 shadow-xs dark:bg-cyan-500/20 dark:text-cyan-300 dark:border-cyan-500/40"
+                : "text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white !bg-transparent !border-0"
             }`}
             title="Grid Cards View"
           >
@@ -138,7 +138,7 @@ export const SimprintHeader: React.FC<SimprintHeaderProps> = ({
           <div className="relative flex-1">
             <Search
               size={15}
-              className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none"
+              className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500 pointer-events-none"
             />
             <input
               ref={searchInputRef}
@@ -146,10 +146,10 @@ export const SimprintHeader: React.FC<SimprintHeaderProps> = ({
               placeholder={t("bar.search")}
               value={query}
               onChange={(e) => onQueryChange(e.target.value)}
-              className="w-full pl-9 pr-14 py-1.5 bg-slate-900/80 border border-slate-800 rounded-xl text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500/40 transition-colors"
+              className="w-full pl-9 pr-14 py-1.5 bg-white border border-slate-300 text-slate-900 placeholder-slate-400 focus:border-cyan-600 dark:bg-slate-900/80 dark:border-slate-800 dark:text-slate-200 dark:placeholder-slate-500 dark:focus:border-cyan-500 rounded-xl text-xs focus:outline-none focus:ring-1 focus:ring-cyan-500/40 transition-colors"
             />
             <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center">
-              <kbd className="px-1.5 py-0.5 text-[10px] font-mono text-slate-400 bg-slate-800/80 border border-slate-700/60 rounded">
+              <kbd className="px-1.5 py-0.5 text-[10px] font-mono bg-slate-100 text-slate-500 border border-slate-200 dark:bg-slate-800/80 dark:text-slate-400 dark:border-slate-700/60 rounded">
                 Ctrl K
               </kbd>
             </div>
@@ -164,7 +164,7 @@ export const SimprintHeader: React.FC<SimprintHeaderProps> = ({
               <select
                 value={selectedTag}
                 onChange={(e) => onTagChange(e.target.value)}
-                className="pl-2.5 pr-7 py-1.5 bg-slate-900/80 border border-slate-800 rounded-xl text-xs text-slate-300 focus:outline-none focus:border-cyan-500 transition-colors cursor-pointer appearance-none"
+                className="pl-2.5 pr-7 py-1.5 bg-white border border-slate-300 text-slate-800 dark:bg-slate-900/80 dark:border-slate-800 dark:text-slate-300 rounded-xl text-xs focus:outline-none focus:border-cyan-500 transition-colors cursor-pointer appearance-none shadow-xs"
               >
                 <option value="">{t("bar.allTags")}</option>
                 <option value={"\u0000none"}>{t("bar.untagged")}</option>
@@ -176,7 +176,7 @@ export const SimprintHeader: React.FC<SimprintHeaderProps> = ({
               </select>
               <Filter
                 size={12}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none"
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500 pointer-events-none"
               />
             </div>
           )}
@@ -187,7 +187,7 @@ export const SimprintHeader: React.FC<SimprintHeaderProps> = ({
               <select
                 value={selectedStage}
                 onChange={(e) => onStageChange(e.target.value)}
-                className="pl-2.5 pr-7 py-1.5 bg-slate-900/80 border border-slate-800 rounded-xl text-xs text-slate-300 focus:outline-none focus:border-cyan-500 transition-colors cursor-pointer appearance-none"
+                className="pl-2.5 pr-7 py-1.5 bg-white border border-slate-300 text-slate-800 dark:bg-slate-900/80 dark:border-slate-800 dark:text-slate-300 rounded-xl text-xs focus:outline-none focus:border-cyan-500 transition-colors cursor-pointer appearance-none shadow-xs"
               >
                 <option value="">{t("bar.allStages")}</option>
                 <option value={"\u0000none"}>{t("bar.noStage")}</option>
@@ -199,18 +199,18 @@ export const SimprintHeader: React.FC<SimprintHeaderProps> = ({
               </select>
               <Filter
                 size={12}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none"
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500 pointer-events-none"
               />
             </div>
           )}
 
           {/* Open Only checkbox */}
-          <label className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-slate-900/60 border border-slate-800 text-xs text-slate-300 hover:text-white cursor-pointer select-none">
+          <label className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-slate-100 border border-slate-300 text-slate-700 dark:bg-slate-900/60 dark:border-slate-800 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white cursor-pointer select-none text-xs">
             <input
               type="checkbox"
               checked={openOnly}
               onChange={(e) => onOpenOnlyChange(e.target.checked)}
-              className="rounded border-slate-700 bg-slate-800 text-cyan-500 focus:ring-0 focus:ring-offset-0 cursor-pointer"
+              className="rounded border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-cyan-600 dark:text-cyan-500 focus:ring-0 focus:ring-offset-0 cursor-pointer"
             />
             <span>{t("bar.openOnly", { n: runningCount })}</span>
           </label>
@@ -218,9 +218,9 @@ export const SimprintHeader: React.FC<SimprintHeaderProps> = ({
           {/* Bulk Creator button */}
           <button
             onClick={onOpenBulk}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900/90 border border-slate-700/80 hover:border-cyan-500/50 hover:bg-slate-800 text-xs font-medium text-slate-200 hover:text-white transition-all cursor-pointer shadow-sm"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white hover:bg-slate-50 border border-slate-300 text-slate-700 hover:text-slate-900 dark:bg-slate-900/90 dark:hover:bg-slate-800 dark:border-slate-700/80 dark:text-slate-200 dark:hover:text-white text-xs font-medium transition-all cursor-pointer shadow-xs"
           >
-            <Layers size={14} className="text-cyan-400" />
+            <Layers size={14} className="text-cyan-600 dark:text-cyan-400" />
             <span>{t("bp.button")}</span>
           </button>
 
@@ -228,9 +228,9 @@ export const SimprintHeader: React.FC<SimprintHeaderProps> = ({
           {importsHere && (
             <button
               onClick={onOpenCsv}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900/90 border border-slate-700/80 hover:border-cyan-500/50 hover:bg-slate-800 text-xs font-medium text-slate-200 hover:text-white transition-all cursor-pointer shadow-sm"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white hover:bg-slate-50 border border-slate-300 text-slate-700 hover:text-slate-900 dark:bg-slate-900/90 dark:hover:bg-slate-800 dark:border-slate-700/80 dark:text-slate-200 dark:hover:text-white text-xs font-medium transition-all cursor-pointer shadow-xs"
             >
-              <FileSpreadsheet size={14} className="text-emerald-400" />
+              <FileSpreadsheet size={14} className="text-emerald-600 dark:text-emerald-400" />
               <span>{t("csv.button")}</span>
             </button>
           )}
@@ -239,9 +239,9 @@ export const SimprintHeader: React.FC<SimprintHeaderProps> = ({
           {importsHere && (
             <button
               onClick={onOpenGologin}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900/90 border border-slate-700/80 hover:border-cyan-500/50 hover:bg-slate-800 text-xs font-medium text-slate-200 hover:text-white transition-all cursor-pointer shadow-sm"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white hover:bg-slate-50 border border-slate-300 text-slate-700 hover:text-slate-900 dark:bg-slate-900/90 dark:hover:bg-slate-800 dark:border-slate-700/80 dark:text-slate-200 dark:hover:text-white text-xs font-medium transition-all cursor-pointer shadow-xs"
             >
-              <Download size={14} className="text-sky-400" />
+              <Download size={14} className="text-sky-600 dark:text-sky-400" />
               <span>{t("gl.button")}</span>
             </button>
           )}
@@ -250,9 +250,9 @@ export const SimprintHeader: React.FC<SimprintHeaderProps> = ({
           <button
             onClick={handleRefresh}
             title={t("bar.refresh")}
-            className="p-2 rounded-xl bg-slate-900/90 border border-slate-800 hover:border-slate-700 text-slate-400 hover:text-white transition-all cursor-pointer shadow-sm"
+            className="p-2 rounded-xl bg-white hover:bg-slate-50 border border-slate-300 text-slate-600 hover:text-slate-900 dark:bg-slate-900/90 dark:hover:bg-slate-800 dark:border-slate-800 dark:text-slate-400 dark:hover:text-white transition-all cursor-pointer shadow-xs"
           >
-            <RotateCw size={14} className={isRefreshing ? "animate-spin text-cyan-400" : ""} />
+            <RotateCw size={14} className={isRefreshing ? "animate-spin text-cyan-600 dark:text-cyan-400" : ""} />
           </button>
         </div>
       </div>

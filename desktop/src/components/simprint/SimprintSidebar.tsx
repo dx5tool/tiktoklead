@@ -79,7 +79,7 @@ export const SimprintSidebar: React.FC<SimprintSidebarProps> = ({
 
   return (
     <aside
-      className={`h-full flex flex-col justify-between bg-[#0b0f19]/90 backdrop-blur-2xl border-r border-slate-800/80 text-slate-200 select-none z-20 transition-all duration-300 ease-in-out ${
+      className={`h-full flex flex-col justify-between bg-[var(--simprint-sidebar-bg)] border-r border-[var(--simprint-border)] text-[var(--simprint-text)] select-none z-20 transition-all duration-300 ease-in-out ${
         collapsed ? "w-16 min-w-[4rem]" : "w-64 min-w-[16rem]"
       }`}
     >
@@ -127,22 +127,22 @@ export const SimprintSidebar: React.FC<SimprintSidebarProps> = ({
                     : "w-full justify-between px-3 py-2 text-sm"
                 } ${
                   isSelected
-                    ? "bg-cyan-500/15 text-cyan-400 border border-cyan-500/30 shadow-sm shadow-cyan-500/10"
-                    : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border border-transparent"
+                    ? "bg-cyan-500/15 text-cyan-600 dark:text-cyan-400 border border-cyan-500/30 shadow-xs font-semibold"
+                    : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 hover:bg-slate-200/60 dark:hover:bg-slate-800/50 !bg-transparent !border-0"
                 }`}
               >
                 <div className={`flex items-center ${collapsed ? "justify-center" : "gap-3"}`}>
-                  <IconComponent size={collapsed ? 19 : 18} className={isSelected ? "text-cyan-400" : "text-slate-400"} />
+                  <IconComponent size={collapsed ? 19 : 18} className={isSelected ? "text-cyan-600 dark:text-cyan-400" : "text-slate-500 dark:text-slate-400"} />
                   {!collapsed && <span>{navLabel}</span>}
                 </div>
-                {!collapsed && isSelected && <ChevronRight size={14} className="text-cyan-400" />}
+                {!collapsed && isSelected && <ChevronRight size={14} className="text-cyan-600 dark:text-cyan-400" />}
               </button>
             );
           })}
         </div>
 
         {/* Project Folders */}
-        <div className={`pt-2 border-t border-slate-800/80 ${collapsed ? "space-y-2" : "space-y-3"}`}>
+        <div className={`pt-2 border-t border-[var(--simprint-border)] ${collapsed ? "space-y-2" : "space-y-3"}`}>
           {projectSections.map(([side, label]) => {
             const sideProjects = projects.filter((p) => p.origin === side);
 
@@ -161,13 +161,13 @@ export const SimprintSidebar: React.FC<SimprintSidebarProps> = ({
                         title={`${p.name} (${p.profile_count})`}
                         className={`w-10 h-9 mx-auto flex items-center justify-center rounded-xl transition-colors cursor-pointer relative ${
                           isFolderActive
-                            ? "bg-cyan-500/15 text-cyan-400 border border-cyan-500/30"
-                            : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/40 border border-transparent"
+                            ? "bg-cyan-500/15 text-cyan-600 dark:text-cyan-400 border border-cyan-500/30"
+                            : "text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 hover:bg-slate-200/60 dark:hover:bg-slate-800/40 !bg-transparent !border-0"
                         }`}
                       >
-                        <Folder size={16} className={isFolderActive ? "text-cyan-400" : "text-slate-500"} />
+                        <Folder size={16} className={isFolderActive ? "text-cyan-600 dark:text-cyan-400" : "text-slate-400 dark:text-slate-500"} />
                         {p.profile_count > 0 && (
-                          <span className="absolute top-1 right-1 h-1.5 w-1.5 rounded-full bg-cyan-400" />
+                          <span className="absolute top-1 right-1 h-1.5 w-1.5 rounded-full bg-cyan-500" />
                         )}
                       </button>
                     );
@@ -183,14 +183,14 @@ export const SimprintSidebar: React.FC<SimprintSidebarProps> = ({
                   <button
                     onClick={() => onNewProject(side)}
                     title={t(side === "local" ? "app.newProjectHere" : "app.newProject")}
-                    className="p-1 rounded-md text-slate-400 hover:text-cyan-400 hover:bg-cyan-500/10 transition-colors cursor-pointer"
+                    className="p-1 rounded-md text-slate-500 dark:text-slate-400 hover:text-cyan-600 dark:hover:text-cyan-400 hover:bg-cyan-500/10 transition-colors cursor-pointer !bg-transparent !border-0"
                   >
                     <Plus size={14} />
                   </button>
                 </div>
 
                 {sideProjects.length === 0 ? (
-                  <div className="px-3 py-2 text-xs text-slate-600 italic">
+                  <div className="px-3 py-2 text-xs text-slate-500 italic">
                     {side === "team" ? t("app.nothingShared") : t("app.noFoldersHere")}
                   </div>
                 ) : (
@@ -211,20 +211,20 @@ export const SimprintSidebar: React.FC<SimprintSidebarProps> = ({
                             }}
                             className={`w-full flex items-center justify-between px-3 py-1.5 rounded-lg text-xs font-medium transition-colors cursor-pointer ${
                               isFolderActive
-                                ? "bg-cyan-500/15 text-cyan-400 border border-cyan-500/30"
-                                : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/40 border border-transparent"
+                                ? "bg-cyan-500/15 text-cyan-700 dark:text-cyan-400 border border-cyan-500/30"
+                                : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 hover:bg-slate-200/60 dark:hover:bg-slate-800/40 !bg-transparent !border-0"
                             }`}
                           >
                             <div className="flex items-center gap-2 truncate pr-2">
-                              <Folder size={14} className={isFolderActive ? "text-cyan-400" : "text-slate-500"} />
+                              <Folder size={14} className={isFolderActive ? "text-cyan-600 dark:text-cyan-400" : "text-slate-400 dark:text-slate-500"} />
                               <span className="truncate">{p.name}</span>
                             </div>
                             <div className="flex items-center gap-1">
                               <span
                                 className={`px-1.5 py-0.2 rounded-full text-[10px] ${
                                   isFolderActive
-                                    ? "bg-cyan-500/20 text-cyan-300 font-semibold"
-                                    : "bg-slate-800 text-slate-400"
+                                    ? "bg-cyan-100 text-cyan-800 dark:bg-cyan-500/20 dark:text-cyan-300 font-semibold"
+                                    : "bg-slate-200 text-slate-700 dark:bg-slate-800 dark:text-slate-400"
                                 }`}
                               >
                                 {p.profile_count}
@@ -234,7 +234,7 @@ export const SimprintSidebar: React.FC<SimprintSidebarProps> = ({
                                   e.stopPropagation();
                                   setActiveMenuId(isMenuOpen ? null : p.id);
                                 }}
-                                className="opacity-0 group-hover:opacity-100 p-0.5 rounded text-slate-400 hover:text-white transition-opacity"
+                                className="opacity-0 group-hover:opacity-100 p-0.5 rounded text-slate-400 hover:text-slate-900 dark:hover:text-white transition-opacity !bg-transparent !border-0"
                               >
                                 <MoreVertical size={12} />
                               </button>
@@ -243,13 +243,13 @@ export const SimprintSidebar: React.FC<SimprintSidebarProps> = ({
 
                           {/* Context Menu for Folder */}
                           {isMenuOpen && (
-                            <div className="absolute right-2 top-8 w-36 py-1 bg-slate-900 border border-slate-700/80 rounded-xl shadow-xl z-50 text-xs">
+                            <div className="absolute right-2 top-8 w-36 py-1 bg-white border border-slate-200 text-slate-800 shadow-xl dark:bg-slate-900 dark:border-slate-700/80 dark:text-slate-300 dark:shadow-xl rounded-xl z-50 text-xs">
                               <button
                                 onClick={() => {
                                   setActiveMenuId(null);
                                   onRenameProject(p);
                                 }}
-                                className="w-full text-left px-3 py-1.5 text-slate-300 hover:bg-slate-800 hover:text-white"
+                                className="w-full text-left px-3 py-1.5 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-white !bg-transparent !border-0"
                               >
                                 {t("proj.rename")}
                               </button>
@@ -259,7 +259,7 @@ export const SimprintSidebar: React.FC<SimprintSidebarProps> = ({
                                     setActiveMenuId(null);
                                     onSendProject(p);
                                   }}
-                                  className="w-full text-left px-3 py-1.5 text-slate-300 hover:bg-slate-800 hover:text-white"
+                                  className="w-full text-left px-3 py-1.5 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-white !bg-transparent !border-0"
                                 >
                                   {t("proj.sendAll")}
                                 </button>
@@ -270,7 +270,7 @@ export const SimprintSidebar: React.FC<SimprintSidebarProps> = ({
                                     setActiveMenuId(null);
                                     onShareProject(p);
                                   }}
-                                  className="w-full text-left px-3 py-1.5 text-slate-300 hover:bg-slate-800 hover:text-white"
+                                  className="w-full text-left px-3 py-1.5 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-white !bg-transparent !border-0"
                                 >
                                   {t("proj.shareAll")}
                                 </button>
@@ -280,7 +280,7 @@ export const SimprintSidebar: React.FC<SimprintSidebarProps> = ({
                                   setActiveMenuId(null);
                                   onDeleteProject(p);
                                 }}
-                                className="w-full text-left px-3 py-1.5 text-rose-400 hover:bg-rose-500/10"
+                                className="w-full text-left px-3 py-1.5 text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-500/10 !bg-transparent !border-0"
                               >
                                 {t("proj.delete")}
                               </button>
@@ -298,11 +298,11 @@ export const SimprintSidebar: React.FC<SimprintSidebarProps> = ({
       </nav>
 
       {/* Footer Status & Machine Info */}
-      <div className={`border-t border-slate-800/80 bg-slate-950/40 ${collapsed ? "p-2 flex flex-col items-center gap-2" : "p-3 space-y-2"}`}>
+      <div className={`border-t border-[var(--simprint-border)] bg-slate-100/60 dark:bg-slate-950/40 ${collapsed ? "p-2 flex flex-col items-center gap-2" : "p-3 space-y-2"}`}>
         {!collapsed ? (
           <>
             {/* Real-time Agent Status indicator */}
-            <div className="flex items-center justify-between px-2 py-1.5 rounded-lg bg-slate-900/60 border border-slate-800 text-xs">
+            <div className="flex items-center justify-between px-2 py-1.5 rounded-lg bg-white/80 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 text-xs shadow-xs">
               <div className="flex items-center gap-2">
                 <span className="relative flex h-2.5 w-2.5">
                   {shell.agent_ready ? (
@@ -319,7 +319,7 @@ export const SimprintSidebar: React.FC<SimprintSidebarProps> = ({
                 </span>
                 <span
                   className={`font-semibold tracking-wide ${
-                    shell.agent_ready ? "text-emerald-400" : "text-rose-400"
+                    shell.agent_ready ? "text-emerald-700 dark:text-emerald-400" : "text-rose-700 dark:text-rose-400"
                   }`}
                 >
                   {shell.agent_ready ? "Agent Online" : "Agent Disconnected"}
@@ -330,20 +330,20 @@ export const SimprintSidebar: React.FC<SimprintSidebarProps> = ({
 
             {/* User / Machine details */}
             {me && (
-              <div className="px-2 text-xs font-medium text-slate-300 truncate" title={me.email}>
+              <div className="px-2 text-xs font-medium text-slate-700 dark:text-slate-300 truncate" title={me.email}>
                 {me.email}
               </div>
             )}
-            <div className="flex items-center justify-between px-2 text-[11px] text-slate-400">
+            <div className="flex items-center justify-between px-2 text-[11px] text-slate-500 dark:text-slate-400">
               <div className="truncate flex-1 pr-2" title={shell.machine_name}>
                 <span>{shell.machine_name}</span>
-                {!shell.native && <span className="text-cyan-400"> · {t("app.browserDev")}</span>}
+                {!shell.native && <span className="text-cyan-600 dark:text-cyan-400"> · {t("app.browserDev")}</span>}
               </div>
               <button
                 onClick={onSettings}
                 title={t("app.settings")}
                 aria-label={t("app.settings")}
-                className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+                className="p-1 rounded-lg text-slate-500 hover:text-slate-900 hover:bg-slate-200/60 dark:text-slate-400 dark:hover:text-white dark:hover:bg-slate-800 transition-colors cursor-pointer !bg-transparent !border-0"
               >
                 <SettingsIcon size={15} />
               </button>
@@ -374,7 +374,7 @@ export const SimprintSidebar: React.FC<SimprintSidebarProps> = ({
               onClick={onSettings}
               title={t("app.settings")}
               aria-label={t("app.settings")}
-              className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+              className="p-2 rounded-lg text-slate-500 hover:text-slate-900 hover:bg-slate-200/60 dark:text-slate-400 dark:hover:text-white dark:hover:bg-slate-800 transition-colors cursor-pointer !bg-transparent !border-0"
             >
               <SettingsIcon size={16} />
             </button>
