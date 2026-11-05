@@ -676,6 +676,9 @@ export type UpdateProgress = {
 };
 
 async function cmd<T>(name: string, args: Record<string, unknown> = {}): Promise<T> {
+  if (!isDesktop) {
+    throw new ApiError(0, `Tauri IPC command "${name}" is only available in Desktop App mode.`);
+  }
   try {
     return await invoke<T>(name, args);
   } catch (raw: any) {
@@ -732,12 +735,110 @@ function devMachineId(): string {
   }
   return id;
 }
+const DEV_PROFILES_KEY = "fury.dev_profiles";
+const DEV_PROJECTS_KEY = "fury.dev_projects";
+
+function devProjects(): Project[] {
+  try {
+    const raw = localStorage.getItem(DEV_PROJECTS_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch {}
+  return [
+    { id: "p1", name: "Dự án 2", profile_count: 1, origin: "local" },
+    { id: "p2", name: "My profiles", profile_count: 0, origin: "local" },
+  ];
+}
+
+function saveDevProjects(list: Project[]): void {
+  try {
+    localStorage.setItem(DEV_PROJECTS_KEY, JSON.stringify(list));
+  } catch {}
+}
+
+function devProfiles(): Profile[] {
+  try {
+    const raw = localStorage.getItem(DEV_PROFILES_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch {}
+  return [
+    {
+      id: "shopee1",
+      name: "Shopee1",
+      origin: "local",
+      project_id: "p1",
+      project_name: "Dự án 2",
+      tags: [],
+      notes: "Ghi chú 1 Render thử bảng trong k...",
+      status: "Idle",
+      persona_id: "win-rtx4060",
+      proxy: null,
+      allow_no_proxy: true,
+      last_opened_at: "2026-11-05T12:46:01.000Z",
+      permissions: ["launch", "manage_access", "edit_profile", "delete_profile"],
+      shared_with: 0,
+      fp_seed: 1234,
+      timezone: null,
+      languages: null,
+      running: false,
+      lock: null,
+    },
+    {
+      id: "shopee3",
+      name: "Shopee3",
+      origin: "local",
+      project_id: null,
+      project_name: null,
+      tags: ["hot", "vip", "cần", "lưu", "ý", "kiểm", "tra"],
+      notes: "",
+      status: "Idle",
+      persona_id: "mac-m2",
+      proxy: null,
+      allow_no_proxy: true,
+      last_opened_at: "2026-11-04T19:55:17.000Z",
+      permissions: ["launch", "manage_access", "edit_profile", "delete_profile"],
+      shared_with: 0,
+      fp_seed: 5678,
+      timezone: null,
+      languages: null,
+      running: false,
+      lock: null,
+    },
+  ];
+}
+
+function saveDevProfiles(list: Profile[]): void {
+  try {
+    localStorage.setItem(DEV_PROFILES_KEY, JSON.stringify(list));
+  } catch {}
+}
+
 
 // ---------------------------------------------------------------------------
 
 export const api = {
   shell(): Promise<Shell> {
     if (isDesktop) return cmd<Shell>("shell_state");
+    const devMode = typeof localStorage !== "undefined" ? localStorage.getItem("fury.dev_mode") : null;
+    const isLocal = devMode !== "team" && storedToken() === null;
+    if (isLocal) {
+      return Promise.resolve({
+        mode: "local" as const,
+        agent_ready: true,
+        core_ready: true,
+        core_problem: null,
+        core_download: null,
+        remember_org_key: true,
+        version: "dev",
+        org_key_ready: true,
+        last_email: null,
+        last_server: null,
+        awaiting_key: false,
+        server_url: null,
+        machine_name: navigator.platform || "this browser",
+        signed_in: true,
+        native: false,
+      });
+    }
     return Promise.resolve({
       mode: "team" as const,
       agent_ready: false,
@@ -750,8 +851,6 @@ export const api = {
       last_email: null,
       last_server: null,
       awaiting_key: false,
-      // Vite proxies /v1, so in this mode the address is fixed by the dev
-      // config rather than chosen by the operator.
       server_url: "http://127.0.0.1:8901 (vite proxy)",
       machine_name: navigator.platform || "this browser",
       signed_in: storedToken() !== null,
@@ -872,21 +971,40 @@ export const api = {
 
   me: (): Promise<Me> => (isDesktop ? cmd<Me>("me") : http<Me>("/v1/me")),
 
-  projects: (): Promise<Project[]> =>
-    isDesktop ? cmd<Project[]>("projects") : http<Project[]>("/v1/projects"),
+  projects: (): Promise<Project[]> => {
+    if (isDesktop) return cmd<Project[]>("projects");
+    const devMode = typeof localStorage !== "undefined" ? localStorage.getItem("fury.dev_mode") : null;
+    if (devMode !== "team" && storedToken() === null) {
+      return Promise.resolve(devProjects());
+    }
+    return http<Project[]>("/v1/projects");
+  },
 
-  createProjectIn: (name: string, origin: Origin): Promise<{ id: string }> =>
-    cmd<{ id: string }>("create_project", { name, origin }),
+  createProjectIn: (name: string, origin: Origin): Promise<{ id: string }> => {
+    if (isDesktop) {
+      return cmd<{ id: string }>("create_project", { name, origin });
+    }
+    const all = devProjects();
+    const id = `p_${crypto.randomUUID()}`;
+    all.push({ id, name, profile_count: 0, origin: "local" });
+    saveDevProjects(all);
+    return Promise.resolve({ id });
+  },
 
-  /** Every profile when `projectId` is omitted — which is the Profiles view,
-   *  and the ordinary case. Passing one narrows it. */
-  profiles: (projectId?: string, origin?: Origin): Promise<Profile[]> =>
-    isDesktop
-      ? cmd<Profile[]>("profiles", { projectId: projectId ?? null, origin: origin ?? null })
-      : projectId
-        ? http<Profile[]>(`/v1/projects/${projectId}/profiles`)
-        : Promise.resolve([]),
-
+  profiles: (projectId?: string, origin?: Origin): Promise<Profile[]> => {
+    if (isDesktop) {
+      return cmd<Profile[]>("profiles", { projectId: projectId ?? null, origin: origin ?? null });
+    }
+    const devMode = typeof localStorage !== "undefined" ? localStorage.getItem("fury.dev_mode") : null;
+    if (devMode !== "team" && storedToken() === null) {
+      const all = devProfiles();
+      if (!projectId) return Promise.resolve(all);
+      return Promise.resolve(all.filter((p) => p.project_id === projectId));
+    }
+    return projectId
+      ? http<Profile[]>(`/v1/projects/${projectId}/profiles`)
+      : Promise.resolve([]);
+  },
   // ---- the team (server only) ------------------------------------------
 
   /** Who did what, newest first. Owners and admins only; the server refuses
@@ -1048,10 +1166,23 @@ export const api = {
 
   // Local mode only: with a server, profiles and proxies are edited where the
   // permissions live, and that screen does not exist yet.
-  disconnectServer: (): Promise<Shell> => cmd<Shell>("disconnect_server"),
-  saveServerKit: (dir: string): Promise<{ path: string; files: number }> =>
-    cmd<{ path: string; files: number }>("save_server_kit", { dir }),
-  personas: (): Promise<Persona[]> => cmd<Persona[]>("personas"),
+  disconnectServer: (): Promise<Shell> => {
+    if (!isDesktop) {
+      if (typeof localStorage !== "undefined") {
+        localStorage.setItem("fury.dev_mode", "local");
+        localStorage.removeItem(TOKEN_KEY);
+      }
+      return api.shell();
+    }
+    return cmd<Shell>("disconnect_server");
+  },
+  personas: (): Promise<Persona[]> => {
+    if (isDesktop) return cmd<Persona[]>("personas");
+    return Promise.resolve([
+      { id: "win-rtx4060", os: "windows", gpu: "NVIDIA GeForce RTX 4060" },
+      { id: "mac-m2", os: "macos", gpu: "Apple M2" },
+    ] as unknown as Persona[]);
+  },
   preview: (spec: {
     persona_id: string;
     fp_seed: number;
@@ -1060,11 +1191,17 @@ export const api = {
     timezone: string | null;
     languages: string[] | null;
     overrides?: MachineOverrides;
-  }): Promise<Preview> => cmd<Preview>("preview", { spec }),
+  }): Promise<Preview> => {
+    if (isDesktop) return cmd<Preview>("preview", { spec });
+    return Promise.resolve({} as Preview);
+  },
   /** `origin` picks this machine's list or the team's; absent, the shell's mode. */
-  proxies: (origin?: Origin): Promise<LocalProxy[]> =>
-    cmd<LocalProxy[]>("proxies", { origin: origin ?? null }),
-
+  proxies: (origin?: Origin): Promise<LocalProxy[]> => {
+    if (isDesktop) return cmd<LocalProxy[]>("proxies", { origin: origin ?? null });
+    return Promise.resolve([]);
+  },
+  saveServerKit: (dir: string): Promise<{ path: string; files: number }> =>
+    cmd<{ path: string; files: number }>("save_server_kit", { dir }),
   /** Logins stored beside a profile. Local mode only for now — see commands.rs. */
   credentials: (profileId: string): Promise<Credential[]> =>
     cmd<Credential[]>("credentials", { profileId }),
@@ -1148,10 +1285,74 @@ export const api = {
   /** What other people have given to this account. */
   sharedWithMe: (): Promise<Profile[]> => cmd<Profile[]>("shared_with_me"),
 
-  saveProfile: (profile: unknown, origin?: Origin): Promise<{ id: string }> =>
-    cmd<{ id: string }>("save_profile", { profile, origin: origin ?? null }),
-  deleteProfile: (id: string, origin?: Origin): Promise<unknown> =>
-    cmd("delete_profile", { id, origin: origin ?? null }),
+  saveProfile: (profile: unknown, origin?: Origin): Promise<{ id: string }> => {
+    if (isDesktop) {
+      return cmd<{ id: string }>("save_profile", { profile, origin: origin ?? null });
+    }
+    const devMode = typeof localStorage !== "undefined" ? localStorage.getItem("fury.dev_mode") : null;
+    if (devMode !== "team" && storedToken() === null) {
+      const p = profile as Partial<Profile> & { id?: string };
+      const all = devProfiles();
+      const id = p.id || crypto.randomUUID();
+      const existingIdx = all.findIndex((x) => x.id === id);
+      const updated = {
+        id,
+        name: p.name || "Profile",
+        origin: "local" as const,
+        project_id: p.project_id ?? null,
+        project_name: p.project_name ?? null,
+        tags: p.tags ?? [],
+        notes: p.notes ?? "",
+        status: p.status ?? "Idle",
+        persona_id: p.persona_id ?? "win-rtx4060",
+        proxy: p.proxy ?? null,
+        allow_no_proxy: true,
+        last_opened_at: new Date().toISOString(),
+        permissions: ["launch", "manage_access", "edit_profile", "delete_profile"],
+        shared_with: 0,
+        fp_seed: 1234,
+        timezone: null,
+        languages: null,
+        running: false,
+        lock: null,
+        ...(existingIdx >= 0 ? all[existingIdx] : {}),
+        ...p,
+      } as Profile;
+      if (existingIdx >= 0) {
+        all[existingIdx] = updated;
+      } else {
+        all.push(updated);
+      }
+      saveDevProfiles(all);
+      return Promise.resolve({ id });
+    }
+    return Promise.resolve({ id: "dev" });
+  },
+  /** The note alone. See `save_notes` in commands.rs for why it is not
+   *  `saveProfile` with one field changed.
+   *
+   *  Both transports, like every other call: under `npm run dev` there is no
+   *  Rust side, and a command-only definition failed with "Could not reach the
+   *  server." while the list itself came through the Vite proxy. */
+  setNotes: (profileId: string, notes: string, origin?: Origin): Promise<unknown> =>
+    isDesktop
+      ? cmd("save_notes", { profileId, notes, origin: origin ?? null })
+      : http(`/v1/profiles/${profileId}/notes`, {
+          method: "PATCH",
+          body: JSON.stringify({ notes }),
+        }),
+  deleteProfile: (id: string, origin?: Origin): Promise<unknown> => {
+    if (isDesktop) {
+      return cmd("delete_profile", { id, origin: origin ?? null });
+    }
+    const devMode = typeof localStorage !== "undefined" ? localStorage.getItem("fury.dev_mode") : null;
+    if (devMode !== "team" && storedToken() === null) {
+      const all = devProfiles().filter((x) => x.id !== id);
+      saveDevProfiles(all);
+      return Promise.resolve();
+    }
+    return Promise.resolve();
+  },
 
   /** Many profiles from one template. Each gets its own seed and its own
    *  persona — see the agent for why that is the whole safety property. */
