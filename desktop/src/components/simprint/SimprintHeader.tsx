@@ -8,7 +8,9 @@ import {
   Download,
   Layers,
   Filter,
+  Folder,
 } from "lucide-react";
+import type { Project } from "../../api";
 import { useI18n } from "../../i18n";
 import { SimprintBadge } from "./SimprintBadge";
 import { isSuggested } from "../../status";
@@ -27,6 +29,11 @@ interface SimprintHeaderProps {
   stages: string[];
   selectedStage: string;
   onStageChange: (stage: string) => void;
+  projects?: Project[];
+  selectedProject?: string;
+  onProjectChange?: (projectId: string) => void;
+  projectCounts?: Record<string, number>;
+  noProjectCount?: number;
   openOnly: boolean;
   onOpenOnlyChange: (openOnly: boolean) => void;
   importsHere: boolean;
@@ -51,6 +58,11 @@ export const SimprintHeader: React.FC<SimprintHeaderProps> = ({
   stages,
   selectedStage,
   onStageChange,
+  projects,
+  selectedProject,
+  onProjectChange,
+  projectCounts = {},
+  noProjectCount,
   openOnly,
   onOpenOnlyChange,
   importsHere,
@@ -175,6 +187,30 @@ export const SimprintHeader: React.FC<SimprintHeaderProps> = ({
                 ))}
               </select>
               <Filter
+                size={12}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500 pointer-events-none"
+              />
+            </div>
+          )}
+          {/* Project Filter */}
+          {projects && projects.length > 0 && onProjectChange && (
+            <div className="relative">
+              <select
+                value={selectedProject || ""}
+                onChange={(e) => onProjectChange(e.target.value)}
+                className="pl-2.5 pr-7 py-1.5 bg-white border border-slate-300 text-slate-800 dark:bg-slate-900/80 dark:border-slate-800 dark:text-slate-300 rounded-xl text-xs focus:outline-none focus:border-cyan-500 transition-colors cursor-pointer appearance-none shadow-xs"
+              >
+                <option value="">{t("col.project")}: {t("app.projects")}</option>
+                <option value={"\u0000none"}>
+                  {t("col.noProject")} {noProjectCount !== undefined ? `(${noProjectCount})` : ""}
+                </option>
+                {projects.map((proj) => (
+                  <option key={proj.id} value={proj.id}>
+                    {proj.name} {projectCounts[proj.id] !== undefined ? `(${projectCounts[proj.id]})` : `(${proj.profile_count})`}
+                  </option>
+                ))}
+              </select>
+              <Folder
                 size={12}
                 className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500 pointer-events-none"
               />

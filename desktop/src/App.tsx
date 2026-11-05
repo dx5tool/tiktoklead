@@ -151,6 +151,7 @@ export function App() {
   const [tag, setTag] = useState("");
   // The stage filter (5.5): "" is every stage, "\u0000none" is no stage.
   const [stage, setStage] = useState("");
+  const [projectFilter, setProjectFilter] = useState("");
   const [viewMode, setViewMode] = useState<"table" | "grid">(() => {
     try {
       return (localStorage.getItem("fury.view_mode") as "table" | "grid") || "table";
@@ -628,6 +629,11 @@ export function App() {
         (tag === "\u0000none" ? p.tags.length === 0 : p.tags.includes(tag)),
     )
     .filter((p) => stage === "" || (stage === "\u0000none" ? !p.status : (p.status ?? "").trim().toLowerCase() === stage))
+    .filter(
+      (p) =>
+        projectFilter === "" ||
+        (projectFilter === "\u0000none" ? !p.project_id : p.project_id === projectFilter),
+    )
     .filter((p) => !openOnly || p.running);
 
   // Exit sharing over EVERY profile, not the filtered view: the question is
@@ -1066,6 +1072,16 @@ export function App() {
             stages={stages}
             selectedStage={stage}
             onStageChange={setStage}
+            projects={projects}
+            selectedProject={projectFilter}
+            onProjectChange={setProjectFilter}
+            projectCounts={Object.fromEntries(
+              projects.map((proj) => [
+                proj.id,
+                profiles.filter((p) => p.project_id === proj.id).length,
+              ]),
+            )}
+            noProjectCount={profiles.filter((p) => !p.project_id).length}
             openOnly={openOnly}
             onOpenOnlyChange={setOpenOnly}
             importsHere={importsHere}
