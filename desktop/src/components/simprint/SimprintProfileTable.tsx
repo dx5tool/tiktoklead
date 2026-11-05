@@ -60,6 +60,7 @@ interface SimprintProfileTableProps {
   onNetwork?: (p: Profile) => void;
   onClone?: (p: Profile) => void;
   onCookies?: (p: Profile) => void;
+  onQuickEdit?: (p: Profile, name: string, tags: string[]) => Promise<void>;
   /** Save just the note beside a profile. Present only where the caller may
    *  edit it; the pencil in that cell is hidden otherwise. */
   onNotes?: (p: Profile, notes: string) => Promise<void>;
@@ -90,6 +91,7 @@ export const SimprintProfileTable: React.FC<SimprintProfileTableProps> = ({
   onNetwork,
   onClone,
   onCookies,
+  onQuickEdit,
   onNotes,
   personas,
   sharing,
@@ -126,6 +128,42 @@ export const SimprintProfileTable: React.FC<SimprintProfileTableProps> = ({
   const [notesText, setNotesText] = useState("");
   const [notesBusy, setNotesBusy] = useState(false);
   const [notesError, setNotesError] = useState<string | null>(null);
+  const [quickEditFor, setQuickEditFor] = useState<Profile | null>(null);
+  const [quickName, setQuickName] = useState("");
+  const [quickTags, setQuickTags] = useState("");
+  const [quickBusy, setQuickBusy] = useState(false);
+  const [quickError, setQuickError] = useState<string | null>(null);
+
+  const openQuickEdit = (p: Profile) => {
+    setQuickEditFor(p);
+    setQuickName(p.name);
+    setQuickTags((p.tags ?? []).join(", "));
+    setQuickError(null);
+  };
+
+  const saveQuickEdit = async () => {
+    if (!quickEditFor || !onQuickEdit) return;
+    const trimmedName = quickName.trim();
+    if (!trimmedName) return;
+    setQuickBusy(true);
+    setQuickError(null);
+    try {
+      const parsedTags = Array.from(
+        new Set(
+          quickTags
+            .split(/[,\s]+/)
+            .map((t) => t.replace(/^#/, "").trim())
+            .filter(Boolean),
+        ),
+      );
+      await onQuickEdit(quickEditFor, trimmedName, parsedTags);
+      setQuickEditFor(null);
+    } catch (e) {
+      setQuickError(say(e));
+    } finally {
+      setQuickBusy(false);
+    }
+  };
   const windowed = profiles.length > WINDOW_FROM;
 
   const toggleMenu = (id: string, trigger: HTMLElement) => {
@@ -316,56 +354,74 @@ export const SimprintProfileTable: React.FC<SimprintProfileTableProps> = ({
 
                 {/* Profile Name & Badges */}
                 <td className="py-3 px-4">
-                  <div className="flex items-center gap-2">
-                    {/* Platform 2-letter badge */}
-                    {(() => {
-                      const pl = platformOf(p.start_urls);
-                      return pl ? (
-                        <span
-                          className="px-1.5 py-0.5 rounded text-[10px] font-bold tracking-wider uppercase border"
-                          title={pl.name}
-                          style={{
-                            background: `hsl(${pl.hue} 45% 20%)`,
-                            color: `hsl(${pl.hue} 80% 85%)`,
-                            borderColor: `hsl(${pl.hue} 60% 35%)`,
-                          }}
-                        >
-                          {pl.mark}
+                  <div className="group/name flex items-center justify-between gap-2 max-w-full">
+                    <div className="flex items-center gap-2 min-w-0 flex-wrap">
+                      {/* Platform 2-letter badge */}
+                      {(() => {
+                        const pl = platformOf(p.start_urls);
+                        return pl ? (
+                          <span
+                            className="px-1.5 py-0.5 rounded text-[10px] font-bold tracking-wider uppercase border shrink-0"
+                            title={pl.name}
+                            style={{
+                              background: `hsl(${pl.hue} 45% 20%)`,
+                              color: `hsl(${pl.hue} 80% 85%)`,
+                              borderColor: `hsl(${pl.hue} 60% 35%)`,
+                            }}
+                          >
+                            {pl.mark}
+                          </span>
+                        ) : null;
+                      })()}
+
+                      {/* Profile Name */}
+                      <span className="font-semibold text-slate-900 dark:text-slate-100 group-hover/name:text-cyan-600 dark:group-hover/name:text-cyan-300 transition-colors">
+                        {p.name}
+                      </span>
+
+                      {/* Local only badge */}
+                      {hasServer && p.origin === "local" && (
+                        <span className="text-slate-400 shrink-0" title={t("col.onlyHereWhy")}>
+                          <Laptop size={13} />
                         </span>
-                      ) : null;
-                    })()}
+                      )}
 
-                    {/* Profile Name */}
-                    <span className="font-semibold text-slate-900 dark:text-slate-100 group-hover:text-cyan-600 dark:group-hover:text-cyan-300 transition-colors">
-                      {p.name}
-                    </span>
+                      {/* Shared with team count */}
+                      {p.shared_with > 0 && (
+                        <span
+                          className="inline-flex items-center gap-0.5 text-slate-400 shrink-0"
+                          title={t("col.sharedWith", { n: String(p.shared_with) })}
+                        >
+                          <Users size={13} />
+                          <span className="text-[10px] font-medium">{p.shared_with}</span>
+                        </span>
+                      )}
 
-                    {/* Local only badge */}
-                    {hasServer && p.origin === "local" && (
-                      <span className="text-slate-400" title={t("col.onlyHereWhy")}>
-                        <Laptop size={13} />
-                      </span>
-                    )}
+                      {/* Verdict alert */}
+                      {verdict.level !== "ok" && (
+                        <span
+                          className={verdict.level === "block" ? "text-rose-400" : "text-amber-400"}
+                          title={verdictText}
+                        >
+                          <AlertTriangle size={13} />
+                        </span>
+                      )}
+                    </div>
 
-                    {/* Shared with team count */}
-                    {p.shared_with > 0 && (
-                      <span
-                        className="inline-flex items-center gap-0.5 text-slate-400"
-                        title={t("col.sharedWith", { n: String(p.shared_with) })}
+                    {/* Quick Edit Name & Tags Button on Hover */}
+                    {canEdit && onQuickEdit && (
+                      <button
+                        type="button"
+                        title="Edit Name & Tags"
+                        aria-label="Edit Name & Tags"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          openQuickEdit(p);
+                        }}
+                        className="shrink-0 p-1 rounded-md text-slate-400 hover:text-cyan-600 dark:hover:text-cyan-400 hover:bg-slate-200/60 dark:hover:bg-slate-800 transition-all opacity-0 group-hover/name:opacity-100 focus:opacity-100 !bg-transparent !border-0 cursor-pointer"
                       >
-                        <Users size={13} />
-                        <span className="text-[10px] font-medium">{p.shared_with}</span>
-                      </span>
-                    )}
-
-                    {/* Verdict alert */}
-                    {verdict.level !== "ok" && (
-                      <span
-                        className={verdict.level === "block" ? "text-rose-400" : "text-amber-400"}
-                        title={verdictText}
-                      >
-                        <AlertTriangle size={13} />
-                      </span>
+                        <Pencil size={12} />
+                      </button>
                     )}
                   </div>
 
@@ -573,17 +629,6 @@ export const SimprintProfileTable: React.FC<SimprintProfileTableProps> = ({
                       </button>
                     )}
 
-                    {/* Quick Cookies */}
-                    {onCookies && (
-                      <button
-                        title={t("ck.cookies")}
-                        disabled={busy}
-                        onClick={() => onCookies(p)}
-                        className="p-1.5 rounded-lg text-slate-500 hover:text-slate-900 hover:bg-slate-200/60 dark:text-slate-400 dark:hover:text-white dark:hover:bg-slate-800 transition-colors cursor-pointer !bg-transparent !border-0 !p-1.5"
-                      >
-                        <Cookie size={13} />
-                      </button>
-                    )}
 
                     {/* More actions */}
                     <button
@@ -620,6 +665,19 @@ export const SimprintProfileTable: React.FC<SimprintProfileTableProps> = ({
               ...(menu.top !== null ? { top: menu.top } : { bottom: menu.bottom ?? undefined }),
             }}
           >
+            {onCookies && (
+              <button
+                role="menuitem"
+                onClick={() => {
+                  setMenu(null);
+                  onCookies(menuProfile);
+                }}
+                className="w-full flex items-center gap-2 px-3 py-1.5 text-slate-700 hover:text-slate-900 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white cursor-pointer !bg-transparent !border-0"
+              >
+                <Cookie size={13} />
+                <span>{t("ck.cookies")}</span>
+              </button>
+            )}
             {onShare && (menuProfile.origin === "local" || menuProfile.permissions.includes("manage_access")) && (
               <button
                 role="menuitem"
@@ -723,6 +781,88 @@ export const SimprintProfileTable: React.FC<SimprintProfileTableProps> = ({
                   {notesBusy ? t("ui.saving") : t("ui.save")}
                 </button>
               </div>
+            </div>
+          </div>,
+          document.body,
+        )}
+      {quickEditFor &&
+        createPortal(
+          <div
+            className="scrim"
+            onMouseDown={(e) => {
+              if (e.target === e.currentTarget && !quickBusy) setQuickEditFor(null);
+            }}
+          >
+            <div
+              className="modal"
+              style={{ width: 480, height: "auto", maxHeight: "88vh" }}
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="quick-edit-title"
+            >
+              <div className="modalHead">
+                <h2 id="quick-edit-title">{t("row.edit")}</h2>
+                <span className="muted small font-mono">{quickEditFor.name}</span>
+              </div>
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  void saveQuickEdit();
+                }}
+                className="form space-y-4"
+                style={{ paddingTop: "var(--s-4)" }}
+              >
+                <div className="field">
+                  <label htmlFor="quick-edit-name">{t("col.name")}</label>
+                  <div>
+                    <input
+                      id="quick-edit-name"
+                      type="text"
+                      autoFocus
+                      required
+                      value={quickName}
+                      onChange={(e) => setQuickName(e.target.value)}
+                      style={{ width: "100%" }}
+                      placeholder="Profile name"
+                    />
+                  </div>
+                </div>
+
+                <div className="field">
+                  <label htmlFor="quick-edit-tags">{t("pd.tags")}</label>
+                  <div>
+                    <input
+                      id="quick-edit-tags"
+                      type="text"
+                      value={quickTags}
+                      onChange={(e) => setQuickTags(e.target.value)}
+                      style={{ width: "100%" }}
+                      placeholder="de, marketplace, amazon"
+                    />
+                    <p className="hint">{t("pd.tagsHint")}</p>
+                  </div>
+                </div>
+
+                {quickError && <p className="error">{quickError}</p>}
+
+                <div className="modalFoot flex items-center justify-end gap-2">
+                  <button
+                    type="button"
+                    className="ghost"
+                    disabled={quickBusy}
+                    onClick={() => setQuickEditFor(null)}
+                  >
+                    {t("ui.cancel")}
+                  </button>
+                  <button
+                    type="submit"
+                    className="primary"
+                    disabled={quickBusy || !quickName.trim()}
+                  >
+                    {quickBusy ? t("ui.saving") : t("ui.save")}
+                  </button>
+                </div>
+              </form>
             </div>
           </div>,
           document.body,

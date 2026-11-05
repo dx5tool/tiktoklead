@@ -463,6 +463,13 @@ export function App() {
     await api.setNotes(p.id, notes, p.origin);
     await refreshProfiles();
   };
+  const saveNameAndTags = async (p: Profile, name: string, tags: string[]) => {
+    const payload = p.origin === "local"
+      ? { ...p, name, tags, proxy_id: p.proxy?.id ?? "", proxy: null }
+      : { ...p, name, tags };
+    await api.saveProfile(payload, p.origin);
+    await refreshProfiles();
+  };
 
   useEffect(() => {
     void refreshProfiles();
@@ -1579,6 +1586,7 @@ export function App() {
                   await refreshProfiles();
                 }}
                 onCookies={setCookiesFor}
+                onQuickEdit={saveNameAndTags}
               />
             ) : (
               <SimprintProfileGrid
@@ -1611,6 +1619,7 @@ export function App() {
                   await refreshProfiles();
                 }}
                 onCookies={setCookiesFor}
+                onQuickEdit={saveNameAndTags}
               />
             )}
           </div>
