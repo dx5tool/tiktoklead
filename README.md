@@ -11,7 +11,7 @@ team. No seats, no per-profile pricing, no telemetry.
 
 > **Status: in development, and now on both macOS and Windows.** The core builds
 > and spoofs; the agent launches profiles; the server and desktop shell work.
-> Builds are on the [Releases](https://github.com/dx5tool/fury-nomaster/releases)
+> Builds are on the [Releases](https://github.com/dx5tool/tiktoklead/releases)
 > page, marked pre-release. **macOS builds are signed and notarised since
 > 21.09.2026; Windows is not** — see below.
 >
@@ -172,7 +172,7 @@ minutes depending on what changed; `ccache` and `sccache` do not help, because
 the build uses `-fmodules` and they miss on everything.
 
 ```bash
-git clone https://github.com/dx5tool/fury-nomaster && cd xchange-antidetect-browser
+git clone https://github.com/dx5tool/tiktoklead && cd xchange-antidetect-browser
 cargo build --release
 ```
 

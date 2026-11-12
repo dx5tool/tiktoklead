@@ -14,7 +14,7 @@
 #   latest.json                          what the updater reads, from
 #                                        releases/latest/download/latest.json
 #
-# Signed here, on the release Mac, with ~/.private_keys/xchange-updater.key
+# Signed here, on the release Mac, with ~/.tauri/xchange-tiktoklead.key
 # (FURY_UPDATER_KEY to override). The Windows installer is built on the box and
 # signed after it comes back, so the private key never leaves this machine.
 # Every installed copy checks these signatures against the public key in
@@ -27,8 +27,8 @@ version="${1:?usage: updater-feed.sh <version> <stapled XChange.app> <setup.exe>
 app="${2:?the stapled XChange.app}"
 setup="${3:?the Windows setup.exe}"
 out="$(cd "${4:?the release directory}" && pwd)"
-key="${FURY_UPDATER_KEY:-$HOME/.private_keys/xchange-updater.key}"
-repo="https://github.com/dx5tool/fury-nomaster/releases/download/v$version"
+key="${FURY_UPDATER_KEY:-$HOME/.tauri/xchange-tiktoklead.key}"
+repo="https://github.com/dx5tool/tiktoklead/releases/download/v$version"
 
 [ -d "$app" ] || { echo "!! no application at $app" >&2; exit 1; }
 [ -f "$setup" ] || { echo "!! no installer at $setup" >&2; exit 1; }
@@ -64,7 +64,7 @@ out, version, repo, mac, win = sys.argv[1:]
 sig = lambda f: open(f"{out}/{f}.sig").read().strip()
 feed = {
     "version": version,
-    "notes": f"https://github.com/dx5tool/fury-nomaster/releases/tag/v{version}",
+    "notes": f"https://github.com/dx5tool/tiktoklead/releases/tag/v{version}",
     "pub_date": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
     "platforms": {
         "darwin-aarch64": {"signature": sig(mac), "url": f"{repo}/{mac}"},

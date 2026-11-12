@@ -8,7 +8,7 @@ name: pages
 
 on:
   push:
-    branches: [main]
+    branches: [xchange]
     paths:
       - tools/detect-suite/probe.html
       - tools/detect-suite/probe.js

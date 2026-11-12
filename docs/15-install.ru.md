@@ -1,7 +1,7 @@
 # 15 — Установка
 
 > **Релизы есть; для macOS они подписаны, для Windows — нет.** На странице
-> [Releases](https://github.com/dx5tool/fury-nomaster/releases)
+> [Releases](https://github.com/dx5tool/tiktoklead/releases)
 > сборки лежат с 18.08.2026; текущая — 0.4.20 для Windows x64 и macOS
 > на Apple Silicon. К каждой приложены `SHA256SUMS` и
 > `REPORT.md` — измерение, которое ядро прошло перед публикацией. С 21.09.2026
@@ -40,7 +40,7 @@ XChange — это **две загрузки**, и об этом стоит зн
 ### 1. Приложение
 
 Скачайте `xchange-<версия>-macos-<арх>.dmg` со страницы
-[Releases](https://github.com/dx5tool/fury-nomaster/releases). `арх` — это `arm64`
+[Releases](https://github.com/dx5tool/tiktoklead/releases). `арх` — это `arm64`
 для любого Mac на Apple silicon (M1 и новее); если не уверены,  → «Об этом
 Mac» покажет. Для Intel релизной сборки пока нет: она называлась бы `x86_64`,
 и до её публикации на Intel-машине остаётся сборка из исходников.
@@ -154,7 +154,7 @@ Windows. Теперь прогнали, и `tools/verify-windows.ps1` прохо
 ### 1. Приложение
 
 Скачайте `xchange-<версия>-windows-x64-setup.exe` со страницы
-[Releases](https://github.com/dx5tool/fury-nomaster/releases) и
+[Releases](https://github.com/dx5tool/tiktoklead/releases) и
 запустите. **SmartScreen будет возражать** — «Система Windows защитила ваш
 компьютер» — потому что установщик не подписан, а не потому, что с ним что-то
 не так. Нажмите **Подробнее**, затем **Выполнить в любом случае**.

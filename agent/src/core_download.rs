@@ -82,7 +82,7 @@ fn asset_infix() -> &'static str {
 }
 
 const RELEASES: &str =
-    "https://api.github.com/repos/dx5tool/fury-nomaster/releases?per_page=10";
+    "https://api.github.com/repos/dx5tool/tiktoklead/releases?per_page=10";
 
 /// Name and URL of the newest core asset for this platform.
 ///

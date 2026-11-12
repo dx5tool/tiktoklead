@@ -146,7 +146,7 @@ export const SimprintHeader: React.FC<SimprintHeaderProps> = ({
         <div className="flex items-center gap-3">
           <h1 className="text-xl font-bold text-slate-900 dark:text-white tracking-tight">{title}</h1>
           <SimprintBadge variant="slate" title={t("app.profileCount", { n: totalCount })}>
-            Total: {totalCount}
+            {t("pager.total")}: {totalCount}
           </SimprintBadge>
           {runningCount > 0 && (
             <SimprintBadge variant="emerald" dot pulse>

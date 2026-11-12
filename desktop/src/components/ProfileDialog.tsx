@@ -139,7 +139,7 @@ function newProfileOverrides(): MachineOverrides {
  *  an anti-detect browser, the same profiles on their own OS were not. So new
  *  profiles get this OS's machines, they come first in the list, and picking
  *  another says why not (catalogue::pick_weighted_on does the same in bulk). */
-function hostOs(): string | null {
+export function hostOs(): string | null {
   const ua = navigator.userAgent;
   if (/Macintosh|Mac OS X/.test(ua)) return "macOS";
   if (/Windows/.test(ua)) return "Windows";
@@ -368,6 +368,7 @@ export function ProfileDialog({
       .preview({
         persona_id: personaId,
         fp_seed: editing?.fp_seed ?? 0,
+        is_new: !editing,
         // An empty field follows the exit, and the preview has to say what the
         // launch will claim rather than what the field contains. When the proxy
         // has been checked, that is its zone.

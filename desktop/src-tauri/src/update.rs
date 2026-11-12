@@ -34,9 +34,9 @@ use tauri_plugin_updater::UpdaterExt;
 // one went up. The list is newest-first, so the first entry is the answer.
 //
 // Fork: `plugins.updater.endpoints` in tauri.conf.json is the installer feed,
-// and this is the version-check feed. Both are placeholders until the Simprint
-// fork publishes its own builds; replace both together.
-const RELEASES: &str = "https://api.github.com/repos/dx5tool/fury-nomaster/releases?per_page=5";
+// and this is the version-check feed. Both point at the fork's release repo;
+// replace them together.
+const RELEASES: &str = "https://api.github.com/repos/dx5tool/tiktoklead/releases?per_page=5";
 
 #[derive(Serialize)]
 pub struct UpdateCheck {
@@ -184,13 +184,16 @@ pub async fn check_update(state: tauri::State<'_, crate::commands::AppState>) ->
         });
     }
 
+    let download = installer(&body);
+    let available = newer(latest, current()) && download.is_some();
+
     Ok(UpdateCheck {
         current: current(),
         latest: Some(latest.to_string()),
         url: body.get("html_url").and_then(|v| v.as_str()).map(str::to_string),
-        download: installer(&body),
+        download,
         notes: body.get("body").and_then(|v| v.as_str()).map(str::to_string),
-        status: if newer(latest, current()) { "available" } else { "current" },
+        status: if available { "available" } else { "current" },
         message: None,
     })
 }

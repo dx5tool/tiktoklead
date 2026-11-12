@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import { api, type DomainList, type KeptPersona, type Shell, type StorageInfo } from "../api";
 import { SecondFactor } from "./SecondFactor";
 import { useAsk } from "./Ask";
-import { languages, useI18n, type Language } from "../i18n";
+import { languageNames, languages, useI18n, type Language } from "../i18n";
 import { type Theme, themes, useTheme } from "../theme";
 import { Select } from "./Select";
 import { DEFAULT_SERVER } from "../defaults";
@@ -17,6 +17,12 @@ type Tab = (typeof TABS)[number];
 // the tab only offers a connection nothing on this machine can use yet. The
 // panel below stays intact; delete this list to bring the tab back.
 const HIDDEN_TABS: readonly Tab[] = ["team"];
+
+// Data-tab blocks kept out of the way: the transfer file, the relay's domain
+// lists and the machine capture. The components below stay whole, so taking an
+// entry out of this list brings its block back.
+type DataBlock = "transfer" | "domainLists" | "captureMachine";
+const HIDDEN_DATA: readonly DataBlock[] = ["transfer", "domainLists", "captureMachine"];
 
 /** Everything that is a preference rather than a property of a profile.
  *
@@ -30,7 +36,7 @@ const HIDDEN_TABS: readonly Tab[] = ["team"];
  *  fit. */
 /** The issue form that turns a saved capture into a pull request
  *  (.github/workflows/persona-issue.yml). Drop the file in; a robot does the rest. */
-const PERSONA_FORM = "https://github.com/dx5tool/fury-nomaster/issues/new?template=persona.yml";
+const PERSONA_FORM = "https://github.com/dx5tool/tiktoklead/issues/new?template=persona.yml";
 
 export function Settings({
   shell,
@@ -74,6 +80,7 @@ export function Settings({
   const [error, setError] = useState<string | null>(null);
   const { ask, dialog: askDialog } = useAsk();
   const [storage, setStorage] = useState<StorageInfo | null>(null);
+  const shows = (b: DataBlock) => !HIDDEN_DATA.includes(b);
 
   // Asked once when the Data tab is first opened, not on mount: the agent call
   // is cheap but the answer is only drawn there, and this dialog is opened for
@@ -166,17 +173,21 @@ export function Settings({
               <div className="settingsGroup">
                 <h2>{t("set.language")}</h2>
                 <p>{t("set.languageHint")}</p>
-                <div className="segmented">
+                {/* A list rather than the segmented control the other settings use:
+                    fifteen names do not fit in a row, and each is written in its own
+                    language so somebody who cannot read the current interface can
+                    still find theirs. */}
+                <select
+                  aria-label={t("set.language")}
+                  value={language}
+                  onChange={(e) => setLanguage(e.target.value as Language)}
+                >
                   {languages.map((l) => (
-                    <button
-                      key={l}
-                      aria-pressed={language === l}
-                      onClick={() => setLanguage(l as Language)}
-                    >
-                      {l === "system" ? t("set.langSystem") : l === "ru" ? "Русский" : l === "zh" ? "简体中文" : "English"}
-                    </button>
+                    <option key={l} value={l}>
+                      {l === "system" ? t("set.langSystem") : languageNames[l].name}
+                    </option>
                   ))}
-                </div>
+                </select>
               </div>
             </>
           )}
@@ -298,7 +309,7 @@ export function Settings({
 
           {tab === "data" && (
             <>
-              {shell.mode === "local" && (
+              {shows("transfer") && shell.mode === "local" && (
                 <div className="settingsGroup">
                   <h2>{t("set.transfer")}</h2>
                   <p>{t("set.transferHint")}</p>
@@ -324,9 +335,11 @@ export function Settings({
                 </div>
               )}
 
-              <DomainLists />
+              {shows("domainLists") && <DomainLists />}
 
-              <CaptureMachine team={shell.mode !== "local" && shell.signed_in} />
+              {shows("captureMachine") && (
+                <CaptureMachine team={shell.mode !== "local" && shell.signed_in} />
+              )}
 
               <div className="settingsGroup">
                 <h2>{t("set.thisMachine")}</h2>

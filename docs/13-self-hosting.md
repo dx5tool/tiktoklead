@@ -55,7 +55,7 @@ S3-совместимое хранилище не нужно и не испол�
 ## Быстрый путь: docker compose
 
 ```bash
-git clone https://github.com/dx5tool/fury-nomaster && cd xchange-antidetect-browser
+git clone https://github.com/dx5tool/tiktoklead && cd xchange-antidetect-browser
 cp .env.example .env          # задайте FURY_DB_PASSWORD
 docker compose up -d
 ```
@@ -90,8 +90,8 @@ compose это одна команда, `docker compose exec server xchange-serv
 
 ```bash
 V=0.2.21; A=x86_64
-curl -fLO https://github.com/dx5tool/fury-nomaster/releases/download/v$V/xchange-server-$V-linux-$A.tar.gz
-curl -fL https://github.com/dx5tool/fury-nomaster/releases/download/v$V/xchange-server-$V-linux-$A.tar.gz.sha256 | sha256sum -c
+curl -fLO https://github.com/dx5tool/tiktoklead/releases/download/v$V/xchange-server-$V-linux-$A.tar.gz
+curl -fL https://github.com/dx5tool/tiktoklead/releases/download/v$V/xchange-server-$V-linux-$A.tar.gz.sha256 | sha256sum -c
 tar -xzf xchange-server-$V-linux-$A.tar.gz && ./xchange-server --version
 ```
 

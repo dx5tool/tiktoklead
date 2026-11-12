@@ -30,6 +30,7 @@ import { isSuggested, statusHue } from "../../status";
 import { SimprintBadge } from "./SimprintBadge";
 import { isOpenHere } from "../ProfileTable";
 import { isProviderProxy } from "../../providerProxy";
+import { flag } from "../../flag";
 
 interface SimprintProfileGridProps {
   profiles: Profile[];
@@ -374,7 +375,17 @@ export const SimprintProfileGrid: React.FC<SimprintProfileGridProps> = ({
                       <Network size={11} />
                       <span>Proxy</span>
                     </span>
-                    <span>{p.proxy?.country ?? (p.proxy ? t("row.proxyUnchecked") : "Direct")}</span>
+                    <span>
+                      {p.proxy?.country ? (
+                        <>
+                          <span className="flag">{flag(p.proxy.country)}</span> {p.proxy.country}
+                        </>
+                      ) : p.proxy ? (
+                        t("row.proxyUnchecked")
+                      ) : (
+                        "Direct"
+                      )}
+                    </span>
                   </div>
                   {p.proxy ? (
                     <div className="font-mono text-slate-800 dark:text-slate-200 truncate flex items-center justify-between">

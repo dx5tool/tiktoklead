@@ -235,7 +235,7 @@ XChange downloads it, checks its signature, installs it and restarts. Profiles,
 proxies and settings stay. Close open profiles first; the button reminds you.
 
 The button arrived in 0.3.0. From an older version, install the new one by hand
-once from the [releases page](https://github.com/dx5tool/fury-nomaster/releases/latest).
+once from the [releases page](https://github.com/dx5tool/tiktoklead/releases/latest).
 
 Sometimes the browser itself updates; XChange then shows **Update the browser**, a
 separate download that leaves profiles alone.
@@ -268,6 +268,6 @@ admin removes the account and invites it again.
 with a Microsoft certificate. **More info → Run anyway**.
 
 **Found a bug or have an idea.** Open an
-[issue on GitHub](https://github.com/dx5tool/fury-nomaster/issues/new):
+[issue on GitHub](https://github.com/dx5tool/tiktoklead/issues/new):
 one problem per issue, with a screenshot and the XChange version
 (**Settings → About**).

@@ -41,7 +41,7 @@ HERE = pathlib.Path(__file__).resolve().parent
 ROOT = HERE.parent
 DIST = HERE / "dist"
 
-REPO = "dx5tool/fury-nomaster"
+REPO = "dx5tool/tiktoklead"
 
 
 def chromium_version() -> str:

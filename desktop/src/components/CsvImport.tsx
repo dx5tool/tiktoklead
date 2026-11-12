@@ -5,6 +5,7 @@ import { useMemo, useRef, useState } from "react";
 import { api, type LocalProxy } from "../api";
 import { useI18n } from "../i18n";
 import { type Field, looksLikeHeader, mapHeader, parseCsv, splitMulti } from "../csv";
+import { hostOs } from "./ProfileDialog";
 
 /** Profiles from a spreadsheet (docs/16 5.7). One row, one profile.
  *
@@ -93,15 +94,23 @@ export function CsvImport({
       // Weighted pick over the catalogue for rows that name no persona —
       // the same spread the batch dialog uses, done here because the rows
       // differ from one another and the agent's batch call takes one template.
+      //
+      // Of this computer's OS, as the batch dialog's are: a machine of another
+      // OS is not hidden by the patches. This drew from the whole catalogue
+      // until 0.5.0, and with phones in it would have made a phone of a
+      // spreadsheet row.
       const known = new Set(personas.map((p) => p.id));
-      const total = personas.reduce((s, p) => s + p.weight, 0);
+      const host = hostOs();
+      const same = personas.filter((p) => p.os.split(" ")[0] === host);
+      const pool = same.length > 0 ? same : personas;
+      const total = pool.reduce((s, p) => s + p.weight, 0);
       const pick = (): string => {
         let r = Math.random() * total;
-        for (const p of personas) {
+        for (const p of pool) {
           r -= p.weight;
           if (r <= 0) return p.id;
         }
-        return personas[personas.length - 1]?.id ?? "";
+        return pool[pool.length - 1]?.id ?? "";
       };
 
       let created = 0;

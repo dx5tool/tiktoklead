@@ -12,6 +12,7 @@ import { Extensions } from "./components/Extensions";
 import { DiskUsage } from "./components/DiskUsage";
 import { NetworkReport } from "./components/NetworkReport";
 import { ExtensionsView } from "./components/ExtensionsView";
+import { BookmarksView } from "./components/BookmarksView";
 import { AssistantsView } from "./components/AssistantsView";
 import { WarmDialog } from "./components/WarmDialog";
 import { useAsk } from "./components/Ask";
@@ -47,6 +48,7 @@ import { SimprintExportProfiles } from "./components/simprint/SimprintExportProf
 import { SimprintImportProfiles } from "./components/simprint/SimprintImportProfiles";
 import { SimprintPager, PAGE_SIZES } from "./components/simprint/SimprintPager";
 import { SHOW_VIEW_TOGGLE, sortProfiles, type ProfileSort } from "./components/simprint/utils";
+import { usePinnedProfiles } from "./pinned";
 import {
   providerForProxy,
   fetchProviderExit,
@@ -192,6 +194,7 @@ export function App() {
   const [tag, setTag] = useState("");
   const [projectFilter, setProjectFilter] = useState("");
   const [sort, setSort] = useState<ProfileSort>("created_desc");
+  const { pinned, togglePin } = usePinnedProfiles();
   const [viewMode, setViewMode] = useState<"table" | "grid">(() => {
     try {
       return (localStorage.getItem("xchange.view_mode") as "table" | "grid") || "table";
@@ -609,6 +612,7 @@ export function App() {
       )
       .filter((p) => !openOnly || p.running),
     sort,
+    pinned,
   );
 
   const pageCount = Math.max(1, Math.ceil(shown.length / pageSize));
@@ -1913,7 +1917,7 @@ export function App() {
               <button
                 className="ghost"
                 onClick={() =>
-                  void api.openUrl("https://github.com/dx5tool/fury-nomaster/blob/main/docs/14-team-server.md")
+                  void api.openUrl("https://github.com/dx5tool/tiktoklead/blob/xchange/docs/14-team-server.md")
                 }
               >
                 {t("app.serverUpdateSteps")}
@@ -2022,6 +2026,7 @@ export function App() {
             them looking for a profile list that was never theirs. */}
         {view === "proxies" && <Proxies profiles={profiles} local={local} myEmail={me?.email ?? null} />}
         {view === "extensions" && <ExtensionsView profiles={profiles} />}
+        {view === "bookmarks" && <BookmarksView profiles={profiles} />}
         {view === "projects" && (
           <Projects
             projects={projects}
@@ -2170,6 +2175,8 @@ export function App() {
                 onCookies={setCookiesFor}
                 onOpenFolder={openProfileFolder}
                 onQuickEdit={saveNameAndTags}
+                pinned={pinned}
+                onTogglePin={(p) => togglePin(p.id)}
               />
             ) : (
               <SimprintProfileGrid

@@ -45,8 +45,7 @@ function byName(a: Profile, b: Profile): number {
   return a.name.localeCompare(b.name, undefined, { sensitivity: "base", numeric: true });
 }
 
-/** A sorted copy — the list itself is React state and must not be reordered. */
-export function sortProfiles(profiles: Profile[], sort: ProfileSort): Profile[] {
+function sorted(profiles: Profile[], sort: ProfileSort): Profile[] {
   const out = [...profiles];
   switch (sort) {
     case "created_desc":
@@ -78,4 +77,21 @@ export function sortProfiles(profiles: Profile[], sort: ProfileSort): Profile[] 
     default:
       return out.sort(byName);
   }
+}
+
+/** A sorted copy — the list itself is React state and must not be reordered.
+ *
+ *  Pinned rows come first and keep the order the chosen sort gave them; the
+ *  pin moves a row, it does not re-rank the rest. */
+export function sortProfiles(
+  profiles: Profile[],
+  sort: ProfileSort,
+  pinned?: ReadonlySet<string>,
+): Profile[] {
+  const out = sorted(profiles, sort);
+  if (!pinned || pinned.size === 0) return out;
+  const top: Profile[] = [];
+  const rest: Profile[] = [];
+  for (const p of out) (pinned.has(p.id) ? top : rest).push(p);
+  return [...top, ...rest];
 }

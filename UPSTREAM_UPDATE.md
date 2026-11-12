@@ -6,7 +6,7 @@ Dự án này sử dụng kiến trúc phân tầng module hóa **"Ruột XChang
 - **Tầng API Client** (`desktop/src/api.ts`): **Bảo tồn nguyên vẹn 100% chữ ký & kiểu dữ liệu**, không sửa đổi để ngăn ngừa rò rỉ fingerprint và đảm bảo CLI/Daemon hoạt động chính xác.
 - **Tầng giao diện Simprint** (`desktop/src/components/simprint/`, `desktop/src/theme/`): Tách biệt hoàn toàn trong thư mục riêng, chỉ nhận dữ liệu từ `App.tsx`.
 
-> **Trạng thái hiện tại (04.11.2026):** nhánh `custom/simprint-ui` đã merge upstream `v0.4.20`. Farm schedule, WireGuard, Team/server, core `0.4.14` và các fix bảo mật đã có trong source. Updater đã tách khỏi upstream bằng placeholder — xem mục 5.
+> **Trạng thái hiện tại (12.11.2026):** source publish tại `github.com/dx5tool/tiktoklead`, nhánh `xchange`, version `1.4.21`. Updater riêng của fork trỏ `tiktoklead` — xem mục 5.
 
 > **Đổi tên Fury → XChange (12.11.2026).** Toàn bộ bề mặt người dùng, tên crate/binary, docs và tên file đã đổi sang XChange. **Khi rebase upstream, KHÔNG đổi ngược các chuỗi dưới đây về Fury** — chúng không phải nhãn sản phẩm mà là giao thức với core Chromium đã build sẵn.
 
@@ -136,17 +136,41 @@ Merge `upstream-v0.4.20` vào `custom/simprint-ui`, rồi xử lý:
 - **`SimprintSidebar.tsx`**: dùng `shell.version` thay cho `v0.3.9` hardcode.
 - Test: `npm run build`, `cargo check -p xchange-agent -p xchange-desktop -p xchange-server`, mở app kiểm tra Profiles/Farm/WireGuard/Users.
 
-## 5. Updater riêng của fork
+## 5. Updater riêng của fork (Windows)
 
-Hiện tại:
+Từ 12.11.2026 fork phát hành tại `github.com/dx5tool/tiktoklead`:
 
-- `desktop/src-tauri/tauri.conf.json` → `plugins.updater.pubkey` là key ngẫu nhiên, endpoint `https://updates.simprint.invalid/latest.json`.
-- `desktop/src-tauri/src/update.rs` → `RELEASES` trỏ repo placeholder `dx5tool/fury-nomaster`.
+- `desktop/src-tauri/tauri.conf.json` → `plugins.updater.pubkey` là key minisign thật; endpoint `https://github.com/dx5tool/tiktoklead/releases/latest/download/latest.json`.
+- `desktop/src-tauri/src/update.rs` → `RELEASES` trỏ `dx5tool/tiktoklead`.
+- `agent/src/core_download.rs` → `RELEASES` trỏ `dx5tool/tiktoklead`.
+- `tools/release/updater-feed-windows.sh` ký installer Windows và sinh `latest.json` chỉ với `windows-x86_64`.
+- `tools/release/updater-feed.sh` giữ cho macOS; repo đã đổi sang `tiktoklead`.
 
-Đây là placeholder có chủ đích: không báo update upstream và không thể cài bản official. Muốn phát hành thật:
+Quy trình phát hành Windows:
 
-1. `cd desktop && npx tauri signer generate -w ~/.tauri/xchange-simprint.key`
-2. Đưa public key vào `tauri.conf.json`; build với `TAURI_SIGNING_PRIVATE_KEY`.
-3. Sửa `RELEASES` và endpoint cùng lúc, trỏ về repo release của fork.
-4. Sửa `tools/release/updater-feed.sh` (đang hardcode repo upstream), `Cargo.toml` repository và `tools/ci/check-repo-url.py` nếu chạy CI.
-5. Core download vẫn trỏ upstream trong `agent/src/core_download.rs`; đổi nếu muốn host core riêng.
+1. Build core: `OUT_DIR=core/src/out/windows-x64.noindex tools/release/pack-core-windows.sh`, đặt tên `xchange-core-<CORE_VERSION>-windows-x64.tar.xz`.
+2. Build installer: `cd desktop && npm run app:build`; đổi tên `xchange-<version>-windows-x64-setup.exe`.
+3. Ký và sinh manifest: `tools/release/updater-feed-windows.sh <version> <setup.exe> dist-win`.
+4. `gh release create v<version> -R dx5tool/tiktoklead --target xchange --latest ...` và upload core, installer, `.sig`, `latest.json`, `SHA256SUMS`.
+5. `CORE_BUILD` trong `agent/src/main.rs` phải khớp `<CORE_VERSION>`.
+
+Private key: `~/.tauri/xchange-tiktoklead.key` (không commit). Public key nằm trong `tauri.conf.json`.
+
+---
+
+## 6. Đã port từ upstream 0.5.0–0.5.3 (12.11.2026)
+
+Giữ nguyên core 155 và patch `0071-webrtc-candidates`; chỉ port tầng agent/desktop/Tauri:
+
+- **Bookmark Sets (0.5.3)**: `agent/src/bookmarks.rs`, IPC `bookmarks.*`, Tauri commands, `BookmarksView`, sidebar. Ghi vào `Default/Bookmarks` trước khi mở profile; set do người dùng tạo trong browser không bị đụng. Marker dùng `xchange_set`.
+- **Cờ quốc gia proxy (0.5.2)**: `desktop/src/flag.ts`, font `TwemojiCountryFlags.woff2`, hiện ở Proxies và bảng/grid profile.
+- **12 ngôn ngữ (0.5.1)**: `desktop/src/locales/` (es, pt, fr, de, tr, ar, hi, ja, ko, id, vi, uk), Arabic RTL. Đây là bản dịch máy; key custom của fork fallback sang tiếng Anh.
+- **Google session portable (0.5.0)**: 2 flag `BoundSessionCredentialsKillSwitch` / `DeviceBoundSessions` trong launcher.
+- **Proxy password/rotation (0.5.0)**: Web Store và rotation đi qua relay; password chứa `#`, `/`, `?` không còn lỗi.
+- **Open-on-start mỗi lần (0.5.2)**: start URL cấu hình được mở ở mọi lần chạy; tab trống chỉ mở lần đầu.
+- **CSV cùng OS + Logins hint (0.5.0/0.5.2)**: chọn persona cùng hệ điều hành với máy; mô tả Logins là store riêng.
+- **deviceMemory 8GB (0.5.1)**: profile Windows mới trên máy 16GB nhận override 8GB (lợi ích đo trên core 157; core 155 vẫn chạy bình thường).
+- **Per-server org key (0.5.2)**: `settings.json` lưu generation theo từng server; sửa lỗi owner không đăng nhập được server thứ hai.
+- **Tauri 2.12 / updater 2.14 / zip 9.5.1**: bump dependency và lockfile.
+
+Không port: Partner card proxys.io, team cookie reseal. Core Chrome 157 để sau (xem mục 5 về core download và patch 0071).

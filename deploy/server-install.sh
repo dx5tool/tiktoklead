@@ -119,7 +119,7 @@ case "$(uname -m)" in
 esac
 PREBUILT=""
 if [ "${FURY_BUILD_FROM_SOURCE:-0}" != "1" ] && [ -n "$FURY_VER" ] && [ -n "$FURY_ARCH" ]; then
-    URL="https://github.com/dx5tool/fury-nomaster/releases/download/v$FURY_VER/xchange-server-$FURY_VER-linux-$FURY_ARCH.tar.gz"
+    URL="https://github.com/dx5tool/tiktoklead/releases/download/v$FURY_VER/xchange-server-$FURY_VER-linux-$FURY_ARCH.tar.gz"
     DL="$(mktemp -d)"
     if curl -fsSL "$URL" -o "$DL/server.tar.gz" && curl -fsSL "$URL.sha256" -o "$DL/server.sha256" \
         && echo "$(cut -d' ' -f1 "$DL/server.sha256")  $DL/server.tar.gz" | sha256sum -c --quiet \

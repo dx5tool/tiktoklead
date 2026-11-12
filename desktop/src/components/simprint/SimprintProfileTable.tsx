@@ -20,6 +20,8 @@ import {
   MoreHorizontal,
   HardDrive,
   RotateCcw,
+  Pin,
+  PinOff,
 } from "lucide-react";
 import { useI18n } from "../../i18n";
 import type { Me, Profile } from "../../api";
@@ -30,6 +32,7 @@ import { isSuggested, statusHue } from "../../status";
 import { SimprintBadge } from "./SimprintBadge";
 import { isOpenHere } from "../ProfileTable";
 import { isProviderProxy, providerForProxy } from "../../providerProxy";
+import { flag } from "../../flag";
 
 function formatSize(bytes: number): string {
   if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
@@ -84,6 +87,11 @@ interface SimprintProfileTableProps {
    *  it is not there. Absent where the caller has no shell behind it. */
   onOpenFolder?: (p: Profile) => void;
   onQuickEdit?: (p: Profile, name: string, tags: string[]) => Promise<void>;
+  /** Ids the operator pinned to the top of the list, on this machine. */
+  pinned?: ReadonlySet<string>;
+  /** Flips the pin on a profile. Absent where the list is not the
+   *  operator's own — a borrowed list keeps the order it arrived in. */
+  onTogglePin?: (p: Profile) => void;
   /** Save just the note beside a profile. Present only where the caller may
    *  edit it; the pencil in that cell is hidden otherwise. */
   onNotes?: (p: Profile, notes: string) => Promise<void>;
@@ -128,6 +136,8 @@ export const SimprintProfileTable: React.FC<SimprintProfileTableProps> = ({
   onCookies,
   onOpenFolder,
   onQuickEdit,
+  pinned,
+  onTogglePin,
   onNotes,
   personas,
   sharing,
@@ -222,7 +232,7 @@ export const SimprintProfileTable: React.FC<SimprintProfileTableProps> = ({
     const above = r.top - 8;
     // Taller than today's actions, so it flips up before it is cut off rather
     // than after someone adds the next one.
-    const want = 380;
+    const want = 420;
     const up = below < want && above > below;
     setMenu({
       id,
@@ -350,6 +360,22 @@ export const SimprintProfileTable: React.FC<SimprintProfileTableProps> = ({
   const menuIsOpen = menuProfile
     ? isOpenHere(menuProfile, { local, userId: me?.user_id, machine: thisMachine })
     : false;
+  // The menu reads in three groups: where the row lives, what it holds, and
+  // what happens to it. A rule is drawn only where both sides have something —
+  // a line with nothing under it says nothing.
+  const menuCanEdit = menuProfile?.permissions.includes("edit_profile") ?? false;
+  const menuCanDelete = menuProfile?.permissions.includes("delete_profile") ?? false;
+  const menuFirstGroup = Boolean(menuProfile && (onTogglePin || onOpenFolder));
+  const menuMiddleGroup = Boolean(
+    menuProfile &&
+      (onCookies ||
+        (onShare &&
+          (menuProfile.origin === "local" || menuProfile.permissions.includes("manage_access"))) ||
+        (onExtensions && menuCanEdit) ||
+        (onDisk && menuCanEdit) ||
+        (onClone && menuCanEdit)),
+  );
+  const menuLastGroup = Boolean(menuProfile && (onReset || onDelete) && menuCanDelete);
 
   return (
     <div className="w-full overflow-x-auto bg-[var(--simprint-surface)] rounded-xl border border-[var(--simprint-border)] transition-colors duration-200">
@@ -401,6 +427,7 @@ export const SimprintProfileTable: React.FC<SimprintProfileTableProps> = ({
             const verdict = assess(p, personas ?? null, sharedExitCount, providerBacked);
             const verdictText = verdict.notes.map((n) => t(n.key, n.vars)).join(" · ");
             const isPicked = selected.has(p.id);
+            const isPinned = pinned?.has(p.id) ?? false;
             const providerKey = providerProxy?.api_key?.trim() ?? "";
             const maskedProviderKey =
               providerKey.length > 8
@@ -453,7 +480,7 @@ export const SimprintProfileTable: React.FC<SimprintProfileTableProps> = ({
                 onClick={selectMode === "click" ? toggleRow : undefined}
                 className={`transition-colors group border-b border-[var(--simprint-border)] ${
                   isPicked
-                    ? "bg-cyan-50/80 dark:bg-cyan-950/20"
+                    ? "bg-[var(--simprint-table-row-selected)] hover:bg-[var(--simprint-table-row-selected-hover)]"
                     : "bg-[var(--simprint-table-row)] hover:bg-[var(--simprint-table-row-hover)]"
                 }`}
               >
@@ -495,9 +522,27 @@ export const SimprintProfileTable: React.FC<SimprintProfileTableProps> = ({
                         ) : null;
                       })()}
 
-                      {/* Profile Name */}
-                      <span className="font-semibold text-slate-900 dark:text-slate-100 group-hover/name:text-cyan-600 dark:group-hover/name:text-cyan-300 transition-colors">
-                        {p.name}
+                      {/* Profile Name, with the pin beside it: the mark and
+                          the name it moves wrap as one item. */}
+                      <span className="inline-flex items-center gap-1.5 min-w-0">
+                        {isPinned && onTogglePin && (
+                          <button
+                            type="button"
+                            title={t("row.unpin")}
+                            aria-label={t("row.unpin")}
+                            aria-pressed
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onTogglePin(p);
+                            }}
+                            className="shrink-0 p-0.5 rounded-md text-cyan-600 dark:text-cyan-400 hover:bg-slate-200/60 dark:hover:bg-slate-800 transition-colors cursor-pointer !bg-transparent !border-0"
+                          >
+                            <Pin size={13} fill="currentColor" />
+                          </button>
+                        )}
+                        <span className="font-semibold text-slate-900 dark:text-slate-100 group-hover/name:text-cyan-600 dark:group-hover/name:text-cyan-300 transition-colors">
+                          {p.name}
+                        </span>
                       </span>
 
                       {/* Quick Edit Name & Tags, beside the name it edits */}
@@ -597,7 +642,15 @@ export const SimprintProfileTable: React.FC<SimprintProfileTableProps> = ({
                           <span>{t("prov.noIpYet")}</span>
                         ) : (
                           <>
-                            <span>{p.proxy.country ?? t("row.proxyUnchecked")}</span>
+                            <span>
+                              {p.proxy.country ? (
+                                <>
+                                  <span className="flag">{flag(p.proxy.country)}</span> {p.proxy.country}
+                                </>
+                              ) : (
+                                t("row.proxyUnchecked")
+                              )}
+                            </span>
                             {!providerBacked && sharedExitCount >= 2 && (
                               <span className={sharedExitCount >= 3 ? "text-amber-600 dark:text-amber-400 font-medium" : "text-slate-500 dark:text-slate-400"}>
                                 · {t("row.sharedExit", { n: sharedExitCount })}
@@ -851,6 +904,19 @@ export const SimprintProfileTable: React.FC<SimprintProfileTableProps> = ({
               ...(menu.top !== null ? { top: menu.top } : { bottom: menu.bottom ?? undefined }),
             }}
           >
+            {onTogglePin && (
+              <button
+                role="menuitem"
+                onClick={() => {
+                  setMenu(null);
+                  onTogglePin(menuProfile);
+                }}
+                className="w-full flex items-center gap-2 px-3 py-1.5 text-slate-700 hover:text-slate-900 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white cursor-pointer !bg-transparent !border-0"
+              >
+                {pinned?.has(menuProfile.id) ? <PinOff size={13} /> : <Pin size={13} />}
+                <span>{pinned?.has(menuProfile.id) ? t("row.unpin") : t("row.pin")}</span>
+              </button>
+            )}
             {onOpenFolder && (
               <button
                 role="menuitem"
@@ -863,6 +929,9 @@ export const SimprintProfileTable: React.FC<SimprintProfileTableProps> = ({
                 <FolderOpen size={13} />
                 <span>{t("row.openFolder")}</span>
               </button>
+            )}
+            {menuFirstGroup && menuMiddleGroup && (
+              <div role="separator" className="my-1 border-t border-slate-200/70 dark:border-slate-700/60" />
             )}
             {onCookies && (
               <button
@@ -928,6 +997,9 @@ export const SimprintProfileTable: React.FC<SimprintProfileTableProps> = ({
                 <Copy size={13} />
                 <span>{t("bp.clone")}</span>
               </button>
+            )}
+            {menuMiddleGroup && menuLastGroup && (
+              <div role="separator" className="my-1 border-t border-slate-200/70 dark:border-slate-700/60" />
             )}
             {onReset && menuProfile.permissions.includes("delete_profile") && (
               <button

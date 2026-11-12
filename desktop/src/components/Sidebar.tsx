@@ -5,7 +5,7 @@ import { useI18n } from "../i18n";
 import { useState } from "react";
 import type { Me, Project, Shell } from "../api";
 
-export type View = "profiles" | "sharedWithMe" | "proxies" | "extensions" | "projects" | "assistants" | "trash" | "users";
+export type View = "profiles" | "sharedWithMe" | "proxies" | "extensions" | "bookmarks" | "projects" | "assistants" | "trash" | "users";
 
 export function Sidebar({
   projects,

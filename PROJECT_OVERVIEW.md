@@ -1,15 +1,17 @@
 # XCHANGE ANTIDETECT BROWSER — SIMPRINT UI REDESIGN
 > **Tài liệu Handoff & Kiến Trúc Dự Án dành cho AI LLM / Developer tiếp quản**  
-> *Phiên bản: v0.4.20 | Nhánh: `custom/simprint-ui` | Cập nhật gần nhất: 04/11/2026*
+> *Phiên bản: v1.4.21 | Nhánh: `xchange` | Cập nhật gần nhất: 12/11/2026*
 >
 > Đã merge upstream XChange `v0.4.20`: Farm schedule, WireGuard, Team/server, core `0.4.14` và các fix bảo mật đã có trong source. Giao diện Simprint được giữ nguyên.
+>
+> **12.11.2026:** đã port các tính năng upstream `0.5.0–0.5.3` (Bookmark Sets, cờ quốc gia proxy, 12 ngôn ngữ, Google session portable, proxy password/rotation, open-on-start, deviceMemory 8GB, per-server org key, Tauri 2.12). Core vẫn `155.0.8059.39` và giữ patch `0071-webrtc-candidates`.
 
 ---
 
 ## 1. TỔNG QUAN DỰ ÁN
 
 ### 1.1. XChange Antidetect Browser là gì?
-XChange (gốc: [dx5tool/fury-nomaster](https://github.com/dx5tool/fury-nomaster)) là trình duyệt chống phát hiện danh tính (Antidetect Browser) mã nguồn mở cấp độ doanh nghiệp dành cho đội ngũ (teams) và cá nhân:
+XChange (gốc: [dx5tool/fury-nomaster](https://github.com/dx5tool/fury-nomaster)) là trình duyệt chống phát hiện danh tính (Antidetect Browser) mã nguồn mở cấp độ doanh nghiệp dành cho đội ngũ (teams) và cá nhân. Fork hiện phát hành tại [dx5tool/tiktoklead](https://github.com/dx5tool/tiktoklead), nhánh `xchange`:
 - **Tầng Chromium C++ (`core/`)**: Bản vá sâu vào Chromium Core để can thiệp giả lập vân tay trình duyệt phần cứng: Canvas spoofing, WebGL vendor/renderer, AudioContext latency, Client Rects, User-Agent, Navigator, Fonts, v.v. (không dùng extension injection để tránh bị phát hiện).
 - **Tầng Daemon Rust (`agent/`)**: Daemon tiến trình `xchange-agent` chạy ngầm quản lý profiles, proxy routing (HTTP/SOCKS5/WireGuard), cookie jar, profile lock heartbeat và thực hiện CLI automation.
 - **Tầng Desktop Shell (`desktop/`)**: Ứng dụng desktop xây dựng trên **Tauri v2 + React 19 + TypeScript + Vite**.

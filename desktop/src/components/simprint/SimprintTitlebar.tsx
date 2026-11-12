@@ -16,6 +16,7 @@ import {
   Layers,
   Network,
   Puzzle,
+  Bookmark,
   FolderKanban,
   Bot,
   Users,
@@ -26,7 +27,8 @@ import {
   Moon,
   Check,
 } from "lucide-react";
-import { useI18n } from "../../i18n";
+import { languageNames, useI18n, type Resolved } from "../../i18n";
+import { flag } from "../../flag";
 import { useTheme } from "../../theme";
 import type { Me, Project, Shell } from "../../api";
 import type { View } from "../Sidebar";
@@ -53,63 +55,46 @@ const SECTION_ICONS: Record<View, React.ComponentType<{ size?: number; className
   sharedWithMe: Users,
   proxies: Network,
   extensions: Puzzle,
+  bookmarks: Bookmark,
   projects: FolderKanban,
   assistants: Bot,
   users: Users,
   trash: Trash2,
 };
 
-const LANGUAGES = [
-  { code: "en", name: "English" },
-  { code: "ru", name: "Русский" },
-  { code: "zh", name: "中文" },
-] as const;
-
-/** Flags drawn as SVG rather than emoji: Windows ships no flag glyphs, and the
- *  window's CSP allows images only from itself (no flag CDN). */
-const Flag: React.FC<{ code: "en" | "ru" | "zh" }> = ({ code }) => {
-  const frame = "rounded-[2px] overflow-hidden ring-1 ring-black/10 shrink-0";
-  if (code === "ru") {
-    return (
-      <svg aria-hidden="true" width="22" height="15" viewBox="0 0 3 2" className={frame}>
-        <rect width="3" height="0.667" fill="#fff" />
-        <rect y="0.667" width="3" height="0.667" fill="#0039A6" />
-        <rect y="1.334" width="3" height="0.666" fill="#D52B1E" />
-      </svg>
-    );
-  }
-  if (code === "zh") {
-    return (
-      <svg aria-hidden="true" width="22" height="15" viewBox="0 0 30 20" className={frame}>
-        <rect width="30" height="20" fill="#DE2910" />
-        <text x="3" y="9" fontSize="8" fill="#FFDE00">
-          ★
-        </text>
-        <text x="11" y="5" fontSize="3" fill="#FFDE00">
-          ★
-        </text>
-        <text x="13.5" y="8" fontSize="3" fill="#FFDE00">
-          ★
-        </text>
-        <text x="13.5" y="12" fontSize="3" fill="#FFDE00">
-          ★
-        </text>
-        <text x="11" y="15" fontSize="3" fill="#FFDE00">
-          ★
-        </text>
-      </svg>
-    );
-  }
-  return (
-    <svg aria-hidden="true" width="22" height="15" viewBox="0 0 60 40" className={frame}>
-      <rect width="60" height="40" fill="#012169" />
-      <path d="M0,0 L60,40 M60,0 L0,40" stroke="#fff" strokeWidth="8" />
-      <path d="M0,0 L60,40 M60,0 L0,40" stroke="#C8102E" strokeWidth="4" />
-      <path d="M30,0 V40 M0,20 H60" stroke="#fff" strokeWidth="12" />
-      <path d="M30,0 V40 M0,20 H60" stroke="#C8102E" strokeWidth="6" />
-    </svg>
-  );
+/** The country whose flag stands for each language: English by the flag it is
+ *  written with here, Portuguese by Brazil, Arabic by Saudi Arabia. */
+const LANGUAGE_FLAG: Record<Resolved, string> = {
+  en: "GB",
+  ru: "RU",
+  zh: "CN",
+  es: "ES",
+  pt: "BR",
+  fr: "FR",
+  de: "DE",
+  tr: "TR",
+  ar: "SA",
+  hi: "IN",
+  ja: "JP",
+  ko: "KR",
+  id: "ID",
+  vi: "VN",
+  uk: "UA",
 };
+
+/** Vietnamese leads the menu; the rest follow as the interface has always
+ *  listed them. */
+const LANGUAGES: { code: Resolved; name: string }[] = (
+  ["vi", "en", "ru", "zh", "es", "pt", "fr", "de", "tr", "ar", "hi", "ja", "ko", "id", "uk"] as Resolved[]
+).map((code) => ({ code, name: languageNames[code].name }));
+
+/** Flags come from the font shipped with the app (theme/flags.css): Windows
+ *  ships no flag glyphs, and the window's CSP allows images only from itself. */
+const Flag: React.FC<{ code: Resolved }> = ({ code }) => (
+  <span className="flag shrink-0" aria-hidden="true">
+    {flag(LANGUAGE_FLAG[code])}
+  </span>
+);
 
 export const SimprintTitlebar: React.FC<SimprintTitlebarProps> = ({
   view,
@@ -226,6 +211,8 @@ export const SimprintTitlebar: React.FC<SimprintTitlebarProps> = ({
         ? t("nav.proxies")
         : view === "extensions"
         ? t("nav.extensions")
+        : view === "bookmarks"
+        ? t("nav.bookmarks")
         : view === "projects"
         ? t("nav.projects")
         : view === "assistants"
@@ -364,7 +351,7 @@ export const SimprintTitlebar: React.FC<SimprintTitlebarProps> = ({
           {langMenuOpen && (
             <div
               role="menu"
-              className="absolute right-0 top-9 w-44 py-1.5 bg-white border border-slate-200 text-slate-800 shadow-xl dark:bg-[#171b26]/98 dark:border-slate-800 dark:text-slate-200 dark:shadow-2xl rounded-xl backdrop-blur-2xl z-50 text-xs"
+              className="absolute right-0 top-9 w-60 max-h-80 overflow-auto py-1.5 bg-white border border-slate-200 text-slate-800 shadow-xl dark:bg-[#171b26]/98 dark:border-slate-800 dark:text-slate-200 dark:shadow-2xl rounded-xl backdrop-blur-2xl z-50 text-xs"
             >
               {LANGUAGES.map(({ code, name }) => (
                 <button

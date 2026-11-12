@@ -7,6 +7,7 @@ import {
   Share2,
   Network,
   Puzzle,
+  Bookmark,
   FolderKanban,
   Bot,
   Users as UsersIcon,
@@ -40,6 +41,7 @@ const NAV_ICONS: Record<View, React.ComponentType<{ className?: string; size?: n
   sharedWithMe: Share2,
   proxies: Network,
   extensions: Puzzle,
+  bookmarks: Bookmark,
   projects: FolderKanban,
   assistants: Bot,
   users: UsersIcon,
@@ -66,8 +68,8 @@ export const SimprintSidebar: React.FC<SimprintSidebarProps> = ({
   const local = shell.mode === "local";
 
   const navItems: View[] = local
-    ? ["profiles", "proxies", "extensions", "projects", "trash"]
-    : ["profiles", "sharedWithMe", "proxies", "extensions", "projects", "trash"];
+    ? ["profiles", "proxies", "extensions", "bookmarks", "projects", "trash"]
+    : ["profiles", "sharedWithMe", "proxies", "extensions", "bookmarks", "projects", "trash"];
 
   return (
     <aside

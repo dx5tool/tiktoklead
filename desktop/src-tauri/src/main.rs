@@ -69,7 +69,6 @@ fn main() {
             update::maybe_install_on_start(app.handle());
             let config_dir = app.path().app_config_dir()?;
             let settings = Settings::load(&config_dir);
-            let seen_generation = settings.ork_generation;
 
             let session = Session::new();
             if let Some(url) = settings.server_url.as_deref() {
@@ -102,7 +101,6 @@ fn main() {
                 session,
                 locks: Default::default(),
                 org_key: Default::default(),
-                ork_generation: Mutex::new(seen_generation),
             });
             Ok(())
         })
@@ -227,6 +225,9 @@ fn main() {
             commands::warm_stop,
             commands::warm_clear,
             commands::warm_defaults,
+            commands::bookmarks_list,
+            commands::bookmarks_save,
+            commands::bookmarks_delete,
             commands::farm_list,
             commands::farm_create,
             commands::farm_delete,

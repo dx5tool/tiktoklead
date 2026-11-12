@@ -256,7 +256,7 @@ socks5://user:pass@host:port
 
 Кнопка появилась в 0.3.0. С более старой версии один раз поставьте новую
 вручную со страницы
-[релизов](https://github.com/dx5tool/fury-nomaster/releases/latest).
+[релизов](https://github.com/dx5tool/tiktoklead/releases/latest).
 
 Иногда обновляется и сам браузер. Тогда XChange покажет **«Обновить браузер»**:
 это отдельная загрузка, профили не трогаются.
@@ -291,6 +291,6 @@ socks5://user:pass@host:port
 случае»**.
 
 **Нашёл ошибку или есть идея.** Заведите заявку на
-[GitHub](https://github.com/dx5tool/fury-nomaster/issues/new):
+[GitHub](https://github.com/dx5tool/tiktoklead/issues/new):
 одна проблема на одну заявку, со скриншотом и версией XChange (видна в
 **Настройки → О программе**).

@@ -2,10 +2,22 @@
 // Copyright 2026 Bogdan Shapovalov and the XChange authors
 
 import { useEffect, useState } from "react";
+import { ar } from "./locales/ar";
+import { de } from "./locales/de";
+import { es } from "./locales/es";
+import { fr } from "./locales/fr";
+import { hi } from "./locales/hi";
+import { id } from "./locales/id";
+import { ja } from "./locales/ja";
+import { ko } from "./locales/ko";
+import { pt } from "./locales/pt";
+import { tr } from "./locales/tr";
+import { uk } from "./locales/uk";
+import { vi } from "./locales/vi";
 
 /** Interface language.
  *
- *  No library. Two languages and a few hundred strings do not justify a
+ *  No library. Fifteen languages and their strings do not justify a
  *  dependency with a plural-rules engine and a loader — and the one thing a
  *  library would buy, catching a missing key at build time, is bought here
  *  instead by typing `t` against the English dictionary: a key that does not
@@ -16,13 +28,38 @@ import { useEffect, useState } from "react";
  *  interface — an operator working in Russian on a German profile is the normal
  *  case, and tying the two would leak the operator into the fingerprint.
  */
-export const languages = ["system", "en", "ru", "zh"] as const;
+export const languages = [
+  "system", "vi", "en", "ru", "zh", "es", "pt", "fr", "de", "tr", "ar", "hi", "ja", "ko", "id", "uk",
+] as const;
 export type Language = (typeof languages)[number];
+/** A language the interface can actually be in: the choice with "system" resolved. */
+export type Resolved = Exclude<Language, "system">;
+
+/** Each language under its own name, so a person who cannot read the current
+ *  interface can still find theirs. The other part of each entry is the BCP-47
+ *  tag dates are formatted with. */
+export const languageNames: Record<Resolved, { name: string; tag: string }> = {
+  en: { name: "English", tag: "en-US" },
+  ru: { name: "Русский", tag: "ru-RU" },
+  zh: { name: "简体中文", tag: "zh-CN" },
+  es: { name: "Español", tag: "es-ES" },
+  pt: { name: "Português (Brasil)", tag: "pt-BR" },
+  fr: { name: "Français", tag: "fr-FR" },
+  de: { name: "Deutsch", tag: "de-DE" },
+  tr: { name: "Türkçe", tag: "tr-TR" },
+  ar: { name: "العربية", tag: "ar" },
+  hi: { name: "हिन्दी", tag: "hi-IN" },
+  ja: { name: "日本語", tag: "ja-JP" },
+  ko: { name: "한국어", tag: "ko-KR" },
+  id: { name: "Bahasa Indonesia", tag: "id-ID" },
+  vi: { name: "Tiếng Việt", tag: "vi-VN" },
+  uk: { name: "Українська", tag: "uk-UA" },
+};
 
 const en = {
   // shell
   "app.projects": "Projects",
-  "app.otherSettings": "Other settings",
+  "app.otherSettings": "OTHER",
   "app.newProject": "New project",
   "app.newProjectHere": "New folder on this machine",
   "app.projectsTeam": "TEAM PROJECTS",
@@ -46,6 +83,29 @@ const en = {
   "cred.title": "Logins",
   "cred.add": "Add a login",
   "cred.empty": "No logins saved for this profile. A shared account's password and two-factor seed live here rather than in a group chat — sealed on this machine, and sealed with the organisation key when there is a server.",
+  "cred.hint": "Kept in XChange, not in the browser's password manager: nothing here is filled into pages. You copy a password or a code from here and paste it yourself.",
+  "nav.bookmarks": "Bookmarks",
+  "bm.intro": "A set is a tree of folders and links that you make once and give to many profiles. It appears at the start of the bookmarks bar the next time a profile is opened. Bookmarks made in the browser itself are never touched.",
+  "bm.new": "New set",
+  "bm.empty": "No bookmark sets yet.",
+  "bm.name": "Set name",
+  "bm.addLink": "Add link",
+  "bm.addFolder": "Add folder",
+  "bm.title": "Title",
+  "bm.url": "Address",
+  "bm.folderName": "Folder name",
+  "bm.profiles": "Profiles that get this set",
+  "bm.allProfiles": "Every profile on this machine",
+  "bm.count": "{links} links · {profiles} profiles",
+  "bm.countAll": "{links} links · all profiles",
+  "bm.deleteConfirm": "Delete the set “{name}”? Its bookmarks leave each profile the next time that profile is opened.",
+  "bm.saved": "Saved. A profile gets the change the next time it is opened.",
+  "bm.remove": "Remove",
+  "bm.up": "Move up",
+  "bm.down": "Move down",
+  "bm.noProfiles": "There are no profiles to give it to yet.",
+  "bm.search": "Find a profile",
+  "bm.selectShown": "All shown ({n})",
   "cred.label": "Name",
   "cred.site": "Site",
   "cred.username": "Username",
@@ -409,6 +469,8 @@ const en = {
   "row.close": "Close",
   "row.edit": "Edit",
   "row.openFolder": "Open profile folder",
+  "row.pin": "Pin to top",
+  "row.unpin": "Unpin",
   "row.openFolderMissingTitle": "Profile folder not found",
   "row.openFolderMissing": "This profile's folder is not on this machine any more: {path}",
   "row.closeFirst": "Close it first",
@@ -1076,7 +1138,7 @@ const en = {
   "set.storageResetDetail": "New profiles will go back to {path}. Profiles already created elsewhere stay there.",
   "set.storageSplit": "{n} profiles are kept in a folder other than the default. They are not moved, and they still open normally.",
   "set.storageHint":
-    "Profiles, the database and the browser are all kept here. The data directory is fixed: it is read once at startup, before there is a window, and it also names the agent's pipe. Where new profiles go is a choice — existing ones keep the folder they already have. A folder on an NTFS or APFS volume is required: cookie jars are protected by permissions those filesystems provide and a FAT or exFAT disk cannot.",
+    "Profiles, the database and the browser live here; only the folder for new profiles can change. Use an NTFS or APFS volume — FAT or exFAT cannot protect cookie jars with permissions.",
   "err.rootNotDir": "That path is not a folder.",
   "err.rootNotWritable": "That folder cannot be written to. Check the permissions, or pick another folder.",
   "err.rootNoAcl": "That folder cannot be restricted to your account. Use a folder on an NTFS or APFS volume — not a removable disk formatted for FAT or exFAT, where cookie jars would be readable by anyone with the disk.",
@@ -1538,7 +1600,7 @@ export function dictionary(): Record<string, string> {
  *  Russian-speaking operator. */
 const ru: Record<Key, string> = {
   "app.projects": "Проекты",
-  "app.otherSettings": "Другие настройки",
+  "app.otherSettings": "OTHER",
   "app.newProject": "Новый проект",
   "app.newProjectHere": "Новая папка на этой машине",
   "app.projectsTeam": "ПРОЕКТЫ КОМАНДЫ",
@@ -1562,6 +1624,29 @@ const ru: Record<Key, string> = {
   "cred.title": "Логины",
   "cred.add": "Добавить логин",
   "cred.empty": "Для этого профиля логинов нет. Пароль общего аккаунта и его второй фактор живут здесь, а не в переписке — запечатанные ключом машины, а при сервере ключом организации.",
+  "cred.hint": "Хранится в XChange, а не в менеджере паролей браузера: на страницы отсюда ничего не подставляется. Пароль или код копируется здесь и вставляется вручную.",
+  "nav.bookmarks": "Закладки",
+  "bm.intro": "Набор — это дерево папок и ссылок, которое создаётся один раз и выдаётся многим профилям. Он появляется в начале панели закладок при следующем открытии профиля. Закладки, сделанные в самом браузере, не затрагиваются.",
+  "bm.new": "Новый набор",
+  "bm.empty": "Наборов закладок пока нет.",
+  "bm.name": "Название набора",
+  "bm.addLink": "Добавить ссылку",
+  "bm.addFolder": "Добавить папку",
+  "bm.title": "Название",
+  "bm.url": "Адрес",
+  "bm.folderName": "Название папки",
+  "bm.profiles": "Профили, которые получают этот набор",
+  "bm.allProfiles": "Все профили на этом компьютере",
+  "bm.count": "Ссылок: {links} · профилей: {profiles}",
+  "bm.countAll": "Ссылок: {links} · все профили",
+  "bm.deleteConfirm": "Удалить набор «{name}»? Его закладки исчезнут из каждого профиля при следующем открытии этого профиля.",
+  "bm.saved": "Сохранено. Профиль получит изменение при следующем открытии.",
+  "bm.remove": "Убрать",
+  "bm.up": "Выше",
+  "bm.down": "Ниже",
+  "bm.noProfiles": "Пока нет профилей, которым его можно выдать.",
+  "bm.search": "Найти профиль",
+  "bm.selectShown": "Все показанные ({n})",
   "cred.label": "Название",
   "cred.site": "Сайт",
   "cred.username": "Логин",
@@ -1623,7 +1708,7 @@ const ru: Record<Key, string> = {
   "sort.nameAsc": "Имя [А → Я]",
   "sort.nameDesc": "Имя [Я → А]",
   "sort.recent": "Недавно открытые",
-  "nav.profiles": "Профили",
+  "nav.profiles": "Profiles",
   "nav.proxies": "Прокси",
   "nav.extensions": "Расширения",
   "nav.projects": "Проекты",
@@ -1921,6 +2006,8 @@ const ru: Record<Key, string> = {
   "row.close": "Закрыть",
   "row.edit": "Изменить",
   "row.openFolder": "Открыть папку профиля",
+  "row.pin": "Закрепить сверху",
+  "row.unpin": "Открепить",
   "row.openFolderMissingTitle": "Папка профиля не найдена",
   "row.openFolderMissing": "Папки этого профиля на этой машине больше нет: {path}",
   "row.closeFirst": "Сначала закройте профиль",
@@ -2565,7 +2652,7 @@ const ru: Record<Key, string> = {
   "set.storageResetDetail": "Новые профили снова будут создаваться в {path}. Уже созданные в другом месте останутся там.",
   "set.storageSplit": "{n} профилей лежат не в папке по умолчанию. Их не переносят, и они по-прежнему открываются.",
   "set.storageHint":
-    "Здесь хранятся профили, база и браузер. Каталог данных фиксирован: он читается один раз при запуске, до появления окна, и он же задаёт имя канала агента. Куда попадают НОВЫЕ профили — это выбор; существующие остаются в своей папке. Нужен том NTFS или APFS: cookie-файлы защищены правами, которые дают эти файловые системы, а FAT или exFAT этого не умеет.",
+    "Здесь хранятся профили, база данных и браузер; менять можно только папку для новых профилей. Используйте том NTFS или APFS — FAT или exFAT не может защитить cookie-файлы правами доступа.",
   "err.rootNotDir": "Этот путь не является папкой.",
   "err.rootNotWritable": "В эту папку нельзя писать. Проверьте права или выберите другую папку.",
   "err.rootNoAcl": "Эту папку нельзя ограничить вашей учётной записью. Используйте папку на томе NTFS или APFS — не съёмный диск с FAT или exFAT, где cookie-файлы сможет прочитать любой, у кого есть диск.",
@@ -3000,7 +3087,7 @@ const ru: Record<Key, string> = {
 /** Simplified Chinese. A full record for the same reason as `ru`. */
 const zh: Record<Key, string> = {
   "app.projects": "项目",
-  "app.otherSettings": "其他设置",
+  "app.otherSettings": "OTHER",
   "app.newProject": "新建项目",
   "app.newProjectHere": "在本机新建文件夹",
   "app.projectsTeam": "团队项目",
@@ -3023,6 +3110,29 @@ const zh: Record<Key, string> = {
   "cred.title": "账号",
   "cred.add": "添加账号",
   "cred.empty": "此环境还没有保存账号。共享账号的密码和两步验证种子应保存在这里，而不是群聊里——在本机加密保存，连接服务器时还会用组织密钥加密。",
+  "cred.hint": "保存在 XChange 中，而不是浏览器的密码管理器里：这里的内容不会自动填入网页。密码或验证码需要从这里复制后手动粘贴。",
+  "nav.bookmarks": "书签",
+  "bm.intro": "书签集是一组文件夹和链接，创建一次即可分配给多个环境。下次打开环境时，它会出现在书签栏的开头。在浏览器里自行添加的书签不会受影响。",
+  "bm.new": "新建书签集",
+  "bm.empty": "还没有书签集。",
+  "bm.name": "书签集名称",
+  "bm.addLink": "添加链接",
+  "bm.addFolder": "添加文件夹",
+  "bm.title": "标题",
+  "bm.url": "地址",
+  "bm.folderName": "文件夹名称",
+  "bm.profiles": "使用此书签集的环境",
+  "bm.allProfiles": "本机上的所有环境",
+  "bm.count": "{links} 个链接 · {profiles} 个环境",
+  "bm.countAll": "{links} 个链接 · 所有环境",
+  "bm.deleteConfirm": "删除书签集“{name}”？其中的书签会在各环境下次打开时移除。",
+  "bm.saved": "已保存。环境将在下次打开时获得更改。",
+  "bm.remove": "移除",
+  "bm.up": "上移",
+  "bm.down": "下移",
+  "bm.noProfiles": "还没有可分配的环境。",
+  "bm.search": "查找环境",
+  "bm.selectShown": "全部显示项（{n}）",
   "cred.label": "名称",
   "cred.site": "网站",
   "cred.username": "用户名",
@@ -3083,7 +3193,7 @@ const zh: Record<Key, string> = {
   "sort.nameAsc": "名称 [A → Z]",
   "sort.nameDesc": "名称 [Z → A]",
   "sort.recent": "最近打开",
-  "nav.profiles": "环境",
+  "nav.profiles": "Profiles",
   "nav.proxies": "代理",
   "nav.extensions": "扩展",
   "nav.projects": "项目",
@@ -3380,6 +3490,8 @@ const zh: Record<Key, string> = {
   "row.close": "关闭",
   "row.edit": "编辑",
   "row.openFolder": "打开环境文件夹",
+  "row.pin": "置顶",
+  "row.unpin": "取消置顶",
   "row.openFolderMissingTitle": "未找到环境文件夹",
   "row.openFolderMissing": "此环境的文件夹已不在本机上：{path}",
   "row.closeFirst": "请先关闭",
@@ -3994,7 +4106,7 @@ const zh: Record<Key, string> = {
   "set.storageResetDetail": "新环境将重新创建在 {path}。已在别处创建的环境会留在那里。",
   "set.storageSplit": "有 {n} 个环境保存在非默认文件夹中。它们不会被移动，仍可正常打开。",
   "set.storageHint":
-    "环境、数据库和浏览器都保存在此处。数据目录是固定的：它在启动时读取一次，那时还没有窗口，而且它也决定了后台服务的管道名称。新环境放在哪里是可以选择的——已有的环境仍保留其所在文件夹。需要 NTFS 或 APFS 卷：Cookie 文件依赖这些文件系统提供的权限保护，而 FAT 或 exFAT 无法做到。",
+    "环境、数据库和浏览器都保存在这里；只有新环境的文件夹可以更改。请使用 NTFS 或 APFS 卷——FAT 或 exFAT 无法用权限保护 Cookie 文件。",
   "err.rootNotDir": "该路径不是文件夹。",
   "err.rootNotWritable": "该文件夹无法写入。请检查权限或选择其他文件夹。",
   "err.rootNoAcl": "该文件夹无法限制为仅你的账户访问。请使用 NTFS 或 APFS 卷上的文件夹——不要使用 FAT 或 exFAT 格式的可移动磁盘，那里的 Cookie 文件任何持有磁盘的人都能读取。",
@@ -4407,13 +4519,17 @@ const zh: Record<Key, string> = {
 
 const KEY = "xchange.language";
 
-function resolve(choice: Language): "en" | "ru" | "zh" {
+const dictionaries: Record<Resolved, Record<string, string>> = {
+  en, ru, zh, es, pt, fr, de, tr, ar, hi, ja, ko, id, vi, uk,
+};
+
+function resolve(choice: Language): Resolved {
   if (choice !== "system") return choice;
   // navigator.language of the *shell*, which is the operator's desktop. The
   // profile's own languages are a separate thing entirely.
   const system = (navigator.language || "en").toLowerCase();
-  if (system.startsWith("ru")) return "ru";
-  if (system.startsWith("zh")) return "zh";
+  const base = system.split("-")[0];
+  if (base in languageNames) return base as Resolved;
   return "en";
 }
 
@@ -4449,10 +4565,10 @@ export function useI18n(): {
   say: (e: unknown) => string;
   language: Language;
   /** The language the interface is actually in: `language` resolved, so
-   *  "system" becomes "en", "ru" or "zh". Compare against this, never against the
+   *  "system" becomes a real one. Compare against this, never against the
    *  setting -- the extension catalogue compared the setting with "ru" and
    *  showed English to everybody on "system" (08.10.2026). */
-  resolved: "en" | "ru" | "zh";
+  resolved: Resolved;
   setLanguage: (l: Language) => void;
 } {
   const [language, setStored] = useState<Language>(storedLanguage);
@@ -4467,10 +4583,11 @@ export function useI18n(): {
 
   useEffect(() => {
     document.documentElement.lang = resolve(language);
+    document.documentElement.dir = resolve(language) === "ar" ? "rtl" : "ltr";
   }, [language]);
 
   const resolved = resolve(language);
-  const dict = resolved === "ru" ? ru : resolved === "zh" ? zh : en;
+  const dict = dictionaries[resolved];
 
   const t = (key: Key, vars?: Record<string, string | number>) =>
     format(dict[key] ?? en[key], vars);
@@ -4490,7 +4607,7 @@ export function useI18n(): {
       return (e as Error)?.message ?? String(e);
     },
     language,
-    resolved: resolve(language),
+    resolved,
     setLanguage: (l) => {
       localStorage.setItem(KEY, l);
       listeners.forEach((fn) => fn());

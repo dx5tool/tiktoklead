@@ -84,7 +84,7 @@ Postgres, он сломает соседей. Так было у тестера 
 **Первый запуск.**
 
 ```bash
-git clone https://github.com/dx5tool/fury-nomaster xchange && cd xchange
+git clone https://github.com/dx5tool/tiktoklead xchange && cd xchange
 cp .env.example .env
 # в .env: FURY_DB_PASSWORD=свой пароль, FURY_VERSION=0.4.20 (последняя версия со страницы релизов)
 docker compose up -d

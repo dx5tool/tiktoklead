@@ -6,7 +6,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Open **https://dx5tool.github.io/fury-nomaster/** in ordinary Google Chrome
+        Open **https://dx5tool.github.io/tiktoklead/** in ordinary Google Chrome
         (not XChange), press «Снять отпечаток» then «Скачать JSON», and drop the file into the
         field below. A workflow turns it into a persona, checks it and opens a pull request
         under your handle; you will see the link here.

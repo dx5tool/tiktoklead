@@ -240,6 +240,22 @@ export interface WarmPlan {
   farm_id?: string;
 }
 
+/** A link, or a folder of them: a folder is a node with no `url`. */
+export interface BookmarkNode {
+  title: string;
+  url?: string | null;
+  children?: BookmarkNode[];
+}
+
+/** A tree of folders and links given to many profiles. See agent/src/bookmarks.rs. */
+export interface BookmarkSet {
+  id: string;
+  name: string;
+  nodes: BookmarkNode[];
+  profiles: string[];
+  all_profiles: boolean;
+}
+
 /** A warm-up on a schedule, over days. See agent/src/farm.rs. */
 export interface FarmSpec {
   name: string;
@@ -1313,6 +1329,8 @@ export const api = {
     timezone: string | null;
     languages: string[] | null;
     overrides?: MachineOverrides;
+    /** Not saved yet: answer with what saving it will store. */
+    is_new?: boolean;
   }): Promise<Preview> => {
     if (isDesktop) return cmd<Preview>("preview", { spec });
     return Promise.resolve({} as Preview);
@@ -1678,6 +1696,12 @@ export const api = {
   warmStop: (id: string): Promise<unknown> => cmd("warm_stop", { id }),
   warmClear: (): Promise<unknown> => cmd("warm_clear"),
   warmDefaults: (): Promise<{ urls: string[] }> => cmd("warm_defaults"),
+
+  // ---- bookmark sets ---------------------------------------------------------
+  bookmarkSets: (): Promise<BookmarkSet[]> =>
+    cmd<{ sets: BookmarkSet[] }>("bookmarks_list").then((r) => r.sets),
+  saveBookmarkSet: (set: BookmarkSet): Promise<{ id: string }> => cmd("bookmarks_save", { set }),
+  deleteBookmarkSet: (id: string): Promise<unknown> => cmd("bookmarks_delete", { id }),
 
   // ---- farming: warm-ups on a schedule -----------------------------------
 

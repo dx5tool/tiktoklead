@@ -321,19 +321,25 @@ async fn resolve_dirs(
 /// a crash, or after a bundle is unpacked from a colleague's machine, and the
 /// Sessions directory is the very thing the browser will read a moment later.
 fn start_urls_for(dir: &std::path::Path, configured: &[String]) -> Vec<String> {
+    // The pages a profile is set to open on start open on EVERY launch. The
+    // browser also restores its previous session, and pages passed on top of a
+    // restored session are added to it, so a start page left open at the last
+    // close comes back twice. That is the price: from 0.4.x they opened on the
+    // first launch only, which made the setting do nothing from the second
+    // launch on, editing the list included.
+    if !configured.is_empty() {
+        return configured.to_vec();
+    }
     if dir.join("Default").join("Sessions").is_dir() {
         return Vec::new();
     }
-    if configured.is_empty() {
-        // Nothing configured opens a blank tab. The relay's start page used to
-        // be the default, to prove the disguise and the exit on the first
-        // launch, but a profile with no site configured should not be sent to
-        // one: the operator asked for no page. The relay still serves that page
-        // at this launch's token for anything that asks for it — see
-        // `Relay::start_url` — it is simply not the first tab.
-        return vec!["about:blank".to_string()];
-    }
-    configured.to_vec()
+    // Nothing configured opens a blank tab. The relay's start page used to
+    // be the default, to prove the disguise and the exit on the first
+    // launch, but a profile with no site configured should not be sent to
+    // one: the operator asked for no page. The relay still serves that page
+    // at this launch's token for anything that asks for it — see
+    // `Relay::start_url` — it is simply not the first tab.
+    vec!["about:blank".to_string()]
 }
 
 impl Agent {
@@ -1783,14 +1789,10 @@ impl Agent {
                         anyhow::anyhow!("this proxy has no rotation link")
                     })?;
 
-                // reqwest cannot reach a WireGuard peer; a relay of our own
-                // can, and stops when `_relay` goes at the end of this arm.
-                let (route, _relay) = if proxy.kind == "wireguard" {
-                    let (addr, guard) = crate::relay::loopback(crate::parse_upstream(&proxy.url())?).await?;
-                    (addr, Some(guard))
-                } else {
-                    (proxy.url(), None)
-                };
+                // Through a relay of our own, which stops when `_relay` goes at
+                // the end of this arm: reqwest cannot reach a WireGuard peer, and
+                // reads a password holding `#` or `/` as the end of the login.
+                let (route, _relay) = crate::relay::loopback(crate::parse_upstream(&proxy.url())?).await?;
                 let client = reqwest::Client::builder()
                     .proxy(reqwest::Proxy::all(&route)?)
                     .timeout(std::time::Duration::from_secs(30))
@@ -1876,6 +1878,11 @@ impl Agent {
                         persona.id,
                         errs.iter().map(|e| e.to_string()).collect::<Vec<_>>().join("\n  ")
                     );
+                }
+                // A new Windows profile on a 16 GB machine starts on 8 GB; a
+                // profile being edited keeps the machine it has.
+                if profile.fp_seed == 0 {
+                    profile.overrides.settle_for_new_profile(&persona);
                 }
                 // Same reasoning for the hand-set fields: a combination that
                 // cannot exist is said now, not at the first launch.
@@ -1966,6 +1973,9 @@ impl Agent {
                             xchange_shared::catalogue::host_os(),
                         )
                         .id;
+                    }
+                    if let Ok(persona) = crate::personas::load(&p.persona_id) {
+                        p.overrides.settle_for_new_profile(&persona);
                     }
                     match self.store.upsert_profile(&p).await {
                         Ok(id) => made.push(id),
@@ -2120,6 +2130,24 @@ impl Agent {
 
             "warm.defaults" => Ok(json!({ "urls": crate::warm::DEFAULT_URLS })),
 
+            // Bookmark sets: folders of links given to many profiles, written
+            // into each at its next launch. See bookmarks.rs.
+            "bookmarks.list" => {
+                let book = crate::bookmarks::Book::load(paths::bookmarks_file());
+                Ok(json!({ "sets": book.live() }))
+            }
+            "bookmarks.save" => {
+                let set: crate::bookmarks::Set = serde_json::from_value(params.get("set").cloned().unwrap_or_default())
+                    .map_err(|e| anyhow::anyhow!("bookmark set: {e}"))?;
+                let mut book = crate::bookmarks::Book::load(paths::bookmarks_file());
+                Ok(json!({ "id": book.save(set)? }))
+            }
+            "bookmarks.delete" => {
+                let id = str_param(&params, "id")?;
+                let mut book = crate::bookmarks::Book::load(paths::bookmarks_file());
+                Ok(json!({ "deleted": book.delete(&id)? }))
+            }
+
             // Farming: warm-ups on a schedule, over days. See farm.rs.
             "farm.list" => {
                 let farms = self.farms.lock().await;
@@ -2234,6 +2262,11 @@ impl Agent {
                         None if count == 1 => format!("{} copy", source.name),
                         None => format!("{} copy {i}", source.name),
                     };
+                    // A copy is a new machine, so it starts the way a new one
+                    // does. A memory set on the source was copied above and stays.
+                    if let Ok(persona) = crate::personas::load(&p.persona_id) {
+                        p.overrides.settle_for_new_profile(&persona);
+                    }
                     match self.store.upsert_profile(&p).await {
                         Ok(new_id) => made.push(new_id),
                         Err(e) => failed.push(json!({ "n": i, "error": e.to_string() })),
@@ -2332,12 +2365,18 @@ impl Agent {
             "profile.preview" => {
                 let base = crate::personas::load(&str_param(&params, "persona_id")?)?;
                 let catalogue = crate::personas::all();
-                let overrides: xchange_shared::overrides::MachineOverrides = params
+                let mut overrides: xchange_shared::overrides::MachineOverrides = params
                     .get("overrides")
                     .filter(|v| !v.is_null())
                     .map(|v| serde_json::from_value(v.clone()))
                     .transpose()?
                     .unwrap_or_default();
+                // The dialog of a profile not saved yet has to show what saving
+                // it will store, not the persona's own value.
+                let is_new = params.get("is_new").and_then(|v| v.as_bool()).unwrap_or(false);
+                if is_new {
+                    overrides.settle_for_new_profile(&base);
+                }
                 // What the pickers may offer for this machine, answered with the
                 // preview so the dialog never lists a value for the wrong OS.
                 let options = xchange_shared::overrides::options_for(&base, &catalogue);
@@ -3757,20 +3796,25 @@ impl Agent {
             let _ = std::fs::remove_file(dir.join("DevToolsActivePort"));
         }
 
-        // Start URLs open on the FIRST launch and never again.
+        // The bookmark sets this profile has, onto its bookmarks bar. Never a
+        // reason not to open the browser: a profile without its working links
+        // is still a profile somebody needs open.
+        match crate::bookmarks::apply(&dir, &crate::bookmarks::Book::load(paths::bookmarks_file()).sets, &profile.id) {
+            Ok(true) => tracing::info!(profile = %profile.name, "wrote the profile's bookmark sets"),
+            Ok(false) => {}
+            Err(e) => tracing::warn!(error = %e, profile = %profile.name, "could not write the profile's bookmark sets"),
+        }
+
+        // The pages a profile is set to open on start open on every launch.
         //
-        // The browser now restores its previous session (see launcher.rs), and
-        // start URLs passed on top of a restored session are added to it rather
-        // than replacing it — so the tenth launch of a profile opened its start
-        // page for the tenth time and the operator closed nine tabs by hand.
-        // Measured: two launches, one extra copy; the pattern is obvious from
-        // there.
+        // The browser also restores its previous session, and pages passed on
+        // top of a restored session are added to it, so a start page left open
+        // at the last close comes back twice. That is the price: from 0.4.x
+        // they opened on the first launch only, which made the setting do
+        // nothing from the second launch on, editing the list included.
         //
-        // "Has it been opened before" is asked of the directory rather than of
-        // a flag in the database, for the same reason `running` is: a flag can
-        // be wrong after a crash or after a bundle is unpacked from a
-        // colleague's machine, and the Sessions directory is the thing the
-        // browser itself will be reading a moment later.
+        // With nothing configured, a blank tab opens on the first launch and
+        // never again: it is a starting point, not a page somebody asked for.
         let start_urls = start_urls_for(&dir, &profile.start_urls);
 
         // Whatever has been installed for this profile. Read from disk rather
@@ -4189,7 +4233,7 @@ mod tests {
     }
 
     #[test]
-    fn start_urls_open_once_and_then_the_session_takes_over() {
+    fn configured_start_urls_open_on_every_launch() {
         let tmp = std::env::temp_dir().join(format!("xchange-su-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&tmp);
         std::fs::create_dir_all(&tmp).unwrap();
@@ -4203,10 +4247,13 @@ mod tests {
         // page was the default and is deliberately not substituted here.
         assert_eq!(start_urls_for(&tmp, &[]), vec!["about:blank".to_string()]);
 
-        // Once the browser has been here, the session is the answer and passing
-        // anything would stack a duplicate on top of it.
+        // Configured pages open on every launch, even after the browser has
+        // been here. Only the built-in blank tab is first-launch-only.
         std::fs::create_dir_all(tmp.join("Default").join("Sessions")).unwrap();
-        assert!(start_urls_for(&tmp, &["https://shop.example/".to_string()]).is_empty());
+        assert_eq!(
+            start_urls_for(&tmp, &["https://shop.example/".to_string()]),
+            vec!["https://shop.example/".to_string()]
+        );
         assert!(start_urls_for(&tmp, &[]).is_empty());
 
         let _ = std::fs::remove_dir_all(&tmp);

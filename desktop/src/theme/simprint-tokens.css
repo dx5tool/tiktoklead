@@ -9,7 +9,11 @@
   --simprint-table-th: #0b0f19;
   --simprint-table-row: #0e1320;
   --simprint-table-row-hover: #151d30;
-  --simprint-table-row-selected: rgba(6, 182, 212, 0.12);
+  /* A picked row is a tint of the accent over the row it replaces: enough to
+     pick it out of a dozen near-black rows, short of the row reading as
+     pressed. Mixed rather than rgba so the result stays opaque. */
+  --simprint-table-row-selected: color-mix(in srgb, var(--simprint-cyan) 14%, var(--simprint-table-row));
+  --simprint-table-row-selected-hover: color-mix(in srgb, var(--simprint-cyan) 20%, var(--simprint-table-row));
   --simprint-card: #111827;
   --simprint-card-hover: #161f30;
   --simprint-border: #1e293b;
@@ -75,6 +79,7 @@
   --simprint-table-row: #ffffff;
   --simprint-table-row-hover: #f8fafc;
   --simprint-table-row-selected: #e0f2fe;
+  --simprint-table-row-selected-hover: #cfeafd;
   --simprint-card: #ffffff;
   --simprint-card-hover: #f8fafc;
   --simprint-border: #e2e8f0;
