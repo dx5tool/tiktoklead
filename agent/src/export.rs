@@ -663,7 +663,7 @@ mod tests {
         let mut zip = zip::ZipArchive::new(std::fs::File::open(&report.path).unwrap()).unwrap();
         let mut names = Vec::new();
         for i in 0..zip.len() {
-            names.push(zip.by_index(i).unwrap().name().to_string());
+            names.push(zip.by_index(i).unwrap().name().unwrap().to_string());
         }
         let joined = names.join("\n");
 

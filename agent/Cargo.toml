@@ -3,6 +3,9 @@ name = "xchange-agent"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+# zip 9, which the export/import path needs for the parser-differential fix,
+# requires 1.88. Only this crate and the desktop shell need the newer compiler.
+rust-version = "1.88"
 
 [dependencies]
 xchange-shared = { path = "../shared-rs" }
@@ -49,7 +52,7 @@ tar = "0.4"
 flate2 = "1"
 # Zip thường cho bản export của người dùng — không phải bundle niêm phong.
 # `deflate-flate2` để không kéo zlib-rs/zopfli: flate2 đã có trong graph.
-zip = { version = "4", default-features = false, features = ["deflate-flate2"] }
+zip = { version = "9", default-features = false, features = ["deflate-flate2"] }
 # The .xz half of a core archive is decoded here rather than by whatever tar
 # the machine happens to have -- see unpack() in install_core.rs. Pure Rust on
 # purpose: the C liblzma would be faster and would put a C toolchain between
