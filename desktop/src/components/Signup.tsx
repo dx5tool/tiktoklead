@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright 2026 Bogdan Shapovalov and the Fury authors
+// Copyright 2026 Bogdan Shapovalov and the XChange authors
 
+import { Brand } from "./Brand";
 import { useEffect, useState } from "react";
 import { useI18n } from "../i18n";
 import { api } from "../api";
@@ -11,7 +12,7 @@ import { PasswordPair } from "./PasswordPair";
  *
  *  The gap this fills: until now the only way onto a server was a code someone
  *  ran a command to issue, which is right for a team a person already runs and
- *  wrong for a product a person downloads. Somebody who installed Fury, wanted
+ *  wrong for a product a person downloads. Somebody who installed XChange, wanted
  *  their profiles on a server, and had nobody to ask had nowhere to go.
  *
  *  The address is asked first and asked alone, because whether this screen can
@@ -33,7 +34,10 @@ export function Signup({
   /// questions in a row on the very first screen a new person sees reads as the
   /// application having forgotten the answer — which it had.
   serverUrl,
+  version,
 }: {
+  /** This build's version, shown under the name (Brand). */
+  version?: string;
   onDone: () => void;
   onCancel: () => void;
   serverUrl?: string | null;
@@ -117,7 +121,7 @@ export function Signup({
 
   return (
     <form className="login" onSubmit={allowed ? create : ask}>
-      <h1>Fury</h1>
+      <Brand version={version} />
 
       {/* The address step is skipped when the shell already knows the server,
           and this is what stops it flashing on the way past: the first render

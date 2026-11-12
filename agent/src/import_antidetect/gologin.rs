@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright 2026 Bogdan Shapovalov and the Fury authors
+// Copyright 2026 Bogdan Shapovalov and the XChange authors
 
 //! Moving profiles out of GoLogin.
 //!
@@ -247,7 +247,7 @@ mod tests {
         assert_eq!(line.as_deref(), Some("socks5://u@x:p:a%ss@5.6.7.8:1080"));
         assert_eq!(note, None);
         // and the paste parser reads it back
-        let parsed = fury_shared::proxy_list::parse_line(line.as_deref().unwrap()).unwrap();
+        let parsed = xchange_shared::proxy_list::parse_line(line.as_deref().unwrap()).unwrap();
         assert_eq!(parsed.host, "5.6.7.8");
         assert_eq!(parsed.port, 1080);
         assert_eq!(parsed.username.as_deref(), Some("u@x"));

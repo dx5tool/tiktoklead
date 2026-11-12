@@ -117,7 +117,7 @@ package_core() {
   fi
   echo "   $said"
 
-  local name="fury-core-$version-$platform-$arch.tar.xz"
+  local name="xchange-core-$version-$platform-$arch.tar.xz"
   echo "== packing $name"
   # -J is xz. Measured against the alternatives on this bundle: 544 MB becomes
   # 134 MB, which is worth the ninety seconds; gzip gives about 200 MB in
@@ -156,7 +156,7 @@ package_core() {
 #    quarantine attribute. A file somebody DOWNLOADS does, and quarantine plus an
 #    invalid bundle signature produces the flat refusal:
 #
-#      "Приложение «Fury» повреждено, и его не удаётся открыть."
+#      "Приложение «XChange» повреждено, и его не удаётся открыть."
 #
 #    The user is told to move it to the Trash. Nothing in that message suggests a
 #    signature, so the natural reading is that the software is broken — and the
@@ -164,7 +164,7 @@ package_core() {
 #
 # 2. THE VERSION. The release version reached the FILE NAMES and never the
 #    bundle: tauri.conf.json carried its own hardcoded "0.0.1", so
-#    fury-0.1.0-pre3-macos-arm64.dmg installed an application that reported
+#    xchange-0.1.0-pre3-macos-arm64.dmg installed an application that reported
 #    0.0.1 to itself. The in-app update check compares against that number, so
 #    it answered about a version nobody was running. tauri.conf.json no longer
 #    holds a version — it inherits from [workspace.package] — and this check is
@@ -203,7 +203,7 @@ verify_shell_app() {
     if [ "${allow_unsigned:-0}" = "1" ]; then
       echo "   WARNING: ad-hoc signature, --allow-unsigned given"
       echo "   Anyone who downloads this must run:"
-      echo "     xattr -dr com.apple.quarantine /Applications/Fury.app"
+      echo "     xattr -dr com.apple.quarantine /Applications/XChange.app"
     else
       echo "!! this bundle is ad-hoc signed, which is not distributable: a" >&2
       echo "!! downloaded copy is quarantined and Gatekeeper refuses it." >&2
@@ -232,24 +232,24 @@ package_shell() {
       mnt=$(mktemp -d)
       hdiutil attach -nobrowse -readonly -mountpoint "$mnt" "$app" >/dev/null
       # Detach even if a check exits — an image left mounted registers its copy
-      # of Fury.app with LaunchServices, and then the machine has two.
+      # of XChange.app with LaunchServices, and then the machine has two.
       trap 'hdiutil detach "$mnt" -quiet 2>/dev/null || true; rmdir "$mnt" 2>/dev/null || true' RETURN
-      local inner="$mnt/Fury.app"
-      [ -d "$inner" ] || { echo "!! no Fury.app inside $app" >&2; exit 1; }
+      local inner="$mnt/XChange.app"
+      [ -d "$inner" ] || { echo "!! no XChange.app inside $app" >&2; exit 1; }
       verify_shell_app "$inner"
     fi
 
-    name="fury-$version-$platform-$arch.${app##*.}"
+    name="xchange-$version-$platform-$arch.${app##*.}"
     echo "== copying $name"
     cp "$app" "$out/$name"
   elif [ -d "$app" ]; then
     verify_shell_app "$app"
-    name="fury-$version-$platform-$arch.tar.xz"
+    name="xchange-$version-$platform-$arch.tar.xz"
     echo "== packing $name"
     tar -cJf "$out/$name" -C "$(dirname "$app")" "$(basename "$app")"
   else
     echo "!! no such bundle: $app" >&2
-    echo "   expected a .dmg or .exe from \`tauri build\`, or a Fury.app directory" >&2
+    echo "   expected a .dmg or .exe from \`tauri build\`, or an XChange.app directory" >&2
     exit 1
   fi
 
@@ -315,7 +315,7 @@ echo "in $out"
 # Skipped rather than fatal when there is no capture to report on. A release
 # built on a machine that has not run the probe is a release with no
 # measurement, and saying so beats inventing one.
-CAPTURE="${FURY_CAPTURE:-tools/detect-suite/baselines/ctx-fury-redacted.json}"
+CAPTURE="${FURY_CAPTURE:-tools/detect-suite/baselines/ctx-xchange-redacted.json}"
 
 # CORE_BINARY is derived here. It used to be referenced on the line below and
 # assigned nowhere at all, so `--core` never reached the report: every release
@@ -341,7 +341,7 @@ fi
 
 if [ -f "$CAPTURE" ]; then
   echo "==> measurement report"
-  cargo run -q -p fury-detect -- report "$CAPTURE" \
+  cargo run -q -p xchange-detect -- report "$CAPTURE" \
     ${CORE_BINARY:+--core "$CORE_BINARY"} \
     --out "$out/REPORT.md" || echo "!! the gate failed — see $out/REPORT.md"
 else

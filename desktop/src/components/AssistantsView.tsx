@@ -1,18 +1,18 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright 2026 Bogdan Shapovalov and the Fury authors
+// Copyright 2026 Bogdan Shapovalov and the XChange authors
 
 import { useEffect, useState } from "react";
 import { api, type Assistants } from "../api";
 import { useI18n } from "../i18n";
 
-/** AI assistants: Fury as an MCP server, connected with one button.
+/** AI assistants: XChange as an MCP server, connected with one button.
  *
  *  In the sidebar rather than inside Settings, because the person who wants it
  *  is looking for it by name. MCP existed for weeks as a README paragraph and
  *  a Python script; a tester searched the application for it "like AdsPower
  *  has", found nothing, and said that is where people get lost (08.10.2026).
  *
- *  The server is `fury-agent mcp` (agent/src/mcp.rs); this screen writes the
+ *  The server is `xchange-agent mcp` (agent/src/mcp.rs); this screen writes the
  *  client configs (src-tauri/assistants.rs). Nothing here talks to a model:
  *  the assistant, its account and its key are the person's own. */
 export function AssistantsView() {

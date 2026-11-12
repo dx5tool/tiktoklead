@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright 2026 Bogdan Shapovalov and the Fury authors
+// Copyright 2026 Bogdan Shapovalov and the XChange authors
 //
 // Why tauri.conf.json builds no .dmg
 //
@@ -7,7 +7,7 @@
 // a build artifact nobody used — and it was not free. Every dmg build mounts a
 // volume to lay the window out and unmounts it, and macOS registers the
 // application inside that volume and never forgets. Thirty-nine dead
-// /Volumes/dmg.*/Fury.app entries had accumulated on the development machine,
+// /Volumes/dmg.*/XChange.app entries had accumulated on the development machine,
 // every one of them offered in the Applications view as something you could
 // apparently launch. Not building a dmg stops it at the source.
 //
@@ -82,5 +82,10 @@ fn append_without_target<W: std::io::Write>(
 
 fn main() {
     pack_server_kit();
+    // `tauri_build` tracks tauri.conf.json, not the frontend it points at.
+    // Without this, `npm run build` followed by a plain `cargo build` keeps the
+    // previous bundle embedded, which reads as "my frontend change did
+    // nothing" (seen with an .xlsx list in Import Account).
+    println!("cargo:rerun-if-changed=../dist");
     tauri_build::build()
 }

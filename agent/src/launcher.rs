@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright 2026 Bogdan Shapovalov and the Fury authors
+// Copyright 2026 Bogdan Shapovalov and the XChange authors
 
 //! Launching the patched core.
 //!
@@ -14,9 +14,9 @@
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 
-use fury_platform::Carrier;
+use xchange_platform::Carrier;
 
-use fury_shared::rbac::LaunchRestrictions;
+use xchange_shared::rbac::LaunchRestrictions;
 
 #[derive(Debug, thiserror::Error)]
 pub enum LaunchError {
@@ -55,6 +55,15 @@ pub struct LaunchSpec<'a> {
     /// Only set when the caller is allowed CDP at all; see `LaunchRestrictions`.
     pub debug_port: Option<u16>,
 
+    /// Run the core without a window.
+    ///
+    /// The cookie exchange opens a profile only to read or write its jar, and a
+    /// window that appears and vanishes for that is a flash nobody asked for.
+    /// This keeps the ordinary launch — relay, proxy, profile directory and
+    /// os-crypt key — and removes only the window; team bundles, locks and the
+    /// push on close are untouched.
+    pub headless: bool,
+
     /// The key the core encrypts this profile's cookies with, or `None` to
     /// leave that to the machine's own keychain.
     ///
@@ -63,7 +72,7 @@ pub struct LaunchSpec<'a> {
     /// derived from the profile's own key material, so the ciphertext in the
     /// cookie jar can be read wherever the bundle can be opened. Without it, a
     /// colleague unpacking a shared profile cannot decrypt its cookies — and
-    /// Chromium answers that by DELETING them, then Fury packs the empty jar
+    /// Chromium answers that by DELETING them, then XChange packs the empty jar
     /// and pushes it.
     ///
     /// Travels on its own descriptor, not in the fingerprint config: that
@@ -72,7 +81,7 @@ pub struct LaunchSpec<'a> {
     /// that runs the visited site's code.
     pub os_crypt_key: Option<[u8; 32]>,
 
-    /// The UI locale, one of Chrome's shipped ones. See `fury_shared::locale`.
+    /// The UI locale, one of Chrome's shipped ones. See `xchange_shared::locale`.
     ///
     /// This is what makes `Intl.DateTimeFormat().resolvedOptions().locale`,
     /// `toLocaleString`, collation and every other ICU-backed answer agree with
@@ -89,7 +98,7 @@ pub struct LaunchSpec<'a> {
 
     /// (profile id, profile name): on macOS the core runs from a copy named
     /// after the profile, so the Dock says which account it is (dock.rs).
-    /// None runs the core as it is, and the Dock says Fury.
+    /// None runs the core as it is, and the Dock says XChange.
     pub dock_name: Option<(&'a str, &'a str)>,
 }
 
@@ -109,26 +118,6 @@ pub fn build_args(spec: &LaunchSpec) -> Vec<String> {
         "--proxy-bypass-list=<-loopback>".to_string(),
         "--no-default-browser-check".to_string(),
         "--no-first-run".to_string(),
-        // Reopen what was open. Chromium was already SAVING the session — the
-        // Sessions directory has files in it after every close — and simply
-        // never restoring it, so a profile came back as a blank new tab and the
-        // work of the last session had to be found again from history.
-        //
-        // Measured 03.08.2026 on a throwaway directory: two tabs open, SIGTERM,
-        // relaunch — one chrome://newtab and nothing else. With this switch the
-        // same test brings both tabs back.
-        //
-        // A switch rather than the session.restore_on_startup preference: the
-        // preference lives in the profile and the operator can change it in
-        // Settings, and a profile that quietly stopped restoring because
-        // somebody clicked something would be hard to explain. This is a
-        // property of how Fury opens a profile, so it belongs in argv.
-        //
-        // Bookmarks needed nothing: the user-data-dir is stable per profile
-        // (paths::profile_dir) and Chromium writes Default/Bookmarks into it,
-        // so they were already surviving. They LOOKED lost because the window
-        // came back empty.
-        "--restore-last-session".to_string(),
         // Anything that phones home outside the profile proxy is a real-IP leak.
         "--disable-background-networking".to_string(),
         // --disable-component-update is NOT here, and its absence is load-bearing.
@@ -149,7 +138,7 @@ pub fn build_args(spec: &LaunchSpec) -> Vec<String> {
         //
         // What it bought, measured the same day: nothing. With the switch and
         // without it, a browser left alone for 90 seconds opens connections to
-        // the same set of Google addresses. And under Fury every one of those
+        // the same set of Google addresses. And under XChange every one of those
         // goes through the relay, because --proxy-server points at it and the
         // loopback bypass is removed — so the question was never whether the
         // browser talks, only whose address it talks from.
@@ -213,6 +202,28 @@ pub fn build_args(spec: &LaunchSpec) -> Vec<String> {
         format!("--lang={}", spec.ui_locale),
     ];
 
+    // Reopen what was open. Chromium was already SAVING the session — the
+    // Sessions directory has files in it after every close — and simply never
+    // restoring it, so a profile came back as a blank new tab and the work of
+    // the last session had to be found again from history. Measured 03.08.2026
+    // on a throwaway directory: two tabs open, SIGTERM, relaunch — one
+    // chrome://newtab and nothing else; with this switch the same test brings
+    // both tabs back.
+    //
+    // A switch rather than the session.restore_on_startup preference: the
+    // preference lives in the profile and the operator can change it in
+    // Settings, and a profile that quietly stopped restoring because somebody
+    // clicked something would be hard to explain. This is a property of how
+    // XChange opens a profile, so it belongs in argv.
+    //
+    // Not for the windowless exchange. Restoring would load every one of those
+    // tabs through the profile's proxy, spending the exit's traffic and letting
+    // those sites see a browser nobody is watching — for an operation whose
+    // whole job is to read the jar the browser already has on disk.
+    if !spec.headless {
+        args.push("--restore-last-session".to_string());
+    }
+
     // Extensions, and the pair is not decoration.
     //
     // `--load-extension` on its own has been progressively restricted upstream
@@ -252,7 +263,23 @@ pub fn build_args(spec: &LaunchSpec) -> Vec<String> {
         _ => {}
     }
 
-    args.extend(spec.start_urls.iter().cloned());
+    // The same browser, in the same profile directory, with no window: the
+    // cookie exchange has nobody to show a page to. Nothing else changes — the
+    // relay, the proxy, the fingerprint config and the os-crypt key are the
+    // ones a visible launch gets, so the jar this reads is the jar the next
+    // launch opens.
+    if spec.headless {
+        args.push("--headless=new".to_string());
+    }
+
+    // The windowless exchange loads no page either. A start URL would be a
+    // request through the profile's proxy, made by a browser with no window, on
+    // an operation that only needs the jar already on disk. `about:blank` is
+    // what Chromium opens on its own, and it costs the exit nothing.
+    if !spec.headless {
+        args.extend(spec.start_urls.iter().cloned());
+    }
+
     args
 }
 
@@ -264,7 +291,7 @@ pub fn build_args(spec: &LaunchSpec) -> Vec<String> {
 /// — a valid persona cannot produce a contradictory config — so what is checked
 /// here is the other failure: a config the core will not understand.
 pub fn spawn(spec: &LaunchSpec) -> Result<std::process::Child, LaunchError> {
-    if let Err(missing) = fury_shared::fingerprint::check_core_config(spec.config) {
+    if let Err(missing) = xchange_shared::fingerprint::check_core_config(spec.config) {
         let msg = missing
             .iter()
             .map(|e| format!("  - {e}"))
@@ -297,7 +324,7 @@ pub fn spawn(spec: &LaunchSpec) -> Result<std::process::Child, LaunchError> {
         match crate::dock::named_core(spec.core_binary, id, name) {
             Ok(exe) => Some(exe),
             Err(e) => {
-                tracing::warn!(error = %e, "running the core under its own name; the Dock will say Fury");
+                tracing::warn!(error = %e, "running the core under its own name; the Dock will say XChange");
                 None
             }
         }
@@ -341,7 +368,13 @@ pub fn spawn(spec: &LaunchSpec) -> Result<std::process::Child, LaunchError> {
 ///
 /// Only the slot is visible in argv — a descriptor number on macOS, a handle
 /// value on Windows. That is the whole point of the carrier; see
-/// `fury_platform::carrier`.
+/// `xchange_platform::carrier`.
+///
+/// The stems stay `fury-`: they are not branding but the wire format between
+/// this agent and the already-built Chromium core, which reads `--fury-fp-fd`
+/// and `--fury-oscrypt-fd` in patches 0001 and 0110. Renaming a stem here does
+/// not rename it in the core, so the browser would start with no persona at all
+/// and nothing anywhere would report an error.
 fn carrier_switches(config: &Carrier, oscrypt: Option<&Carrier>) -> Vec<String> {
     let mut out = vec![config.switch("fury-fp")];
     if let Some(key) = oscrypt {
@@ -353,18 +386,18 @@ fn carrier_switches(config: &Carrier, oscrypt: Option<&Carrier>) -> Vec<String> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fury_shared::rbac::{effective, OrgRole, PermSet};
+    use xchange_shared::rbac::{effective, OrgRole, PermSet};
 
     /// A real derived config, not a hand-written one — these tests exist to
     /// check the thing that actually gets launched.
     fn sample_config() -> serde_json::Value {
-        let persona: fury_shared::persona::Persona = serde_json::from_str(include_str!(
+        let persona: xchange_shared::persona::Persona = serde_json::from_str(include_str!(
             "../../shared/personas/macos-15-m-series-1728x1117.json"
         ))
         .expect("shipped persona parses");
         persona.derive_core_config(
             1,
-            &fury_shared::persona::ProfileContext {
+            &xchange_shared::persona::ProfileContext {
                 timezone: "Europe/Berlin".into(),
                 languages: vec!["de-DE".into(), "de".into()],
                 ui_locale: "de".into(),
@@ -379,13 +412,14 @@ mod tests {
         LaunchSpec {
             dock_name: None,
             extensions: &[],
-            core_binary: Path::new("/nonexistent/Fury"),
+            core_binary: Path::new("/nonexistent/XChange"),
             user_data_dir: Path::new("/tmp/p"),
             config: cfg,
             relay_port: 41000,
             restrictions,
             start_urls: &[],
             debug_port: Some(9222),
+            headless: false,
             os_crypt_key: None,
             ui_locale: "de",
         }
@@ -401,6 +435,40 @@ mod tests {
         assert!(!args.iter().any(|a| a.starts_with("--remote-debugging-port")));
         assert!(args.iter().any(|a| a == "--fury-lock-devtools"));
         assert!(args.iter().any(|a| a == "--fury-lock-data-export"));
+    }
+
+    #[test]
+    fn the_cookie_exchange_gets_a_windowless_browser() {
+        let cfg = sample_config();
+        let r = LaunchRestrictions::for_perms(PermSet::full_profile_work());
+        let urls = ["https://example.com".to_string()];
+        let mut spec = spec_for(r, &cfg);
+        spec.headless = true;
+        spec.start_urls = &urls;
+        let args = build_args(&spec);
+        assert!(
+            args.iter().any(|a| a == "--headless=new"),
+            "the exchange would flash a window: {args:?}"
+        );
+        // Everything a visible launch gets still has to be there.
+        assert!(args.iter().any(|a| a.starts_with("--remote-debugging-port")));
+        assert!(args.iter().any(|a| a.starts_with("--proxy-server=")));
+        // But it opens nothing: a restored tab or a start page is a request
+        // through the profile's proxy for a read of its own cookie jar.
+        assert!(!args.iter().any(|a| a == "--restore-last-session"));
+        assert!(!args.iter().any(|a| a == "https://example.com"));
+    }
+
+    #[test]
+    fn a_visible_launch_still_opens_its_session_and_start_pages() {
+        let cfg = sample_config();
+        let r = LaunchRestrictions::for_perms(PermSet::full_profile_work());
+        let urls = ["https://example.com".to_string()];
+        let mut spec = spec_for(r, &cfg);
+        spec.start_urls = &urls;
+        let args = build_args(&spec);
+        assert!(args.iter().any(|a| a == "--restore-last-session"));
+        assert!(args.iter().any(|a| a == "https://example.com"));
     }
 
     #[test]
@@ -429,7 +497,7 @@ mod tests {
         // ResourceBundle silently falls back to en-US, leaving the browser
         // formatting in a language the profile never claimed.
         assert_eq!(
-            fury_shared::locale::ui_locale_for(Some(spec.ui_locale)),
+            xchange_shared::locale::ui_locale_for(Some(spec.ui_locale)),
             spec.ui_locale
         );
     }
@@ -507,8 +575,8 @@ mod tests {
         // Two installed: both switches, same list, comma-separated. Passing
         // --load-extension alone is what current Chrome ignores.
         let dirs = [
-            std::path::PathBuf::from("/p/Fury Extensions/aaaa"),
-            std::path::PathBuf::from("/p/Fury Extensions/bbbb"),
+            std::path::PathBuf::from("/p/XChange Extensions/aaaa"),
+            std::path::PathBuf::from("/p/XChange Extensions/bbbb"),
         ];
         let mut spec = spec_for(r, &cfg);
         spec.extensions = &dirs;
@@ -539,7 +607,7 @@ mod tests {
         // The switch is not in build_args any more — it names a slot that only
         // exists once the carrier does. That it is passed at all is
         // `carrier_switches`, tested above; that it carries no payload is
-        // `fury_platform::carrier`.
+        // `xchange_platform::carrier`.
         assert!(!joined.contains("--fury-fp-"), "the slot is decided at spawn: {joined}");
     }
 
@@ -548,7 +616,7 @@ mod tests {
         // The exact mistake this guards: handing over FingerprintConfig, whose
         // keys are snake_case, so every lookup in the core misses and the
         // profile silently reports the host machine.
-        let wrong = serde_json::to_value(fury_shared::fingerprint::samples::macos_arm64()).unwrap();
+        let wrong = serde_json::to_value(xchange_shared::fingerprint::samples::macos_arm64()).unwrap();
         let r = LaunchRestrictions::for_perms(PermSet::full_profile_work());
         let err = spawn(&spec_for(r, &wrong)).unwrap_err();
         assert!(matches!(err, LaunchError::Inconsistent(_)), "got {err:?}");
@@ -565,15 +633,16 @@ mod tests {
 
     #[test]
     fn a_real_canvas_is_a_decision_and_passes_while_a_lost_seed_still_does_not() {
-        use fury_shared::overrides::{CanvasMode, MachineOverrides};
+        use xchange_shared::overrides::{CanvasMode, MachineOverrides};
         let mut cfg = sample_config();
-        MachineOverrides { canvas: Some(CanvasMode::Real), ..Default::default() }.apply_config(&mut cfg);
+        MachineOverrides { canvas: Some(CanvasMode::Real), ..Default::default() }
+            .apply_config(&mut cfg, 1);
         assert!(cfg["noise"].get("canvasSeed").is_none());
-        fury_shared::fingerprint::check_core_config(&cfg).expect("real canvas is allowed");
+        xchange_shared::fingerprint::check_core_config(&cfg).expect("real canvas is allowed");
 
         // The marker is what makes it allowed; the same config without it is
         // the forgotten seed the check exists for.
         cfg["noise"].as_object_mut().unwrap().remove("canvas");
-        assert!(fury_shared::fingerprint::check_core_config(&cfg).is_err());
+        assert!(xchange_shared::fingerprint::check_core_config(&cfg).is_err());
     }
 }

@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright 2026 Bogdan Shapovalov and the Fury authors
+// Copyright 2026 Bogdan Shapovalov and the XChange authors
 
 //! Capturing this machine as a persona, from the application.
 //!
 //! The catalogue has 27 machines and two of them are measured. Adding one used
 //! to mean `tools/detect-suite/capture-chrome.sh`, a collector on port 8731 and
-//! `fury-detect persona` — a checkout, Python and a terminal. The machines that
+//! `xchange-detect persona` — a checkout, Python and a terminal. The machines that
 //! could widen the crowd belong to people who installed the .dmg, and none of
 //! them has any of that. This is the same three steps behind one button
 //! (docs/16, 3.4).
@@ -20,7 +20,7 @@
 //!    and launches Chrome at it with a throwaway profile, so extensions and
 //!    settings the operator has installed do not shape the capture;
 //! 3. receives the dump the page posts back, converts it with
-//!    `fury_shared::capture::from_capture` — the same code `fury-detect persona`
+//!    `xchange_shared::capture::from_capture` — the same code `xchange-detect persona`
 //!    runs — and checks the result with `Persona::validate()`.
 //!
 //! What it does not do: send anything anywhere. The result is returned to the
@@ -167,7 +167,7 @@ pub async fn run() -> Result<Captured, String> {
 
     // A throwaway profile, deliberately: a reference capture must describe a
     // clean browser, not one shaped by whatever the operator has installed.
-    let scratch = std::env::temp_dir().join(format!("fury-capture-{token}"));
+    let scratch = std::env::temp_dir().join(format!("xchange-capture-{token}"));
     let mut child = std::process::Command::new(&chrome)
         .arg(format!("--user-data-dir={}", scratch.display()))
         .arg("--no-first-run")
@@ -192,12 +192,12 @@ pub async fn run() -> Result<Captured, String> {
         Err(_) => return Err("the probe did not report back within 90 s — Chrome may have shown a dialog that needed answering".into()),
     };
 
-    let browser = fury_shared::capture::s(&dump, "navigator.userAgent").unwrap_or_default();
+    let browser = xchange_shared::capture::s(&dump, "navigator.userAgent").unwrap_or_default();
     // Unique against what ships: the same model of machine is the common case
     // for a contribution, and two files with one id would be refused by the
     // catalogue's own test. A second M5 becomes macos-m5-1470x956-2.
     let taken: std::collections::HashSet<String> =
-        fury_shared::catalogue::all().into_iter().map(|p| p.id).collect();
+        xchange_shared::catalogue::all().into_iter().map(|p| p.id).collect();
     let base = suggest_id(&dump);
     let mut id = base.clone();
     let mut n = 2;
@@ -205,9 +205,9 @@ pub async fn run() -> Result<Captured, String> {
         id = format!("{base}-{n}");
         n += 1;
     }
-    let persona = fury_shared::capture::from_capture(&dump, &id, 0.01)?;
+    let persona = xchange_shared::capture::from_capture(&dump, &id, 0.01)?;
 
-    let problems = match serde_json::from_value::<fury_shared::persona::Persona>(persona.clone()) {
+    let problems = match serde_json::from_value::<xchange_shared::persona::Persona>(persona.clone()) {
         Ok(p) => p.validate().err().map(|errs| errs.iter().map(|e| e.to_string()).collect()).unwrap_or_default(),
         Err(e) => vec![format!("the persona does not fit the schema: {e}")],
     };
@@ -218,7 +218,7 @@ pub async fn run() -> Result<Captured, String> {
 /// `macos-m1-1440x900`, `win11-rtx4060-1920x1080` — the catalogue's naming,
 /// derived from what the machine says about itself.
 fn suggest_id(dump: &serde_json::Value) -> String {
-    use fury_shared::capture::{n, s};
+    use xchange_shared::capture::{n, s};
     let plat = s(dump, "clientHints.platform").unwrap_or_default();
     // A phone is known by its model, which the hints carry: android-sm-a546b.
     // The GPU and the screen say much less about a handset than about a PC.

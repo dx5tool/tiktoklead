@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: AGPL-3.0-or-later
-# Copyright 2026 Bogdan Shapovalov and the Fury authors
+# Copyright 2026 Bogdan Shapovalov and the XChange authors
 #
 # Team mode, end to end, on one computer pretending to be two.
 #
 #     tools/team-e2e/run.sh
 #
-# Brings up a throwaway PostgreSQL, fury-server and two agents (machine A and
+# Brings up a throwaway PostgreSQL, xchange-server and two agents (machine A and
 # machine B, each with its own FURY_HOME), runs run.mjs against them, and takes
 # everything down again. Nothing touches the real installation: the database,
 # the bundles, both profile directories and both sockets live in a scratch
@@ -14,7 +14,7 @@
 #
 # Needs: PostgreSQL's initdb/pg_ctl (on PATH, or Postgres.app in ~/Applications
 # or /Applications), node 22+, a built core (FURY_CORE, or the one the installed
-# Fury downloaded), and `cargo build -p fury-server -p fury-agent` done.
+# XChange downloaded), and `cargo build -p xchange-server -p xchange-agent` done.
 # The binaries are taken from target/debug unless FURY_E2E_BIN says otherwise --
 # which is how the same run is pointed at an older build to compare.
 set -euo pipefail
@@ -37,7 +37,7 @@ for p in "$HOME/Applications/Postgres.app" "/Applications/Postgres.app"; do
 done
 [[ -n "$pgbin" ]] || { echo "no PostgreSQL: put initdb on PATH" >&2; exit 1; }
 
-work="$(mktemp -d "${TMPDIR:-/tmp}/fury-e2e.XXXXXX")"
+work="$(mktemp -d "${TMPDIR:-/tmp}/xchange-e2e.XXXXXX")"
 # Unix socket paths must fit in sun_path (104 bytes on macOS); TMPDIR there is
 # long enough to break that, so the sockets go somewhere short.
 sockdir="$(mktemp -d /tmp/fe2e.XXXX)"
@@ -61,21 +61,21 @@ trap cleanup EXIT
 
 # A locale PostgreSQL cannot use (a Russian macOS sets one) stops initdb, and
 # the postmaster then refuses to start as "multithreaded during startup".
-LC_ALL=C LANG=C "$pgbin/initdb" -D "$work/pg" -U fury --auth=trust >/dev/null
+LC_ALL=C LANG=C "$pgbin/initdb" -D "$work/pg" -U xchange --auth=trust >/dev/null
 LC_ALL=C LANG=C "$pgbin/pg_ctl" -D "$work/pg" -o "-p $pgport -k ''" -l "$work/pg.log" start >/dev/null
-"$pgbin/psql" -h 127.0.0.1 -p "$pgport" -U fury -d postgres -q \
-  -c "create role app login" -c "create database fury owner app"
+"$pgbin/psql" -h 127.0.0.1 -p "$pgport" -U xchange -d postgres -q \
+  -c "create role app login" -c "create database xchange owner app"
 
 mkdir -p "$work/bundles"
-DATABASE_URL="postgres://app@127.0.0.1:$pgport/fury" FURY_BUNDLE_DIR="$work/bundles" \
+DATABASE_URL="postgres://app@127.0.0.1:$pgport/xchange" FURY_BUNDLE_DIR="$work/bundles" \
   BIND="127.0.0.1:$srvport" FURY_OPEN_SIGNUP=1 RUST_LOG=info \
-  "$bin/fury-server" >"$work/server.log" 2>&1 &
+  "$bin/xchange-server" >"$work/server.log" 2>&1 &
 pids+=($!)
 
 for m in A B; do
   mkdir -p "$work/$m"
   FURY_HOME="$work/$m" FURY_SOCKET="$sockdir/$m.sock" RUST_LOG=info \
-    "$bin/fury-agent" serve >"$work/$m/stdout.log" 2>&1 &
+    "$bin/xchange-agent" serve >"$work/$m/stdout.log" 2>&1 &
   pids+=($!)
 done
 

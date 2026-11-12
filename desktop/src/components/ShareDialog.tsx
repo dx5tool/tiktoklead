@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright 2026 Bogdan Shapovalov and the Fury authors
+// Copyright 2026 Bogdan Shapovalov and the XChange authors
 
 import { useEffect, useState } from "react";
 import { api, type Profile } from "../api";
@@ -111,7 +111,14 @@ export function ShareDialog({
       if (!target) {
         const made = await api.createProjectIn(wanted, "team");
         target = made.id;
-        team.push({ id: made.id, name: wanted, profile_count: 0, origin: "team" });
+        team.push({
+          id: made.id,
+          name: wanted,
+          sort_weight: 0,
+          creator: "",
+          profile_count: 0,
+          origin: "team",
+        });
       }
       const r = await api.uploadProfile(p.id, target);
       moved.set(p.id, r.id);

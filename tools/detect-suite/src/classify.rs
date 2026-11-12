@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright 2026 Bogdan Shapovalov and the Fury authors
+// Copyright 2026 Bogdan Shapovalov and the XChange authors
 
 //! How to read a difference between two fingerprint dumps.
 //!
@@ -12,11 +12,11 @@
 //!   than no spoofing: a site that reads a value twice sees one identity on
 //!   changing hardware.
 //!
-//! * **Spoof mode** — real Chrome baseline vs Fury. Plenty *should* differ —
+//! * **Spoof mode** — real Chrome baseline vs XChange. Plenty *should* differ —
 //!   that is the whole point. But only *values* may differ. Any difference in
 //!   **behaviour** (an API that exists in one and not the other, a getter that
 //!   stopped being native, a codec that stopped being supported, a stability
-//!   flag that flipped) means Fury is distinguishable from Chrome, which is the
+//!   flag that flipped) means XChange is distinguishable from Chrome, which is the
 //!   thing we are trying to avoid.
 //!
 //! So: value differences are expected in spoof mode and forbidden in identity

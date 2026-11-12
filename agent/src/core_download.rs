@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright 2026 Bogdan Shapovalov and the Fury authors
+// Copyright 2026 Bogdan Shapovalov and the XChange authors
 
 //! Fetch the browser core from the project's releases, on request.
 //!
-//! This exists to delete a terminal step. Before it, installing Fury meant two
+//! This exists to delete a terminal step. Before it, installing XChange meant two
 //! downloads and then
 //!
-//!     fury-agent install-core ~/Downloads/fury-core-*.tar.xz
+//!     xchange-agent install-core ~/Downloads/xchange-core-*.tar.xz
 //!
 //! typed into a shell, which is a reasonable thing to ask of a developer and an
 //! unreasonable thing to ask of somebody who came from a product where you
@@ -20,7 +20,7 @@
 //! an updater is a scheduled channel out of an anti-detect browser, from an
 //! address that is not the profile's proxy. That objection is about
 //! PERIODICITY. A machine that phones a known host every day at the same time
-//! is a beacon, and "this address runs Fury and checked in at 14:03" is a
+//! is a beacon, and "this address runs XChange and checked in at 14:03" is a
 //! correlation handle for somebody running a hundred accounts.
 //!
 //! Nothing here runs on a timer, at startup, or in the background. It runs when
@@ -82,7 +82,7 @@ fn asset_infix() -> &'static str {
 }
 
 const RELEASES: &str =
-    "https://api.github.com/repos/furyteamtop/fury-antidetect-browser/releases?per_page=10";
+    "https://api.github.com/repos/dx5tool/fury-nomaster/releases?per_page=10";
 
 /// Name and URL of the newest core asset for this platform.
 ///
@@ -96,7 +96,7 @@ async fn newest_asset(client: &reqwest::Client) -> Result<(String, String)> {
         // version rather than pretending to be a browser: this request is the
         // agent asking for its own updates, and saying so is honest and also
         // what makes a rate-limit complaint traceable to us.
-        .header("User-Agent", concat!("fury-agent/", env!("CARGO_PKG_VERSION")))
+        .header("User-Agent", concat!("xchange-agent/", env!("CARGO_PKG_VERSION")))
         .header("Accept", "application/vnd.github+json")
         .send()
         .await
@@ -117,7 +117,7 @@ async fn newest_asset(client: &reqwest::Client) -> Result<(String, String)> {
     for release_assets in assets {
         for a in release_assets {
             let name = a.get("name").and_then(|v| v.as_str()).unwrap_or_default();
-            if name.starts_with("fury-core-") && name.contains(infix) {
+            if name.starts_with("xchange-core-") && name.contains(infix) {
                 let url = a
                     .get("browser_download_url")
                     .and_then(|v| v.as_str())
@@ -131,7 +131,7 @@ async fn newest_asset(client: &reqwest::Client) -> Result<(String, String)> {
 
     anyhow::bail!(
         "no core asset for {infix} in the latest releases. The releases page has \
-         the file if this is wrong; install it with `fury-agent install-core <file>`"
+         the file if this is wrong; install it with `xchange-agent install-core <file>`"
     )
 }
 
@@ -176,7 +176,7 @@ async fn run(shared: &Shared) -> Result<PathBuf> {
 
     let mut response = client
         .get(&url)
-        .header("User-Agent", concat!("fury-agent/", env!("CARGO_PKG_VERSION")))
+        .header("User-Agent", concat!("xchange-agent/", env!("CARGO_PKG_VERSION")))
         .send()
         .await
         .context("starting the download")?
@@ -220,7 +220,7 @@ async fn run(shared: &Shared) -> Result<PathBuf> {
 
     tracing::info!(bytes = seen, "downloaded; installing");
 
-    // install() is the same path `fury-agent install-core` takes, deliberately:
+    // install() is the same path `xchange-agent install-core` takes, deliberately:
     // it unpacks preserving symlinks, clears the quarantine flag the download
     // attracted, and RUNS THE BROWSER ONCE to check it starts. A download that
     // arrives corrupt should fail here, with the previous core still in place,

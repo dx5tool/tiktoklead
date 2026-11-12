@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright 2026 Bogdan Shapovalov and the Fury authors
+// Copyright 2026 Bogdan Shapovalov and the XChange authors
 
 //! The local store — what one machine knows without a server.
 //!
@@ -14,7 +14,7 @@
 //! distinguish: whoever can read this file is the owner. Asking for an email
 //! and a password with no server to authenticate against would be theatre.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
@@ -35,6 +35,13 @@ pub struct Project {
     pub id: String,
     pub name: String,
     pub notes: String,
+    /// Lower sorts first; equal weights are ordered by name.
+    #[serde(default)]
+    pub sort_weight: i64,
+    /// The device that created it. Empty on rows from before this column, and
+    /// the shell fills in this machine's name when it lists them.
+    #[serde(default)]
+    pub creator: String,
     pub profile_count: i64,
 }
 
@@ -61,15 +68,38 @@ pub struct Credential {
     /// in; see `upsert_credential` for why it does not stay that way.
     #[serde(default)]
     pub totp: Option<String>,
+    /// Session cookies as a Cookie header (`SPC_F=…; SPC_EC=…`). Sealed with
+    /// the machine key like the password, because a live session is a way into
+    /// the account and this file is backed up with the profiles. Written into
+    /// a browser only when the Login button asks for it.
+    #[serde(default)]
+    pub cookie: Option<String>,
     #[serde(default)]
     pub notes: String,
+}
+
+/// One login as the account import sees it: enough to recognise a pasted row,
+/// and no secret unless a secret is what makes it recognisable.
+#[derive(Debug, Clone, Serialize, sqlx::FromRow)]
+pub struct CredentialIdentity {
+    pub id: String,
+    pub profile_id: String,
+    /// The profile's name, so the import can say which one already holds the
+    /// account instead of showing a bare uuid.
+    pub profile_name: String,
+    pub site: String,
+    pub username: Option<String>,
+    /// Opened only for a login that has no username — see `credential_index`.
+    #[serde(default)]
+    pub cookie: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Proxy {
     pub id: String,
     pub name: String,
-    /// "http" | "https" | "socks5"
+    /// "http" | "https" | "socks5" | "wireguard". For "wireguard" the whole
+    /// .conf is in `password` and host/port are its Endpoint, for display.
     pub kind: String,
     pub host: String,
     pub port: u16,
@@ -109,6 +139,12 @@ pub struct Proxy {
 impl Proxy {
     /// The upstream URL the relay takes.
     pub fn url(&self) -> String {
+        // A WireGuard proxy keeps its whole config where a password goes —
+        // sealed like one here and on a team server — and the URL carries it
+        // the same way (`wireguard::url`).
+        if self.kind == "wireguard" {
+            return crate::wireguard::url(self.password.as_deref().unwrap_or(""), &self.host, self.port);
+        }
         match (&self.username, &self.password) {
             (Some(u), Some(p)) => format!("{}://{u}:{p}@{}:{}", self.kind, self.host, self.port),
             _ => format!("{}://{}:{}", self.kind, self.host, self.port),
@@ -200,7 +236,7 @@ pub struct Profile {
     /// profile, and applied — and re-validated — at every launch, never baked
     /// into the persona id.
     #[serde(default)]
-    pub overrides: fury_shared::overrides::MachineOverrides,
+    pub overrides: xchange_shared::overrides::MachineOverrides,
     pub start_urls: Vec<String>,
     pub last_opened_at: Option<String>,
 }
@@ -230,7 +266,7 @@ impl Store {
         // Best effort on both platforms — an unwritable ACL is not a reason to
         // refuse to start — but it is ATTEMPTED on both, which a `#[cfg(unix)]`
         // here would not have been.
-        let _ = fury_platform::perms::owner_only_file(path);
+        let _ = xchange_platform::perms::owner_only_file(path);
 
         let store = Self {
             pool,
@@ -260,6 +296,10 @@ impl Store {
                 id          TEXT PRIMARY KEY,
                 name        TEXT NOT NULL,
                 notes       TEXT NOT NULL DEFAULT '',
+                sort_weight INTEGER NOT NULL DEFAULT 0,
+                -- The device that made it, not a user id: a local store has no
+                -- users. The shell passes this in when it creates a project.
+                created_by  TEXT NOT NULL DEFAULT '',
                 created_at  TEXT NOT NULL,
                 deleted_at  TEXT
             );
@@ -335,6 +375,10 @@ impl Store {
                 -- are accepted on the way in and normalised to a URI so the
                 -- digits, period and hash travel with it.
                 totp        TEXT,
+                -- Sealed. A Cookie header for the session (`SPC_F=…; SPC_EC=…`).
+                -- The Login button writes it into the profile's browser jar;
+                -- imports only ever store it here.
+                cookie      TEXT,
                 notes       TEXT NOT NULL DEFAULT '',
                 created_at  TEXT NOT NULL,
                 updated_at  TEXT NOT NULL
@@ -359,6 +403,11 @@ impl Store {
         // in SQLite means rebuilding the table, and rebuilding a table that
         // holds warmed accounts to reclaim a few unused bytes is a bad trade.
         for stmt in [
+            // Where a project sits in a list, and the device that made it.
+            // Every project that predates these keeps weight 0 and an empty
+            // creator; the shell names this machine for the empty ones.
+            "ALTER TABLE projects ADD COLUMN sort_weight INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE projects ADD COLUMN created_by TEXT NOT NULL DEFAULT ''",
             "ALTER TABLE proxies ADD COLUMN rotate_url TEXT",
             "ALTER TABLE proxies ADD COLUMN checker_url TEXT",
             "ALTER TABLE proxies ADD COLUMN last_timezone TEXT",
@@ -380,12 +429,176 @@ impl Store {
             // Machine fields set by hand, as one JSON object. '{}' is "as the
             // persona has it", which is every profile made before this.
             "ALTER TABLE profiles ADD COLUMN overrides TEXT NOT NULL DEFAULT '{}'",
+            // Where this profile's browser data is, as an absolute path. NULL
+            // means "never launched, use the root in force now" — the only case
+            // where the storage root is consulted. Every profile that existed
+            // before this column gets its old path written in by the backfill
+            // below, so a root change cannot move anything that is already on
+            // disk.
+            "ALTER TABLE profiles ADD COLUMN dir TEXT",
+            // Session cookies joined the login after the first release of the
+            // credentials table. NULL on every existing row, which is "no
+            // cookie stored" — the same thing the Login button treats as
+            // "nothing to write".
+            "ALTER TABLE credentials ADD COLUMN cookie TEXT",
         ] {
             let _ = sqlx::query(stmt).execute(&self.pool).await;
         }
 
+        // Presented as a table rather than a row of the `profiles` data: the
+        // root is a machine-level choice that outlives every profile, and a
+        // profile row that happens to hold it would lose it when that profile
+        // was deleted. `CHECK (id = 1)` is the whole schema — one installation
+        // has one root.
+        sqlx::raw_sql(
+            r#"
+            CREATE TABLE IF NOT EXISTS storage (
+                id           INTEGER PRIMARY KEY CHECK (id = 1),
+                profile_root TEXT
+            );
+            "#,
+        )
+        .execute(&self.pool)
+        .await?;
+
         self.allow_profiles_without_a_project().await?;
+        // After the rebuild above, not before. That function recreates the
+        // table from an explicit column list, and a database old enough to
+        // need it would otherwise have its freshly added `dir` dropped again.
+        self.backfill_profile_dirs().await?;
         Ok(())
+    }
+
+    /// Gives every profile that predates `dir` the path it actually has.
+    ///
+    /// Called on every start and cheap when there is nothing to do. The point
+    /// is ordering: `dir` has to be filled in *before* a root can be chosen,
+    /// or the first profile to be launched after the change would be created
+    /// in the new root while its data sits in the old one — a profile that
+    /// looks logged out with its cookies still on disk.
+    ///
+    /// The default root is `data_dir()/profiles`, which is where every profile
+    /// has lived since the first release.
+    async fn backfill_profile_dirs(&self) -> anyhow::Result<()> {
+        let missing: Vec<String> = sqlx::query_scalar("SELECT id FROM profiles WHERE dir IS NULL")
+            .fetch_all(&self.pool)
+            .await?;
+        if missing.is_empty() {
+            return Ok(());
+        }
+
+        let legacy = crate::paths::data_dir().join("profiles");
+        for id in &missing {
+            let dir = legacy.join(id);
+            sqlx::query("UPDATE profiles SET dir = ? WHERE id = ?")
+                .bind(dir.display().to_string())
+                .bind(id)
+                .execute(&self.pool)
+                .await?;
+        }
+        tracing::info!(
+            profiles = missing.len(),
+            root = %legacy.display(),
+            "recorded where each existing profile's data already is"
+        );
+        Ok(())
+    }
+
+    /// The root new profiles are created under, or `None` for the default.
+    ///
+    /// `None` rather than a stored absolute path so that `FURY_HOME` keeps
+    /// working: a profile root left unset must follow the data directory, not
+    /// pin the value it happened to have the day the row was written.
+    pub async fn profile_root(&self) -> anyhow::Result<Option<PathBuf>> {
+        let stored: Option<Option<String>> =
+            sqlx::query_scalar("SELECT profile_root FROM storage WHERE id = 1")
+                .fetch_optional(&self.pool)
+                .await?;
+        Ok(stored.flatten().filter(|s| !s.is_empty()).map(PathBuf::from))
+    }
+
+    pub async fn set_profile_root(&self, root: Option<&Path>) -> anyhow::Result<()> {
+        sqlx::query(
+            "INSERT INTO storage (id, profile_root) VALUES (1, ?)
+             ON CONFLICT(id) DO UPDATE SET profile_root = excluded.profile_root",
+        )
+        .bind(root.map(|r| r.display().to_string()))
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Where this profile's data is, whether or not it exists yet.
+    ///
+    /// The single source of truth after the `dir` column landed: two places
+    /// computing a profile's path is how a launch reads one directory while the
+    /// purge deletes another. `Err` is a database that cannot answer, not a
+    /// missing directory — a profile that has never been launched has a path
+    /// and no directory, and that is normal.
+    pub async fn profile_dir(&self, id: &str) -> anyhow::Result<PathBuf> {
+        if let Some(dir) = self.stored_dir(id).await? {
+            return Ok(PathBuf::from(dir));
+        }
+        let root = self.profile_root().await?;
+        Ok(crate::paths::profile_dir_in(root.as_deref(), id))
+    }
+
+    /// The `dir` column alone, or `None` for a profile that has never run.
+    ///
+    /// Absent is meaningful: it is the difference between "first launch, make
+    /// the directory" and "this profile has data somewhere and that somewhere
+    /// is gone".
+    pub async fn stored_dir(&self, id: &str) -> anyhow::Result<Option<String>> {
+        let dir: Option<Option<String>> = sqlx::query_scalar("SELECT dir FROM profiles WHERE id = ?")
+            .bind(id)
+            .fetch_optional(&self.pool)
+            .await?;
+        Ok(dir.flatten().filter(|s| !s.is_empty()))
+    }
+
+    /// Pin where this profile lives, so that changing the root cannot move it.
+    ///
+    /// Called when the profile's directory is made for the first time. Before
+    /// this, a profile created under one root and launched after a root change
+    /// would silently land in the new one.
+    pub async fn set_profile_dir(&self, id: &str, dir: &Path) -> anyhow::Result<()> {
+        sqlx::query("UPDATE profiles SET dir = ? WHERE id = ?")
+            .bind(dir.display().to_string())
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    /// Every directory a profile of this installation may legitimately live in.
+    ///
+    /// The default root always counts, because that is where every profile made
+    /// before this feature lives and where `FURY_HOME` points them. The chosen
+    /// root counts while it is set. The parents of profiles already recorded are
+    /// added too: a profile backfilled under a root that has since been changed
+    /// is still legitimate, and refusing to purge it because the setting moved
+    /// would leak a directory nobody can remove from the application.
+    pub async fn known_roots(&self) -> anyhow::Result<Vec<PathBuf>> {
+        let mut roots = vec![crate::paths::data_dir().join("profiles")];
+        if let Some(chosen) = self.profile_root().await? {
+            if !roots.contains(&chosen) {
+                roots.push(chosen);
+            }
+        }
+        let used: Vec<String> = sqlx::query_scalar(
+            "SELECT DISTINCT dir FROM profiles WHERE dir IS NOT NULL",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        for dir in used {
+            if let Some(parent) = PathBuf::from(dir).parent() {
+                let parent = parent.to_path_buf();
+                if !roots.contains(&parent) {
+                    roots.push(parent);
+                }
+            }
+        }
+        Ok(roots)
     }
 
     /// Relax `profiles.project_id` to nullable on databases that predate it.
@@ -460,10 +673,11 @@ impl Store {
 
     pub async fn projects(&self) -> anyhow::Result<Vec<Project>> {
         let rows = sqlx::query(
-            "SELECT p.id, p.name, p.notes,
+            "SELECT p.id, p.name, p.notes, p.sort_weight, p.created_by,
                     (SELECT count(*) FROM profiles f
                       WHERE f.project_id = p.id AND f.deleted_at IS NULL) AS n
-             FROM projects p WHERE p.deleted_at IS NULL ORDER BY p.name",
+             FROM projects p WHERE p.deleted_at IS NULL
+             ORDER BY p.sort_weight, p.name",
         )
         .fetch_all(&self.pool)
         .await?;
@@ -474,30 +688,53 @@ impl Store {
                 id: r.get("id"),
                 name: r.get("name"),
                 notes: r.get("notes"),
+                sort_weight: r.get("sort_weight"),
+                creator: r.get("created_by"),
                 profile_count: r.get("n"),
             })
             .collect())
     }
 
-    pub async fn create_project(&self, name: &str, notes: &str) -> anyhow::Result<String> {
+    pub async fn create_project(
+        &self,
+        name: &str,
+        notes: &str,
+        sort_weight: i64,
+        creator: &str,
+    ) -> anyhow::Result<String> {
         let id = new_id();
-        sqlx::query("INSERT INTO projects (id, name, notes, created_at) VALUES (?, ?, ?, ?)")
-            .bind(&id)
-            .bind(name)
-            .bind(notes)
-            .bind(now())
-            .execute(&self.pool)
-            .await?;
+        sqlx::query(
+            "INSERT INTO projects (id, name, notes, sort_weight, created_by, created_at) \
+             VALUES (?, ?, ?, ?, ?, ?)",
+        )
+        .bind(&id)
+        .bind(name)
+        .bind(notes)
+        .bind(sort_weight)
+        .bind(creator)
+        .bind(now())
+        .execute(&self.pool)
+        .await?;
         Ok(id)
     }
 
-    pub async fn rename_project(&self, id: &str, name: &str, notes: &str) -> anyhow::Result<()> {
-        sqlx::query("UPDATE projects SET name = ?, notes = ? WHERE id = ?")
-            .bind(name)
-            .bind(notes)
-            .bind(id)
-            .execute(&self.pool)
-            .await?;
+    pub async fn rename_project(
+        &self,
+        id: &str,
+        name: &str,
+        notes: Option<&str>,
+        sort_weight: Option<i64>,
+    ) -> anyhow::Result<()> {
+        sqlx::query(
+            "UPDATE projects SET name = ?, notes = COALESCE(?, notes), \
+             sort_weight = COALESCE(?, sort_weight) WHERE id = ?",
+        )
+        .bind(name)
+        .bind(notes)
+        .bind(sort_weight)
+        .bind(id)
+        .execute(&self.pool)
+        .await?;
         Ok(())
     }
 
@@ -555,7 +792,7 @@ impl Store {
 
         match existing {
             Some(id) => Ok(id),
-            None => self.create_project("My profiles", "").await,
+            None => self.create_project("My profiles", "", 0, "").await,
         }
     }
 
@@ -577,6 +814,35 @@ impl Store {
 
     pub async fn upsert_proxy(&self, p: &Proxy) -> anyhow::Result<String> {
         let id = if p.id.is_empty() { new_id() } else { p.id.clone() };
+        // A secret this machine cannot open right now was shown to the form as
+        // blank, and the form sends the blank back. Writing it would turn "the
+        // keychain refused once" into "the password is gone": a tester re-typed
+        // every proxy password after an update (15.10.2026). Kept as stored
+        // unless something new was typed in its place.
+        let stored: Option<(Option<String>, Option<String>)> = if p.id.is_empty() {
+            None
+        } else {
+            sqlx::query_as("SELECT password, rotate_url FROM proxies WHERE id = ?")
+                .bind(&id)
+                .fetch_optional(&self.pool)
+                .await?
+        };
+        let (old_password, old_rotate) = stored.unwrap_or((None, None));
+        let secret = |incoming: Option<&str>, old: Option<String>| -> Option<String> {
+            match (incoming.filter(|v| !v.is_empty()), old) {
+                (None, Some(old)) if !self.vault.opens(&old) => {
+                    tracing::warn!(proxy = %p.name, "kept a stored secret this machine cannot open; nothing new was typed");
+                    Some(old)
+                }
+                // Sealed on the way in. A value already stored as plaintext by
+                // an older build is rewritten sealed the first time its proxy
+                // is saved -- which is why there is no migration step to fail
+                // on someone's laptop.
+                _ => incoming.map(|v| self.vault.seal(v)),
+            }
+        };
+        let password = secret(p.password.as_deref(), old_password);
+        let rotate_url = secret(p.rotate_url.as_deref(), old_rotate);
         sqlx::query(
             "INSERT INTO proxies
                 (id, name, kind, host, port, username, password, rotate_url, checker_url, created_at)
@@ -593,11 +859,8 @@ impl Store {
         .bind(&p.host)
         .bind(p.port as i64)
         .bind(&p.username)
-        // Sealed on the way in. A value already stored as plaintext by an older
-        // build is rewritten sealed the first time its proxy is saved — which is
-        // why there is no migration step to fail on someone's laptop.
-        .bind(p.password.as_deref().map(|v| self.vault.seal(v)))
-        .bind(p.rotate_url.as_deref().map(|v| self.vault.seal(v)))
+        .bind(password)
+        .bind(rotate_url)
         .bind(&p.checker_url)
         .bind(now())
         .execute(&self.pool)
@@ -609,15 +872,86 @@ impl Store {
     // Credentials
     // -----------------------------------------------------------------------
 
-    pub async fn credentials(&self, profile_id: &str) -> anyhow::Result<Vec<Credential>> {
-        let rows: Vec<Credential> = sqlx::query_as(
-            "SELECT id, profile_id, label, site, username, password, totp, notes
+    /// The rows as stored, secrets still sealed.
+    ///
+    /// One query, so `credentials` and `credentials_checked` cannot drift into
+    /// two different ideas of what a login is.
+    async fn credential_rows(&self, profile_id: &str) -> anyhow::Result<Vec<Credential>> {
+        Ok(sqlx::query_as(
+            "SELECT id, profile_id, label, site, username, password, totp, cookie, notes
              FROM credentials WHERE profile_id = ? ORDER BY label",
         )
         .bind(profile_id)
         .fetch_all(&self.pool)
-        .await?;
+        .await?)
+    }
+
+    pub async fn credentials(&self, profile_id: &str) -> anyhow::Result<Vec<Credential>> {
+        let rows = self.credential_rows(profile_id).await?;
         Ok(rows.into_iter().map(|c| self.open_credential(c)).collect())
+    }
+
+    /// Like [`credentials`], but refuses when a sealed field cannot be opened.
+    ///
+    /// Export is the only caller: `open_credential` turns an unopenable value
+    /// into an empty string, and writing that empty string into a file somebody
+    /// will later import from is how a password disappears without a word. A
+    /// failed export is the honest answer.
+    pub async fn credentials_checked(&self, profile_id: &str) -> anyhow::Result<Vec<Credential>> {
+        let rows = self.credential_rows(profile_id).await?;
+        for c in &rows {
+            for (what, value) in [
+                ("password", &c.password),
+                ("two-factor seed", &c.totp),
+                ("session cookie", &c.cookie),
+            ] {
+                if let Some(v) = value {
+                    if !self.vault.opens(v) {
+                        anyhow::bail!(
+                            "the {what} of the login {:?} cannot be opened on this machine",
+                            c.label
+                        );
+                    }
+                }
+            }
+        }
+        Ok(rows.into_iter().map(|c| self.open_credential(c)).collect())
+    }
+
+    /// Every login's identity on this machine, for the account import.
+    ///
+    /// The import writes profiles and logins here, so the rows it has to
+    /// recognise are here, and `credentials` needs a profile id it does not
+    /// have yet — one query answers for all of them instead of one call per
+    /// profile. Usernames are stored in the clear, so the ordinary case costs
+    /// no decryption. A login with no username is recognised by its session
+    /// instead, and that one cookie is opened here: a paste of cookie-only
+    /// rows would otherwise import itself again every time.
+    pub async fn credential_index(&self) -> anyhow::Result<Vec<CredentialIdentity>> {
+        let rows: Vec<CredentialIdentity> = sqlx::query_as(
+            "SELECT c.id, c.profile_id, f.name AS profile_name, c.site, c.username, c.cookie
+             FROM credentials c JOIN profiles f ON f.id = c.profile_id
+             WHERE f.deleted_at IS NULL
+             ORDER BY c.id",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows
+            .into_iter()
+            .map(|mut row| {
+                let named = row
+                    .username
+                    .as_deref()
+                    .map(str::trim)
+                    .is_some_and(|v| !v.is_empty());
+                if named {
+                    row.cookie = None;
+                } else {
+                    row.cookie = row.cookie.map(|v| self.vault.open_value(&v));
+                }
+                row
+            })
+            .collect())
     }
 
     pub async fn upsert_credential(&self, c: &Credential) -> anyhow::Result<String> {
@@ -632,18 +966,18 @@ impl Store {
         // It also refuses here, in front of the person who pasted it, rather
         // than at the moment they need a code to log in.
         let totp = match c.totp.as_deref().map(str::trim).filter(|v| !v.is_empty()) {
-            Some(raw) => Some(fury_shared::totp::Totp::parse(raw)?.to_uri()),
+            Some(raw) => Some(xchange_shared::totp::Totp::parse(raw)?.to_uri()),
             None => None,
         };
 
         sqlx::query(
             "INSERT INTO credentials
-                (id, profile_id, label, site, username, password, totp, notes, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (id, profile_id, label, site, username, password, totp, cookie, notes, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
              ON CONFLICT(id) DO UPDATE SET
                 label = excluded.label, site = excluded.site,
                 username = excluded.username, password = excluded.password,
-                totp = excluded.totp, notes = excluded.notes,
+                totp = excluded.totp, cookie = excluded.cookie, notes = excluded.notes,
                 updated_at = excluded.updated_at",
         )
         .bind(&id)
@@ -653,6 +987,7 @@ impl Store {
         .bind(&c.username)
         .bind(c.password.as_deref().filter(|v| !v.is_empty()).map(|v| self.vault.seal(v)))
         .bind(totp.as_deref().map(|v| self.vault.seal(v)))
+        .bind(c.cookie.as_deref().filter(|v| !v.is_empty()).map(|v| self.vault.seal(v)))
         .bind(&c.notes)
         .bind(now())
         .bind(now())
@@ -675,6 +1010,7 @@ impl Store {
     fn open_credential(&self, mut c: Credential) -> Credential {
         c.password = c.password.map(|v| self.vault.open_value(&v));
         c.totp = c.totp.map(|v| self.vault.open_value(&v));
+        c.cookie = c.cookie.map(|v| self.vault.open_value(&v));
         c
     }
 
@@ -729,6 +1065,22 @@ impl Store {
     /// Whether secrets are actually being sealed, for the interface to report.
     pub fn vault_available(&self) -> bool {
         self.vault.available()
+    }
+
+    /// Saved proxies whose password or rotation link this machine cannot open
+    /// now: they read back blank, and a launch through one sends no password.
+    /// Said on screen, with a way to ask the keychain again.
+    pub async fn unreadable_proxies(&self) -> anyhow::Result<Vec<String>> {
+        let rows: Vec<(String, Option<String>, Option<String>)> = sqlx::query_as(
+            "SELECT name, password, rotate_url FROM proxies WHERE deleted_at IS NULL ORDER BY name",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows
+            .into_iter()
+            .filter(|(_, pw, rot)| [pw, rot].into_iter().flatten().any(|v| !self.vault.opens(v)))
+            .map(|(name, _, _)| name)
+            .collect())
     }
 
     pub async fn delete_proxy(&self, id: &str) -> anyhow::Result<()> {
@@ -918,6 +1270,25 @@ impl Store {
             .bind(id)
             .execute(&self.pool)
             .await?;
+        Ok(())
+    }
+
+    /// Just the free-text note beside a profile.
+    ///
+    /// Separate from `upsert_profile` on purpose: rewriting the whole row from
+    /// a listing read seconds ago would put back the name, proxy or tag
+    /// somebody else changed in between — the same class of bug that made an
+    /// edit to a name erase the notes (12.09.2026), in the other direction.
+    pub async fn set_notes(&self, id: &str, notes: &str) -> anyhow::Result<()> {
+        let n = sqlx::query("UPDATE profiles SET notes = ? WHERE id = ? AND deleted_at IS NULL")
+            .bind(notes)
+            .bind(id)
+            .execute(&self.pool)
+            .await?
+            .rows_affected();
+        if n == 0 {
+            anyhow::bail!("no such profile");
+        }
         Ok(())
     }
 
@@ -1174,6 +1545,7 @@ mod credential_tests {
                 username: Some("alice".into()),
                 password: Some("hunter2".into()),
                 totp: Some("JBSWY3DPEHPK3PXP".into()),
+                cookie: Some("SPC_F=session-value; SPC_EC=csrf-value".into()),
                 notes: String::new(),
             })
             .await
@@ -1182,16 +1554,18 @@ mod credential_tests {
         // What the row actually holds. This file sits beside the profile
         // directories and is backed up with them, so a seed in the clear here
         // is a seed in every backup, forever.
-        let (pw, seed): (Option<String>, Option<String>) =
-            sqlx::query_as("SELECT password, totp FROM credentials WHERE id = ?")
+        let (pw, seed, cookie): (Option<String>, Option<String>, Option<String>) =
+            sqlx::query_as("SELECT password, totp, cookie FROM credentials WHERE id = ?")
                 .bind(&id)
                 .fetch_one(&store.pool)
                 .await
                 .unwrap();
         let pw = pw.unwrap();
         let seed = seed.unwrap();
+        let cookie = cookie.unwrap();
         assert!(!pw.contains("hunter2"), "the password is in the clear: {pw}");
         assert!(!seed.contains("JBSWY3DP"), "the seed is in the clear: {seed}");
+        assert!(!cookie.contains("session-value"), "the cookie is in the clear: {cookie}");
 
         // And back out again.
         let read = store.credentials(&profile_id).await.unwrap();
@@ -1201,6 +1575,10 @@ mod credential_tests {
         let stored = read[0].totp.as_deref().unwrap();
         assert!(stored.starts_with("otpauth://totp/"), "{stored}");
         assert!(stored.contains("algorithm=SHA1"), "{stored}");
+        assert_eq!(
+            read[0].cookie.as_deref(),
+            Some("SPC_F=session-value; SPC_EC=csrf-value")
+        );
     }
 
     #[tokio::test]
@@ -1217,6 +1595,7 @@ mod credential_tests {
                 username: None,
                 password: None,
                 totp: Some("this is not base32!".into()),
+                cookie: None,
                 notes: String::new(),
             })
             .await
@@ -1239,6 +1618,7 @@ mod credential_tests {
                 username: None,
                 password: Some("secret".into()),
                 totp: None,
+                cookie: None,
                 notes: String::new(),
             })
             .await
@@ -1250,6 +1630,109 @@ mod credential_tests {
             .await
             .unwrap();
         assert_eq!(left, 0, "a deleted login is still in the database");
+    }
+
+    /// An export must not write an empty password where a secret exists but
+    /// this machine cannot open it. The ordinary read turns that into `""`,
+    /// which is exactly the value that must not reach the file.
+    #[tokio::test]
+    async fn an_unopenable_secret_stops_the_checked_read() {
+        let (_d, store, profile_id) = store_with_a_profile("cred-check").await;
+        let id = store
+            .upsert_credential(&Credential {
+                id: String::new(),
+                profile_id: profile_id.clone(),
+                label: "the account".into(),
+                site: "shopee.vn".into(),
+                username: Some("alice".into()),
+                password: Some("hunter2".into()),
+                totp: None,
+                cookie: None,
+                notes: String::new(),
+            })
+            .await
+            .unwrap();
+
+        // A value with the vault prefix that no key here can open.
+        sqlx::query("UPDATE credentials SET password = ? WHERE id = ?")
+            .bind("fury:v1:AAAA")
+            .bind(&id)
+            .execute(&store.pool)
+            .await
+            .unwrap();
+
+        let err = store
+            .credentials_checked(&profile_id)
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("cannot be opened"), "{err}");
+        assert_eq!(
+            store.credentials(&profile_id).await.unwrap()[0]
+                .password
+                .as_deref(),
+            Some(""),
+            "the unchecked read is what the UI shows; the export must not rely on it"
+        );
+    }
+
+    /// The account import recognises a pasted row by this index: the username
+    /// in the clear, and the session opened only when there is no username to
+    /// recognise the login by. A login on a profile in the Trash is not there
+    /// — an import must not be skipped because of a profile somebody deleted.
+    #[tokio::test]
+    async fn the_index_opens_a_session_only_for_a_login_without_a_username() {
+        let (_d, store, profile_id) = store_with_a_profile("cred-index").await;
+        let named = store
+            .upsert_credential(&Credential {
+                id: String::new(),
+                profile_id: profile_id.clone(),
+                label: "the account".into(),
+                site: "shopee.vn".into(),
+                username: Some("alice".into()),
+                password: Some("hunter2".into()),
+                totp: None,
+                cookie: Some("SPC_F=aaaaaaaaaaaaaaaaaaaaaaaa".into()),
+                notes: String::new(),
+            })
+            .await
+            .unwrap();
+        let session = store
+            .upsert_credential(&Credential {
+                id: String::new(),
+                profile_id: profile_id.clone(),
+                label: "the session".into(),
+                site: "shopee.vn".into(),
+                username: None,
+                password: None,
+                totp: None,
+                cookie: Some("SPC_F=bbbbbbbbbbbbbbbbbbbbbbbb".into()),
+                notes: String::new(),
+            })
+            .await
+            .unwrap();
+
+        let index = store.credential_index().await.unwrap();
+        let row = index.iter().find(|r| r.id == named).expect("the named login");
+        assert_eq!(row.profile_name, "acct");
+        assert_eq!(row.username.as_deref(), Some("alice"));
+        assert_eq!(row.cookie, None, "a named login needs no session opened");
+
+        let row = index
+            .iter()
+            .find(|r| r.id == session)
+            .expect("the session login");
+        assert_eq!(
+            row.cookie.as_deref(),
+            Some("SPC_F=bbbbbbbbbbbbbbbbbbbbbbbb"),
+            "a login with no username is recognised by its session"
+        );
+
+        store.delete_profile(&profile_id).await.unwrap();
+        assert!(
+            store.credential_index().await.unwrap().is_empty(),
+            "the Trash is not somewhere an import is checked against"
+        );
     }
 }
 
@@ -1546,8 +2029,8 @@ mod tests {
     #[tokio::test]
     async fn profiles_lists_every_project_at_once() {
         let s = store().await;
-        let a = s.create_project("Shops", "").await.unwrap();
-        let b = s.create_project("Ads", "").await.unwrap();
+        let a = s.create_project("Shops", "", 0, "").await.unwrap();
+        let b = s.create_project("Ads", "", 0, "").await.unwrap();
         s.upsert_profile(&blank(&a, "etsy")).await.unwrap();
         s.upsert_profile(&blank(&b, "meta")).await.unwrap();
 
@@ -1564,8 +2047,8 @@ mod tests {
     #[tokio::test]
     async fn profiles_move_between_projects_and_out_of_them() {
         let s = store().await;
-        let a = s.create_project("Shops", "").await.unwrap();
-        let b = s.create_project("Ads", "").await.unwrap();
+        let a = s.create_project("Shops", "", 0, "").await.unwrap();
+        let b = s.create_project("Ads", "", 0, "").await.unwrap();
         let id = s.upsert_profile(&blank(&a, "etsy")).await.unwrap();
 
         assert_eq!(s.move_profiles(&[id.clone()], Some(&b)).await.unwrap(), 1);
@@ -1621,7 +2104,7 @@ mod tests {
         let project = s.default_project().await.unwrap();
         let id = s.upsert_profile(&blank(&project, "gone")).await.unwrap();
 
-        let dir = std::env::temp_dir().join(format!("fury-purge-{id}"));
+        let dir = std::env::temp_dir().join(format!("xchange-purge-{id}"));
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("Cookies"), b"secrets").unwrap();
 
@@ -1639,7 +2122,7 @@ mod tests {
         let s = store().await;
         let project = s.default_project().await.unwrap();
         let id = s.upsert_profile(&blank(&project, "live")).await.unwrap();
-        let dir = std::env::temp_dir().join(format!("fury-nopurge-{id}"));
+        let dir = std::env::temp_dir().join(format!("xchange-nopurge-{id}"));
 
         s.purge_profile(&id, &dir).await.unwrap();
         // Still there: purge only ever touches rows a delete already hid, so a
@@ -1727,5 +2210,51 @@ mod tests {
             ..anon
         };
         assert_eq!(auth.url(), "socks5://bob:s3cr3t@h:1080");
+    }
+
+    /// The keychain refused (or the key is another machine's): the password
+    /// reads back blank, the form sends that blank back on save, and the
+    /// stored one must survive it (tester, 15.10.2026).
+    #[tokio::test]
+    async fn saving_a_proxy_whose_password_cannot_be_opened_keeps_it() {
+        let s = store().await;
+        let proxy = Proxy {
+            id: String::new(),
+            name: "de-1".into(),
+            kind: "socks5".into(),
+            host: "h".into(),
+            port: 1080,
+            username: Some("bob".into()),
+            password: Some("s3cr3t".into()),
+            last_country: None,
+            last_ip: None,
+            last_timezone: None,
+            last_location: None,
+            rotate_url: Some("https://api.example/rotate?key=k".into()),
+            checker_url: None,
+        };
+        let id = s.upsert_proxy(&proxy).await.unwrap();
+        assert!(s.unreadable_proxies().await.unwrap().is_empty());
+
+        for vault in [crate::vault::Vault::for_tests_without_key(), crate::vault::Vault::for_tests([9u8; 32])] {
+            let locked = Store { pool: s.pool.clone(), vault: std::sync::Arc::new(vault) };
+            let shown = locked.proxies().await.unwrap().remove(0);
+            assert_eq!(shown.password.as_deref(), Some(""), "it reads back blank");
+            assert_eq!(locked.unreadable_proxies().await.unwrap(), vec![shown.name.clone()]);
+            // What the form sends back: everything as shown, the blank as none.
+            locked
+                .upsert_proxy(&Proxy { id: id.clone(), name: "de-1 renamed".into(), password: None, rotate_url: Some(String::new()), ..shown })
+                .await
+                .unwrap();
+        }
+
+        let back = s.proxies().await.unwrap().remove(0);
+        assert_eq!(back.name, "de-1 renamed", "the rest of the edit was saved");
+        assert_eq!(back.password.as_deref(), Some("s3cr3t"));
+        assert_eq!(back.rotate_url.as_deref(), Some("https://api.example/rotate?key=k"));
+
+        // With the key at hand, clearing is still clearing.
+        s.upsert_proxy(&Proxy { password: None, ..back }).await.unwrap();
+        assert_eq!(s.proxies().await.unwrap()[0].password, None);
     }
 }

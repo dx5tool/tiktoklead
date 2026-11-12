@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright 2026 Bogdan Shapovalov and the Fury authors
+// Copyright 2026 Bogdan Shapovalov and the XChange authors
 //! Which font families a profile hides, and why no others.
 //!
 //! A persona's `fonts` is what a capture found, and a capture only asks about

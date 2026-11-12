@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-# Copyright 2026 Bogdan Shapovalov and the Fury authors
-"""A twenty-line client for the Fury automation API.
+# Copyright 2026 Bogdan Shapovalov and the XChange authors
+"""A twenty-line client for the XChange automation API.
 
 Deliberately not a package, not on PyPI, and not clever: the API is six
 endpoints and one bearer token, and a dependency for that would be a worse deal
@@ -27,11 +27,11 @@ def _home() -> pathlib.Path:
     if "FURY_HOME" in os.environ:
         return pathlib.Path(os.environ["FURY_HOME"])
     if os.uname().sysname == "Darwin":
-        return pathlib.Path.home() / "Library/Application Support/Fury"
-    return pathlib.Path(os.environ.get("XDG_DATA_HOME", pathlib.Path.home() / ".local/share")) / "fury"
+        return pathlib.Path.home() / "Library/Application Support/XChange"
+    return pathlib.Path(os.environ.get("XDG_DATA_HOME", pathlib.Path.home() / ".local/share")) / "xchange"
 
 
-class Fury:
+class XChange:
     """The agent's local API.
 
     The token is read from disk on every construction rather than passed in.
@@ -48,7 +48,7 @@ class Fury:
             raise SystemExit(
                 f"no {token_file}\n"
                 f"The agent writes it the first time it serves the API:\n"
-                f"  FURY_API_PORT={self.port} fury-agent serve"
+                f"  FURY_API_PORT={self.port} xchange-agent serve"
             )
 
     def _call(self, method: str, path: str, body: dict | None = None):
@@ -73,7 +73,7 @@ class Fury:
         except urllib.error.URLError as e:
             raise SystemExit(
                 f"could not reach the agent on port {self.port} ({e.reason}).\n"
-                f"Start it with: FURY_API_PORT={self.port} fury-agent serve"
+                f"Start it with: FURY_API_PORT={self.port} xchange-agent serve"
             ) from None
 
     def status(self):
@@ -96,7 +96,7 @@ class Fury:
 
 
 class running:
-    """`with running(fury, id) as session:` — stops the profile whatever happens.
+    """`with running(xchange, id) as session:` — stops the profile whatever happens.
 
     Worth having as a context manager rather than a start/stop pair, because the
     failure it prevents is expensive: a script that raises between them leaves
@@ -105,16 +105,16 @@ class running:
     leaked one blocks a person rather than a process.
     """
 
-    def __init__(self, fury: Fury, profile_id: str, cdp: bool = True):
-        self.fury, self.id, self.cdp = fury, profile_id, cdp
+    def __init__(self, xchange: XChange, profile_id: str, cdp: bool = True):
+        self.xchange, self.id, self.cdp = xchange, profile_id, cdp
 
     def __enter__(self):
-        self.session = self.fury.start(self.id, cdp=self.cdp)
+        self.session = self.xchange.start(self.id, cdp=self.cdp)
         return self.session
 
     def __exit__(self, *exc):
         try:
-            self.fury.stop(self.id)
+            self.xchange.stop(self.id)
         except Exception as e:
             # Never mask the original exception with a cleanup failure — the
             # first one is the one worth reading.

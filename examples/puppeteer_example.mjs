@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright 2026 Bogdan Shapovalov and the Fury authors
+// Copyright 2026 Bogdan Shapovalov and the XChange authors
 //
-// Drive a Fury profile with Puppeteer.
+// Drive an XChange profile with Puppeteer.
 //
 //     npm install puppeteer-core        # -core: no bundled Chromium
-//     FURY_API_PORT=35000 fury-agent serve
+//     FURY_API_PORT=35000 xchange-agent serve
 //     node puppeteer_example.mjs <profile-id>
 //
 // puppeteer-core rather than puppeteer, and the difference matters here: the
@@ -22,8 +22,8 @@ const PORT = process.env.FURY_API_PORT || 35000;
 const home =
   process.env.FURY_HOME ||
   (process.platform === "darwin"
-    ? join(homedir(), "Library/Application Support/Fury")
-    : join(process.env.XDG_DATA_HOME || join(homedir(), ".local/share"), "fury"));
+    ? join(homedir(), "Library/Application Support/XChange")
+    : join(process.env.XDG_DATA_HOME || join(homedir(), ".local/share"), "xchange"));
 
 let token;
 try {
@@ -31,7 +31,7 @@ try {
 } catch {
   console.error(`no ${join(home, "api-token")}`);
   console.error(`The agent writes it the first time it serves the API:`);
-  console.error(`  FURY_API_PORT=${PORT} fury-agent serve`);
+  console.error(`  FURY_API_PORT=${PORT} xchange-agent serve`);
   process.exit(1);
 }
 
@@ -48,7 +48,7 @@ async function api(method, path, body) {
     });
   } catch (e) {
     console.error(`could not reach the agent on port ${PORT}: ${e.message}`);
-    console.error(`Start it with: FURY_API_PORT=${PORT} fury-agent serve`);
+    console.error(`Start it with: FURY_API_PORT=${PORT} xchange-agent serve`);
     process.exit(1);
   }
   const json = await res.json();

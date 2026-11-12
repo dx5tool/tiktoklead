@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright 2026 Bogdan Shapovalov and the Fury authors
+// Copyright 2026 Bogdan Shapovalov and the XChange authors
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useI18n } from "../i18n";
@@ -7,6 +7,7 @@ import { Icon, IconButton } from "./Icon";
 import type { Me, Profile } from "../api";
 import { platformOf } from "../platform";
 import { assess } from "../consistency";
+import { isProviderProxy } from "../providerProxy";
 import { isSuggested, statusHue } from "../status";
 
 /** Every row's controls follow the permissions the SERVER resolved. Hiding a
@@ -32,7 +33,11 @@ export function isOpenHere(
   p: Profile,
   where: { local: boolean; userId?: string; machine: string },
 ): boolean {
-  if (where.local) return p.running;
+  // By where the profile lives, as the comment says, and not by the shell's
+  // mode: connected to a server, a profile of this machine's was asked about
+  // its (absent) lock, so one that was running showed Free and Open
+  // (14.10.2026).
+  if (where.local || p.origin === "local") return p.running;
   return (
     p.lock !== null &&
     p.lock.user_id === where.userId &&
@@ -212,7 +217,8 @@ export function ProfileTable({
           // Open with the reason: the contradiction is the ban, not the
           // fingerprint, and a warning that scrolls past is not a guard.
           const shared = sharing?.get(p.id) ?? 0;
-          const verdict = assess(p, personas ?? null, shared);
+          const providerBacked = isProviderProxy(p.proxy);
+          const verdict = assess(p, personas ?? null, shared, providerBacked);
           const verdictText = verdict.notes.map((n) => t(n.key, n.vars)).join(" · ");
 
           return (
@@ -281,7 +287,7 @@ export function ProfileTable({
                 )}
               </td>
               {showProject && (
-                <td className="muted">
+                <td className="muted nowrap">
                   {p.project_name ?? <span className="dim">{t("col.noProject")}</span>}
                 </td>
               )}
@@ -305,7 +311,7 @@ export function ProfileTable({
                       {!canReveal && ` · ${t("row.masked")}`}
                       {/* How many profiles a site sees from this exit (docs/12 C).
                           Said from two; coloured from three. */}
-                      {shared >= 2 && (
+                      {!providerBacked && shared >= 2 && (
                         <span className={shared >= 3 ? "warn" : undefined}> · {t("row.sharedExit", { n: shared })}</span>
                       )}
                     </div>
@@ -367,7 +373,7 @@ export function ProfileTable({
                 )}
               </td>
               <td className="actions">
-                <div>
+                <div className="rowActions">
                 {!open && !locked && canLaunch && (
                   <button
                     disabled={busy || starting || verdict.level === "block"}
@@ -398,9 +404,13 @@ export function ProfileTable({
                     so the name is a hover away and a screen reader still gets
                     a word rather than a glyph. */}
                 {onShare && (p.origin === "local" || p.permissions.includes("manage_access")) && (
-                  <button className="ghost" disabled={busy} title={t("row.shareHint")} onClick={() => onShare(p)}>
-                    <Icon name="share" /> {t("row.shareShort")}
-                  </button>
+                  <IconButton
+                    icon="lock"
+                    label={t("row.shareShort")}
+                    title={t("row.shareHint")}
+                    disabled={busy}
+                    onClick={() => onShare(p)}
+                  />
                 )}
                 {onExtensions && canEdit && (
                   <IconButton icon="puzzle" label={t("ext.extensions")} disabled={busy} onClick={() => onExtensions(p)} />

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright 2026 Bogdan Shapovalov and the Fury authors
+// Copyright 2026 Bogdan Shapovalov and the XChange authors
 
 //! The vault — one key on this machine, and what it seals.
 //!
@@ -13,7 +13,7 @@
 //!
 //! So the secret columns are sealed with a key that lives in the OS keychain
 //! rather than beside them. What that buys is real but bounded, and worth
-//! stating plainly: a copied `fury.db` is now useless on its own. It is not a
+//! stating plainly: a copied `xchange.db` is now useless on its own. It is not a
 //! defence against a process running as this user, which can ask the keychain
 //! for the key exactly as the agent does.
 //!
@@ -35,8 +35,11 @@ use base64::Engine;
 use chacha20poly1305::aead::{Aead, KeyInit};
 use chacha20poly1305::{XChaCha20Poly1305, XNonce};
 
-const SERVICE: &str = "dev.fury.agent";
+const SERVICE: &str = "dev.xchange.agent";
 const ACCOUNT: &str = "vault-key";
+/// The on-disk tag of a sealed column value, and the same kind of constant as
+/// the ciphertext it prefixes: rows already in the local database carry it.
+/// Renaming it makes every saved proxy password and login read as blank.
 const PREFIX: &str = "fury:v1:";
 const NONCE_LEN: usize = 24;
 
@@ -54,18 +57,55 @@ const NONCE_LEN: usize = 24;
 /// the socket existed: from the application, an agent that simply never came
 /// up. Loading on first use costs nothing when the answer is cached and keeps
 /// the failure where it can be explained.
+///
+/// A failed read is remembered too, so a refused keychain does not put its
+/// dialog up again at every list refresh -- but only until `retry`. It used to
+/// be remembered for the life of the process: one dismissed dialog after an
+/// update and every sealed proxy password read back as empty until XChange was
+/// restarted, with nothing on screen to say so (tester, 15.10.2026).
 pub struct Vault {
-    key: std::sync::OnceLock<Option<[u8; 32]>>,
+    key: std::sync::Mutex<Key>,
+}
+
+#[derive(Clone, Copy)]
+enum Key {
+    Unread,
+    Have([u8; 32]),
+    Failed,
 }
 
 impl Vault {
     pub fn open() -> Self {
-        Self { key: std::sync::OnceLock::new() }
+        Self { key: std::sync::Mutex::new(Key::Unread) }
     }
 
     /// The key, read from the keychain the first time anything needs it.
+    /// Held across the read, as the OnceLock before it was: two callers must
+    /// not put up two dialogs.
     fn key(&self) -> Option<[u8; 32]> {
-        *self.key.get_or_init(load_or_create)
+        let mut k = self.key.lock().unwrap_or_else(|e| e.into_inner());
+        if let Key::Unread = *k {
+            *k = match load_or_create() {
+                Some(key) => Key::Have(key),
+                None => Key::Failed,
+            };
+        }
+        match *k {
+            Key::Have(key) => Some(key),
+            _ => None,
+        }
+    }
+
+    /// Ask the keychain again after a failed read; the operator's "try again"
+    /// once they have seen why their passwords are blank.
+    pub fn retry(&self) -> bool {
+        {
+            let mut k = self.key.lock().unwrap_or_else(|e| e.into_inner());
+            if let Key::Failed = *k {
+                *k = Key::Unread;
+            }
+        }
+        self.available()
     }
 
     /// Read the key now, off the caller's thread.
@@ -106,26 +146,32 @@ impl Vault {
     /// returned as it is. That is what makes this migration-free: nothing has
     /// to be rewritten before the app will start.
     pub fn open_value(&self, stored: &str) -> String {
+        // An empty string rather than the ciphertext: a password that fails
+        // to open must not be handed to a proxy as if it were the password.
+        self.try_open(stored).unwrap_or_default()
+    }
+
+    /// Whether a stored value reads back as what was sealed. False for one
+    /// sealed under a key this machine cannot get at right now -- which a save
+    /// must then leave alone rather than overwrite with the blank it showed.
+    pub fn opens(&self, stored: &str) -> bool {
+        self.try_open(stored).is_some()
+    }
+
+    fn try_open(&self, stored: &str) -> Option<String> {
         let Some(rest) = stored.strip_prefix(PREFIX) else {
-            return stored.to_string();
+            return Some(stored.to_string());
         };
-        let Some(key) = self.key() else {
-            return String::new();
-        };
-        let Ok(blob) = base64::engine::general_purpose::STANDARD.decode(rest) else {
-            return String::new();
-        };
+        let key = self.key()?;
+        let blob = base64::engine::general_purpose::STANDARD.decode(rest).ok()?;
         if blob.len() <= NONCE_LEN {
-            return String::new();
+            return None;
         }
         let cipher = XChaCha20Poly1305::new((&key).into());
         cipher
             .decrypt(XNonce::from_slice(&blob[..NONCE_LEN]), &blob[NONCE_LEN..])
             .ok()
             .and_then(|v| String::from_utf8(v).ok())
-            // An empty string rather than the ciphertext: a password that fails
-            // to open must not be handed to a proxy as if it were the password.
-            .unwrap_or_default()
     }
 
     pub fn available(&self) -> bool {
@@ -136,12 +182,12 @@ impl Vault {
     /// never leave an entry behind on the machine that ran them.
     #[cfg(test)]
     pub fn for_tests(key: [u8; 32]) -> Self {
-        Self { key: std::sync::OnceLock::from(Some(key)) }
+        Self { key: std::sync::Mutex::new(Key::Have(key)) }
     }
 
     #[cfg(test)]
     pub fn for_tests_without_key() -> Self {
-        Self { key: std::sync::OnceLock::from(None) }
+        Self { key: std::sync::Mutex::new(Key::Failed) }
     }
 }
 

@@ -1,0 +1,23 @@
+#!/bin/sh
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright 2026 Bogdan Shapovalov and the XChange authors
+#
+# Refuse a direct push to main. Main changes through pull requests only; GitHub
+# Free does not enforce that on a private repository, so this is the client-side
+# half of the guard. .github/workflows/main-guard.yml is the server-side half.
+#
+# Enable it once per clone:
+#
+#     git config core.hooksPath .githooks
+
+while read -r local_ref local_sha remote_ref remote_sha; do
+    case "$remote_ref" in
+        refs/heads/main)
+            echo "pre-push: refusing a direct push to main — open a pull request." >&2
+            echo "pre-push: a deliberate bypass is git push --no-verify." >&2
+            exit 1
+            ;;
+    esac
+done
+
+exit 0

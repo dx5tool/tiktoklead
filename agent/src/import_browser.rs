@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright 2026 Bogdan Shapovalov and the Fury authors
+// Copyright 2026 Bogdan Shapovalov and the XChange authors
 
 //! Taking a profile out of the Chrome the operator already uses.
 //!
@@ -12,13 +12,13 @@
 //!
 //! Chrome encrypts its cookie jar and its saved passwords with a key it keeps
 //! in the operating system's keychain, under its own name. Copying `Cookies`
-//! into a Fury profile produces a file the Fury core cannot read: it has its own
+//! into an XChange profile produces a file the XChange core cannot read: it has its own
 //! key (patch 0110), and Chrome's key belongs to Chrome.
 //!
 //! What Chromium does with a cookie jar it cannot decrypt is not complain — it
 //! discards the rows. So the failure mode of pretending otherwise is an import
 //! that reports success, opens, and is signed out of everything, with the
-//! operator's own explanation being that Fury lost their accounts.
+//! operator's own explanation being that XChange lost their accounts.
 //!
 //! Therefore this copies what travels and REFUSES to copy what does not, and
 //! the refusal is in the result rather than in a log line. `cookies_skipped`
@@ -179,7 +179,7 @@ fn profiles_in(root: &Path) -> Vec<Found> {
 
 /// Copies `from` — a browser profile directory — into `into`.
 ///
-/// `into` is a Fury profile's `Default`, because that is where the core will
+/// `into` is an XChange profile's `Default`, because that is where the core will
 /// look. Caches are left behind for the same reason the sync leaves them
 /// (`bundle::is_cache_dir`), and the encrypted files are left behind for a
 /// reason that matters more.
@@ -236,7 +236,7 @@ mod tests {
     use super::*;
 
     fn scratch(name: &str) -> PathBuf {
-        let d = std::env::temp_dir().join(format!("fury-imp-{}-{name}", std::process::id()));
+        let d = std::env::temp_dir().join(format!("xchange-imp-{}-{name}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
         d

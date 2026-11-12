@@ -1,13 +1,20 @@
 [package]
-name = "fury-desktop"
+name = "xchange-desktop"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Fury desktop shell"
+description = "XChange desktop shell"
 # keyring 4 requires a newer compiler than the rest of the workspace. Stated
 # here rather than raised workspace-wide: the agent and server should stay
 # buildable on older toolchains, and only this crate needs the newer one.
 rust-version = "1.88"
+
+[features]
+# `tauri dev` runs without this and loads the Vite URL. A standalone binary —
+# including a plain debug `cargo build` — must enable it so the frontend under
+# ../dist is embedded. Without it the window opens at http://127.0.0.1:5273 and
+# shows "refused to connect" when Vite is not running.
+custom-protocol = ["tauri/custom-protocol"]
 
 [build-dependencies]
 tar = "0.4"
@@ -17,10 +24,10 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 tar = "0.4"
 flate2 = "1"
-fury-shared = { path = "../../shared-rs" }
+xchange-shared = { path = "../../shared-rs" }
 # The agent address and the transport to it, shared with the agent so the two
 # cannot compute it differently. See platform-rs/src/dirs.rs.
-fury-platform = { path = "../../platform-rs" }
+xchange-platform = { path = "../../platform-rs" }
 
 tauri = { version = "2", features = [] }
 # Two copies of the shell would each keep a profile lock alive and each show a
@@ -67,3 +74,24 @@ whoami = "1"
 base64 = "0.22"
 rand.workspace = true
 tracing.workspace = true
+# Account lists in from .xlsx/.xls/.xlsb/.ods. Pure Rust, and its zip is built
+# with deflate only, so no C toolchain joins the release build. It needs the
+# same compiler this crate already does (1.88, see rust-version above).
+calamine = "0.38"
+
+# The one place the app needs the OS's own folder chooser. Tauri's dialog
+# plugin is the usual answer and is not used here: it pins a newer `tauri` than
+# this shell builds against, and upgrading the whole shell to get one dialog is
+# a larger change than the dialog. Everything else that asks for a destination
+# takes a typed path, because those are aimed at a place the operator already
+# knows; a cookie export is aimed at wherever they keep cookie files.
+#
+# Named per platform because rfd's build script refuses a Linux build that picks
+# no backend at all, and because a feature that only one platform has must not be
+# asked of the others. common-controls-v6 is the one that matters on Windows:
+# without it the folder tree is drawn the way Windows 95 drew it.
+[target.'cfg(any(windows, target_os = "macos"))'.dependencies]
+rfd = { version = "0.16", default-features = false, features = ["common-controls-v6"] }
+
+[target.'cfg(not(any(windows, target_os = "macos")))'.dependencies]
+rfd = { version = "0.16", default-features = false, features = ["gtk3"] }

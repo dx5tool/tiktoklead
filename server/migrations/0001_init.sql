@@ -1,4 +1,4 @@
--- Fury server — initial schema
+-- XChange server — initial schema
 -- PostgreSQL 13+. UUIDv7 is generated application-side (uuid crate) so IDs sort
 -- by creation time; gen_random_uuid() covers the defaults.
 --
@@ -276,7 +276,7 @@ CREATE INDEX ON audit_events (target_id, at DESC);
 
 -- ---------------------------------------------------------------------------
 -- Row-level security: second line of defence under application RBAC.
--- The app connects as `fury_app` and sets `app.user_id` per request.
+-- The app connects as `xchange_app` and sets `app.user_id` per request.
 -- ---------------------------------------------------------------------------
 
 ALTER TABLE projects        ENABLE ROW LEVEL SECURITY;
@@ -316,4 +316,4 @@ CREATE POLICY org_isolation ON credentials
 
 -- Audit must not be rewritable, not even by an org owner going through the app.
 -- Run as superuser after creating the application role:
---   REVOKE UPDATE, DELETE ON audit_events FROM fury_app;
+--   REVOKE UPDATE, DELETE ON audit_events FROM xchange_app;

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright 2026 Bogdan Shapovalov and the Fury authors
+// Copyright 2026 Bogdan Shapovalov and the XChange authors
 
 //! Where the agent's own account of itself goes.
 //!
@@ -39,7 +39,7 @@ const MAX_BYTES: u64 = 4 * 1024 * 1024;
 pub fn start() -> Option<PathBuf> {
     let filter = || {
         tracing_subscriber::EnvFilter::try_from_default_env()
-            .unwrap_or_else(|_| "fury_agent=info".into())
+            .unwrap_or_else(|_| "xchange_agent=info".into())
     };
 
     // A terminal still gets what it always got. The CLI is used by people who
@@ -101,7 +101,7 @@ fn open() -> std::io::Result<PathBuf> {
     // The data directory is owner-only and this is inside it; said again here
     // because a directory created by this function on a machine where the data
     // directory already existed would otherwise inherit whatever the default is.
-    let _ = fury_platform::perms::owner_only_dir(dir);
+    let _ = xchange_platform::perms::owner_only_dir(dir);
 
     // Rotation at startup rather than mid-run: the agent is long-lived but not
     // eternal, the check is one stat, and a rotation that can happen while a
@@ -143,7 +143,7 @@ mod tests {
     #[test]
     fn a_log_that_has_grown_past_the_cap_is_kept_as_the_previous_one() {
         let _guard = crate::ENV.lock().unwrap_or_else(|e| e.into_inner());
-        let home = std::env::temp_dir().join("fury-log-rotate-test");
+        let home = std::env::temp_dir().join("xchange-log-rotate-test");
         std::fs::remove_dir_all(&home).ok();
         // SAFETY: the mutex above is what makes this single-threaded.
         unsafe { std::env::set_var("FURY_HOME", &home) };

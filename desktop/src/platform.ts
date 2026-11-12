@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright 2026 Bogdan Shapovalov and the Fury authors
+// Copyright 2026 Bogdan Shapovalov and the XChange authors
 
 /** Which platform a profile is for, read from where it opens.
  *
@@ -32,6 +32,7 @@ const KNOWN: [RegExp, Platform][] = [
   [/(^|\.)google\.com$|(^|\.)gmail\.com$|(^|\.)youtube\.com$/, { name: "Google", mark: "G", hue: 210 }],
   [/(^|\.)amazon\.[a-z.]+$/, { name: "Amazon", mark: "Am", hue: 35 }],
   [/(^|\.)ebay\.[a-z.]+$/, { name: "eBay", mark: "eB", hue: 120 }],
+  [/(^|\.)shopee\.(?:vn|co\.id|co\.th|com\.my|sg|ph|tw|com\.br|com\.mx)$/, { name: "Shopee", mark: "Sp", hue: 20 }],
   [/(^|\.)etsy\.com$/, { name: "Etsy", mark: "Et", hue: 25 }],
   [/(^|\.)shopify\.com$|(^|\.)myshopify\.com$/, { name: "Shopify", mark: "Sh", hue: 100 }],
   [/(^|\.)x\.com$|(^|\.)twitter\.com$/, { name: "X", mark: "X", hue: 0 }],

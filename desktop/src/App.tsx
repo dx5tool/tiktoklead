@@ -1,48 +1,88 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright 2026 Bogdan Shapovalov and the Fury authors
+// Copyright 2026 Bogdan Shapovalov and the XChange authors
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useI18n, type Key } from "./i18n";
-import { api, ApiError, type LocalProxy, type Me, type MirrorStatus, type Profile, type Project, type Shell, type UpdateProgress, type WarmProgress } from "./api";
+import { api, ApiError, type LocalProxy, type Me, type MirrorStatus, type Profile, type Project, type Shell, type UpdateProgress, type WarmProgress, type Farm } from "./api";
 import { Login } from "./components/Login";
 import { ProfileDialog } from "./components/ProfileDialog";
 import { BulkProfiles } from "./components/BulkProfiles";
-import { Cookies } from "./components/Cookies";
+import { Cookies, exportFileName } from "./components/Cookies";
 import { Extensions } from "./components/Extensions";
+import { DiskUsage } from "./components/DiskUsage";
 import { NetworkReport } from "./components/NetworkReport";
 import { ExtensionsView } from "./components/ExtensionsView";
 import { AssistantsView } from "./components/AssistantsView";
 import { WarmDialog } from "./components/WarmDialog";
 import { useAsk } from "./components/Ask";
+import { IconButton } from "./components/Icon";
 import { CommandPalette, type Command } from "./components/CommandPalette";
-import { ProfileTable, isOpenHere } from "./components/ProfileTable";
+import { isOpenHere } from "./components/ProfileTable";
 import { Proxies } from "./components/Proxies";
+import { Projects } from "./components/Projects";
 import { Trash } from "./components/Trash";
 import { Users } from "./components/Users";
 import { ServerSetup } from "./components/ServerSetup";
 import { Enrol } from "./components/Enrol";
 import { Signup } from "./components/Signup";
 import { Settings } from "./components/Settings";
-import { Sidebar, type View } from "./components/Sidebar";
+import { type View } from "./components/Sidebar";
 import { ShareDialog } from "./components/ShareDialog";
 import { CsvImport } from "./components/CsvImport";
 import { AntidetectImport } from "./components/AntidetectImport";
-import { Icon, IconButton } from "./components/Icon";
+import { AccountImport } from "./components/AccountImport";
 import { useTheme } from "./theme";
 import { exitSharing } from "./consistency";
-import { isSuggested } from "./status";
+import { setStage as saveStage } from "./status";
+import { OUR_SERVERS, versionNewer } from "./defaults";
+import { AppBackground } from "./components/simprint/AppBackground";
+import { SimprintSidebar } from "./components/simprint/SimprintSidebar";
+import { SimprintTitlebar } from "./components/simprint/SimprintTitlebar";
+import { SimprintHeader } from "./components/simprint/SimprintHeader";
+import { SimprintProfileTable } from "./components/simprint/SimprintProfileTable";
+import { SimprintProfileGrid } from "./components/simprint/SimprintProfileGrid";
+import { SimprintBulkBar } from "./components/simprint/SimprintBulkBar";
+import { SimprintStartUrls } from "./components/simprint/SimprintStartUrls";
+import { SimprintExportProfiles } from "./components/simprint/SimprintExportProfiles";
+import { SimprintImportProfiles } from "./components/simprint/SimprintImportProfiles";
+import { SimprintPager, PAGE_SIZES } from "./components/simprint/SimprintPager";
+import { SHOW_VIEW_TOGGLE, sortProfiles, type ProfileSort } from "./components/simprint/utils";
+import {
+  providerForProxy,
+  fetchProviderExit,
+  providerFetches,
+  recordProviderFetch,
+} from "./providerProxy";
+import {
+  pickShopeeCredential,
+  shopeeCheckUrl,
+  shopeeLoginCookies,
+  shopeeLoginUrl,
+  SHOPEE_PLATFORM,
+} from "./shopee";
 
 /** What the browser build the agent asks for changes, for the bar that offers
  *  it. One sentence for every build told a Mac being offered 0.3.8 about a
  *  taskbar icon, canvas fixes and "about 150 MB" (13.10.2026). A build with
  *  no line of its own gets a plain one; the size is shown by the download. */
 const CORE_WHAT: Record<string, Key> = {
+  "0.4.14": "app.coreWhat0414",
+  "0.4.12": "app.coreWhat0412",
   "0.3.8": "app.coreWhat038",
   "0.3.7": "app.coreWhat037",
 };
 function coreWhat(need: string): Key {
   return CORE_WHAT[need] ?? "app.coreWhatOther";
 }
+
+/** What the agent's login outcome means, in the interface's words. */
+const LOGIN_REASON: Record<string, Key> = {
+  otp: "login.reason.otp",
+  captcha: "login.reason.captcha",
+  no_credentials: "login.reason.noCredentials",
+  login_failed: "login.reason.loginFailed",
+  no_form: "login.reason.noForm",
+};
 
 export function App() {
   // The shell answers what the interface cannot know on its own: whether this
@@ -67,6 +107,11 @@ export function App() {
   // agent already keeps; refreshed with the rows.
   const [personaIds, setPersonaIds] = useState<Set<string> | null>(null);
   const [proxyList, setProxyList] = useState<LocalProxy[] | null>(null);
+  // Which local profiles hold a saved login. The row's Login button writes
+  // one of those into the browser, so a profile with none has no button: it
+  // used to be offered on every Shopee row and answered "no saved login"
+  // only after the press (reported 11.11.2026).
+  const [loginProfileIds, setLoginProfileIds] = useState<Set<string> | null>(null);
   const [shared, setShared] = useState<Profile[]>([]);
   /** The profiles a share dialog is open for, or null. */
   const [sharing, setSharing] = useState<Profile[] | null>(null);
@@ -77,11 +122,27 @@ export function App() {
   // first), and holding every button in the list for that long read as the
   // application having frozen -- "the Open button does not press", 27.09.2026.
   const [launching, setLaunching] = useState<Set<string>>(new Set());
+  // Profiles whose Login press is in flight. Per profile for the same reason:
+  // the agent opens a browser, checks the shop, writes cookies and may type a
+  // username and password; holding the whole list for that would read as a
+  // frozen window.
+  const [logging, setLogging] = useState<Set<string>>(new Set());
   // The release feed's answer, and the version the operator said "later" to.
   const [update, setUpdate] = useState<Awaited<ReturnType<typeof api.checkUpdate>> | null>(null);
   const [dismissedUpdate, setDismissedUpdate] = useState<string | null>(() => {
     try {
-      return localStorage.getItem("fury.update.dismissed");
+      return localStorage.getItem("xchange.update.dismissed");
+    } catch {
+      return null;
+    }
+  });
+  // The team server's version against the newest release, for the people
+  // who can update it: owners and admins of a server that is not ours. The
+  // tester who runs his own heard of server updates only when told
+  // (14.10.2026). A server without `server_version` predates 0.4.2.
+  const [dismissedServer, setDismissedServer] = useState<string | null>(() => {
+    try {
+      return localStorage.getItem("xchange.serverUpdate.dismissed");
     } catch {
       return null;
     }
@@ -116,7 +177,7 @@ export function App() {
   useEffect(() => {
     let off = false;
     try {
-      off = localStorage.getItem("fury.update.auto") === "off";
+      off = localStorage.getItem("xchange.update.auto") === "off";
     } catch {
       /* default: on */
     }
@@ -129,15 +190,91 @@ export function App() {
   const [editing, setEditing] = useState<Profile | null | undefined>(undefined);
   const [query, setQuery] = useState("");
   const [tag, setTag] = useState("");
-  // The stage filter (5.5): "" is every stage, "\u0000none" is no stage.
-  const [stage, setStage] = useState("");
+  const [projectFilter, setProjectFilter] = useState("");
+  const [sort, setSort] = useState<ProfileSort>("created_desc");
+  const [viewMode, setViewMode] = useState<"table" | "grid">(() => {
+    try {
+      return (localStorage.getItem("xchange.view_mode") as "table" | "grid") || "table";
+    } catch {
+      return "table";
+    }
+  });
+  const handleViewModeChange = (mode: "table" | "grid") => {
+    setViewMode(mode);
+    try {
+      localStorage.setItem("xchange.view_mode", mode);
+    } catch {
+      /* ignore */
+    }
+  };
+  /** A row is picked by a click, or painted by a press-and-drag across rows. */
+  const [selectMode, setSelectMode] = useState<"click" | "drag">(() => {
+    try {
+      return localStorage.getItem("xchange.select_mode") === "drag" ? "drag" : "click";
+    } catch {
+      return "click";
+    }
+  });
+  const handleSelectModeChange = (mode: "click" | "drag") => {
+    setSelectMode(mode);
+    try {
+      localStorage.setItem("xchange.select_mode", mode);
+    } catch {
+      /* ignore */
+    }
+  };
+  /** While the switcher is hidden there is no way back from grid, so the
+   *  stored mode is ignored and the list renders as a table. */
+  const shownViewMode = SHOW_VIEW_TOGGLE ? viewMode : "table";
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState<number>(() => {
+    try {
+      const saved = Number(localStorage.getItem("xchange.page_size"));
+      return (PAGE_SIZES as readonly number[]).includes(saved) ? saved : 50;
+    } catch {
+      return 50;
+    }
+  });
+  const listScrollRef = useRef<HTMLDivElement>(null);
+  const handlePageSize = (size: number) => {
+    setPageSize(size);
+    setPage(1);
+    try {
+      localStorage.setItem("xchange.page_size", String(size));
+    } catch {
+      /* ignore */
+    }
+  };
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+    try {
+      return localStorage.getItem("xchange.sidebar_collapsed") === "true";
+    } catch {
+      return false;
+    }
+  });
+  const handleToggleSidebar = () => {
+    setSidebarCollapsed((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem("xchange.sidebar_collapsed", String(next));
+      } catch {
+        /* ignore */
+      }
+      return next;
+    });
+  };
   const [selected, setSelected] = useState<Set<string>>(new Set());
   /** `undefined` closed, `null` making new ones, a profile means copying it. */
   const [bulk, setBulk] = useState<Profile | null | undefined>(undefined);
   const [csv, setCsv] = useState(false);
   const [gologin, setGologin] = useState(false);
+  const [accountImport, setAccountImport] = useState(false);
   const [cookiesFor, setCookiesFor] = useState<Profile | null>(null);
+  const [startUrlsFor, setStartUrlsFor] = useState<Profile[] | null>(null);
+  const [exportProfilesFor, setExportProfilesFor] = useState<Profile[] | null>(null);
+  const [importProfilesOpen, setImportProfilesOpen] = useState(false);
   const [extFor, setExtFor] = useState<Profile | null>(null);
+  const [diskFor, setDiskFor] = useState<Profile | null>(null);
   const [netFor, setNetFor] = useState<Profile | null>(null);
   // The synchronised group, polled while it runs so the banner's counter and
   // membership stay true to the agent rather than to the click that started it.
@@ -164,6 +301,67 @@ export function App() {
       clearInterval(h);
     };
   }, [shell?.agent_ready]);
+  // Farming plans (agent/src/farm.rs). The agent starts local sessions on
+  // its own; a team one needs this window -- the lock and the keys are here --
+  // so while it is open it claims the due ones and starts them the way the
+  // Warm button does. It also sets the stage a finished profile asked for.
+  const [farms, setFarms] = useState<{ now_ms: number; farms: Farm[] } | null>(null);
+  const profilesNow = useRef<Profile[]>([]);
+  profilesNow.current = profiles;
+  useEffect(() => {
+    if (!shell?.agent_ready) return;
+    let stop = false;
+    const tick = async () => {
+      try {
+        for (const d of await api.farmDue()) {
+          let plan;
+          try {
+            plan = await api.farmClaim(d.farm_id, d.profile_id);
+          } catch {
+            continue; // no longer due: another window, or the hours ran out
+          }
+          try {
+            const r = await api.warmStart([{ id: d.profile_id, origin: d.origin }], plan);
+            const refused = r.refused.find((x) => x.id === d.profile_id);
+            if (refused) await api.farmFail(d.farm_id, d.profile_id, say({ code: refused.code, message: refused.reason }));
+          } catch (e) {
+            await api.farmFail(d.farm_id, d.profile_id, say(e));
+          }
+        }
+        const list = await api.farmList();
+        for (const f of list.farms) {
+          for (const [pid, tr] of Object.entries(f.tracks)) {
+            if (!tr.stage_pending) continue;
+            const p = profilesNow.current.find((x) => x.id === pid);
+            if (!p) continue; // not in the list being shown; next time
+            // Only over the stage the plan set: one the operator changed by
+            // hand since ("banned") is theirs.
+            if ((p.status ?? "") === "warming") {
+              try {
+                await saveStage(p, tr.stage_pending);
+              } catch {
+                continue;
+              }
+            }
+            await api.farmStageApplied(f.id, pid);
+          }
+        }
+        if (!stop) setFarms(list.farms.length > 0 ? list : null);
+      } catch {
+        if (!stop) setFarms(null);
+      }
+    };
+    void tick();
+    const h = setInterval(() => void tick(), 20_000);
+    return () => {
+      stop = true;
+      clearInterval(h);
+    };
+  }, [shell?.agent_ready]);
+  const refreshFarms = async () => {
+    const list = await api.farmList();
+    setFarms(list.farms.length > 0 ? list : null);
+  };
   useEffect(() => {
     if (!shell?.agent_ready) return;
     let stop = false;
@@ -193,6 +391,10 @@ export function App() {
   const [notice, setNotice] = useState<{ text: string; forProfile: string | null } | null>(null);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  /** Which settings tab opens. "Connect a server" in Users means the team
+   *  tab; it opened on General, one more click away from the only field that
+   *  matters there, and a tester could not find where to sign in (14.10.2026). */
+  const [settingsTab, setSettingsTab] = useState<"general" | "team">("general");
   // Applied at the root before anything renders, so the first paint is already
   // the right theme rather than a flash of the wrong one.
   useTheme();
@@ -227,8 +429,6 @@ export function App() {
   const newOrigin: "local" | "team" =
     active?.origin === "local" || active?.origin === "team" ? active.origin : local ? "local" : "team";
   const canChooseOrigin = !local && !active;
-  // The CSV and anti-detect imports file profiles on this computer.
-  const importsHere = local || !active || active.origin === "local";
   // Local mode has nobody to sign in as. Team mode does, and until it happens
   // there is nothing to show.
   const ready = shell !== null && (local || shell.signed_in);
@@ -300,6 +500,14 @@ export function App() {
       // the list.
       void api.personas().then((ps) => setPersonaIds(new Set(ps.map((x) => x.id))), () => {});
       void api.proxies().then(setProxyList, () => {});
+      // One call for every profile, so the Login button can be derived here
+      // rather than asked per row. A failure keeps the previous answer: a
+      // button that disappears because the agent blinked is worse than one
+      // that stays for one poll longer.
+      void api.credentialIndex().then(
+        (rows) => setLoginProfileIds(new Set(rows.map((row) => row.profile_id))),
+        () => {},
+      );
       // A launch notice outlives its launch by exactly one poll.
       //
       // Here rather than in the Close button, because the browser is closed
@@ -339,6 +547,39 @@ export function App() {
     }
   }, [active, ready, me?.user_id]);
 
+  // One field, written on its own: see save_notes in commands.rs. A note
+  // edited from the table must not carry the row's other fields back with it.
+  const saveNotes = async (p: Profile, notes: string) => {
+    await api.setNotes(p.id, notes, p.origin);
+    await refreshProfiles();
+  };
+  const saveNameAndTags = async (p: Profile, name: string, tags: string[]) => {
+    const payload = p.origin === "local"
+      ? { ...p, name, tags, proxy_id: p.proxy?.id ?? "", proxy: null }
+      : { ...p, name, tags };
+    await api.saveProfile(payload, p.origin);
+    await refreshProfiles();
+  };
+
+  /** Opens the profile's folder where the browser keeps its data, and says
+   *  where it would be when it is gone. A local profile has a directory from
+   *  its first launch; a team one is unpacked into the same place. */
+  const openProfileFolder = async (p: Profile) => {
+    try {
+      const { path, opened } = await api.openProfileFolder(p.id);
+      if (!opened) {
+        void ask({
+          title: t("row.openFolderMissingTitle"),
+          detail: t("row.openFolderMissing", { path }),
+          confirmLabel: t("ui.ok"),
+          alert: true,
+        });
+      }
+    } catch (e) {
+      setError(say(e));
+    }
+  };
+
   useEffect(() => {
     void refreshProfiles();
     // A browser can be closed from its own window, and in team mode a colleague
@@ -349,10 +590,47 @@ export function App() {
     return () => clearInterval(timer);
   }, [refreshProfiles]);
 
+  // Tags in use. Groups were a second, weaker version of this — one label where
+  // a tag list allows several — and two ways to sort the same profiles is one
+  // too many. Projects are the unit that carries access, so nothing was lost.
+  const tags = Array.from(new Set(profiles.flatMap((p) => p.tags))).sort();
+
+  const shown = sortProfiles(
+    matching(profiles, query)
+      .filter(
+        (p) =>
+          tag === "" ||
+          (tag === "\u0000none" ? p.tags.length === 0 : p.tags.includes(tag)),
+      )
+      .filter(
+        (p) =>
+          projectFilter === "" ||
+          (projectFilter === "\u0000none" ? !p.project_id : p.project_id === projectFilter),
+      )
+      .filter((p) => !openOnly || p.running),
+    sort,
+  );
+
+  const pageCount = Math.max(1, Math.ceil(shown.length / pageSize));
+  const safePage = Math.min(page, pageCount);
+  const paged = shown.slice((safePage - 1) * pageSize, safePage * pageSize);
+
+  useEffect(() => {
+    setPage(1);
+  }, [query, tag, projectFilter, openOnly, sort]);
+
+  useEffect(() => {
+    setPage((prev) => Math.min(prev, pageCount));
+  }, [pageCount]);
+
+  useEffect(() => {
+    listScrollRef.current?.scrollTo({ top: 0 });
+  }, [safePage, pageSize]);
+
   if (fatal) {
     return (
       <div className="splash">
-        <div>Fury</div>
+        <div>XChange</div>
         <p className="error" style={{ maxWidth: 460, marginTop: "var(--s-4)" }}>
           {fatal}
         </p>
@@ -363,11 +641,12 @@ export function App() {
     );
   }
 
-  if (!shell) return <div className="splash">Fury</div>;
+  if (!shell) return <div className="splash">XChange</div>;
 
   if (signingUp) {
     return (
       <Signup
+        version={shell.version}
         onDone={() => {
           setSigningUp(false);
           void api.shell().then(setShell);
@@ -381,6 +660,7 @@ export function App() {
   if (enrolling) {
     return (
       <Enrol
+        version={shell.version}
         onDone={() => {
           setEnrolling(false);
           void api.shell().then(setShell);
@@ -394,6 +674,7 @@ export function App() {
   if (!local && !shell.signed_in) {
     return shell.server_url ? (
       <Login
+        version={shell.version}
         onSuccess={() => void api.shell().then(setShell)}
         onEnrol={() => setEnrolling(true)}
         onSignup={() => setSigningUp(true)}
@@ -402,6 +683,7 @@ export function App() {
       />
     ) : (
       <ServerSetup
+        version={shell.version}
         onDone={setShell}
         onSignup={() => setSigningUp(true)}
         onEnrol={() => setEnrolling(true)}
@@ -421,6 +703,7 @@ export function App() {
   if (!local && !shell.org_key_ready) {
     return (
       <Login
+        version={shell.version}
         onSuccess={() => void api.shell().then(setShell)}
         onEnrol={() => setEnrolling(true)}
         onSignup={() => setSigningUp(true)}
@@ -439,11 +722,88 @@ export function App() {
     setShell(await api.shell());
   };
 
+  /** Provider problems are a message the operator has to read, not a bar that
+   *  scrolls away: a key that cannot be used is the end of the launch. */
+  const providerNotice = (message: string) => {
+    void ask({
+      title: t("prov.title"),
+      detail: message,
+      confirmLabel: t("ui.ok"),
+      alert: true,
+    });
+  };
+
+  /** Ask the provider for the exit this profile needs before starting it.
+   *
+   *  A provider proxy has no address until a profile opens: the key is local,
+   *  the provider's interval is remembered per key, and this is the one place
+   *  that turns the key into the host:port the agent launches through. A false
+   *  answer means the launch must not happen, and the reason is already on
+   *  screen (waiting, an expired key, or a key that is not on this machine). */
+  const prepareProviderProxy = async (profile: Profile): Promise<boolean> => {
+    const entry = providerForProxy(profile.proxy?.id);
+    if (!entry) {
+      if (profile.proxy?.kind === "provider") {
+        providerNotice(t("prov.noKey"));
+        return false;
+      }
+      return true;
+    }
+    if (!providerFetches(entry.provider)) {
+      providerNotice(t("prov.notConnected", { provider: entry.provider }));
+      return false;
+    }
+    const wait = (entry.next_request_at ?? 0) - Date.now();
+    if (wait > 0) {
+      providerNotice(
+        t("prov.wait", { provider: entry.provider, secs: Math.ceil(wait / 1000) }),
+      );
+      return false;
+    }
+    try {
+      const info = await fetchProviderExit(entry);
+      const current = (proxyList ?? []).find((x) => x.id === entry.proxy_id);
+      await api.saveProxy({
+        id: entry.proxy_id ?? profile.proxy?.id ?? "",
+        name: current?.name ?? entry.name ?? profile.proxy?.name ?? entry.provider,
+        kind: info.kind,
+        host: info.host,
+        port: info.port,
+        username: current?.username ?? null,
+        password: current?.password ?? null,
+        last_country: null,
+        last_ip: info.lastIp,
+        rotate_url: current?.rotate_url ?? entry.rotate_url ?? null,
+        checker_url: current?.checker_url ?? entry.checker_url ?? null,
+      });
+      recordProviderFetch(entry.provider, entry.api_key, {
+        next_request_at: info.nextRequestAt,
+        expires_at: info.expiresAt ?? 0,
+        last_ip: info.lastIp,
+      });
+      await refreshProfiles();
+      void api.proxies().then(setProxyList, () => {});
+      return true;
+    } catch (e) {
+      // A refusal that named a wait ("too many IP changes, 57s") is remembered
+      // against the key, so the next open says so without asking again.
+      const nextRequestAt = (e as { nextRequestAt?: number } | null)?.nextRequestAt ?? 0;
+      if (nextRequestAt > 0) {
+        recordProviderFetch(entry.provider, entry.api_key, {
+          next_request_at: nextRequestAt,
+        });
+      }
+      providerNotice(`${entry.provider}: ${say(e)}`);
+      return false;
+    }
+  };
+
   const onLaunch = async (profile: Profile, force = false) => {
     if (launching.has(profile.id)) return;
     setLaunching((prev) => new Set(prev).add(profile.id));
     setError(null);
     try {
+      if (!(await prepareProviderProxy(profile))) return;
       const res = await api.launch(profile.id, force, profile.origin);
       // Restrictions are the technical half of "an operator cannot take the
       // data home", and they are applied silently. Saying which ones landed is
@@ -477,21 +837,78 @@ export function App() {
     }
   };
 
-  // Tags in use. Groups were a second, weaker version of this — one label where
-  // a tag list allows several — and two ways to sort the same profiles is one
-  // too many. Projects are the unit that carries access, so nothing was lost.
-  const tags = Array.from(new Set(profiles.flatMap((p) => p.tags))).sort();
-  // Stages in use, lower-cased so "Banned" and "banned" are one filter.
-  const stages = Array.from(new Set(profiles.map((p) => (p.status ?? "").trim().toLowerCase()).filter(Boolean))).sort();
+  // Sign one local Shopee profile in through its browser.
+  //
+  // The cookie is written by the agent only after it has checked that the
+  // profile is not already signed in, so a live session is never overwritten
+  // by an older seed. If the shop asks for a code or a captcha the browser is
+  // left open and this reports that a person has to finish it.
+  const onLogin = async (profile: Profile) => {
+    if (logging.has(profile.id)) return;
+    setLogging((prev) => new Set(prev).add(profile.id));
+    setError(null);
+    try {
+      // A provider proxy's credentials are fetched at launch time. Login opens
+      // the profile itself, so it has to ask for them exactly as Open does.
+      if (!(await prepareProviderProxy(profile))) return;
 
-  const shown = matching(profiles, query)
-    .filter(
-      (p) =>
-        tag === "" ||
-        (tag === "\u0000none" ? p.tags.length === 0 : p.tags.includes(tag)),
-    )
-    .filter((p) => stage === "" || (stage === "\u0000none" ? !p.status : (p.status ?? "").trim().toLowerCase() === stage))
-    .filter((p) => !openOnly || p.running);
+      const credentials = await api.credentials(profile.id, profile.origin);
+      const credential = pickShopeeCredential(credentials);
+      if (!credential) {
+        setError(t("login.noCredentials"));
+        return;
+      }
+
+      let cookies: Record<string, unknown>[] = [];
+      if (credential.cookie?.trim()) {
+        cookies = shopeeLoginCookies(credential.cookie, profile);
+        if (cookies.length === 0) {
+          setError(t("login.cookieInvalid"));
+          return;
+        }
+      }
+
+      const result = await api.loginProfile(profile.id, {
+        cookies,
+        username: credential.username,
+        password: credential.password,
+        platform: SHOPEE_PLATFORM,
+        url: shopeeLoginUrl(profile),
+        checkUrl: shopeeCheckUrl(profile),
+        origin: profile.origin,
+      });
+
+      if (result.logged_in) {
+        setNotice({
+          text: t(
+            result.signed_in_now
+              ? "login.signedIn"
+              : result.cookie_written
+                ? "login.cookieWritten"
+                : "login.already",
+          ),
+          forProfile: null,
+        });
+      } else {
+        const reason = result.reason ?? "login_failed";
+        setNotice({
+          text: `${t("login.needsAction")} ${t(LOGIN_REASON[reason] ?? "login.reason.loginFailed")}`,
+          forProfile: null,
+        });
+      }
+    } catch (e) {
+      setError(say(e));
+    } finally {
+      setLogging((prev) => {
+        const next = new Set(prev);
+        next.delete(profile.id);
+        return next;
+      });
+      // The browser is open whether the sign-in worked or stopped at a
+      // verification step, so the row has to learn that either way.
+      await refreshProfiles().catch(() => {});
+    }
+  };
 
   // Exit sharing over EVERY profile, not the filtered view: the question is
   // how many accounts a site sees from one address.
@@ -504,13 +921,32 @@ export function App() {
       return next;
     });
 
-  const toggleAll = () =>
-    setSelected((prev) =>
-      // Everything visible, not everything that exists: a search is narrowing
-      // on purpose, and selecting rows nobody can see is how bulk deletes go
-      // wrong.
-      prev.size === shown.length ? new Set() : new Set(shown.map((p) => p.id)),
-    );
+  /** Membership, not a flip: a drag paints each row it crosses once, and rows
+   *  already in the target state must not be flipped. */
+  const setPicked = (id: string, on: boolean) =>
+    setSelected((prev) => {
+      if (prev.has(id) === on) return prev;
+      const next = new Set(prev);
+      if (on) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+
+  const toggleAll = () => {
+    // The current page, not everything that exists: selecting rows nobody can
+    // see is how bulk deletes go wrong. Rows picked on other pages stay
+    // picked, and the bulk bar still acts on all of them.
+    const ids = paged.map((p) => p.id);
+    const every = ids.length > 0 && ids.every((id) => selected.has(id));
+    setSelected((prev) => {
+      const next = new Set(prev);
+      for (const id of ids) {
+        if (every) next.delete(id);
+        else next.add(id);
+      }
+      return next;
+    });
+  };
 
   const chosen = shown.filter((p) => selected.has(p.id));
   const openable = chosen.filter((p) => !p.running);
@@ -527,6 +963,10 @@ export function App() {
     setError(t("bar.openingMany"));
     try {
       for (const p of openable) {
+        if (!(await prepareProviderProxy(p))) {
+          setError(null);
+          return;
+        }
         await api.launch(p.id, false, p.origin);
         await refreshProfiles();
       }
@@ -535,6 +975,360 @@ export function App() {
       setError(say(e));
     } finally {
       setBusy(false);
+    }
+  };
+  const onCloseMany = async () => {
+    setBusy(true);
+    for (const p of closable) await api.stop(p.id, p.origin);
+    await refreshProfiles();
+    setBusy(false);
+  };
+
+  const handleUploadSelected = async () => {
+    const team = projects.filter((p) => p.origin === "team");
+    let target = active?.origin === "team" ? active.id : null;
+    if (!target) {
+      const wanted = chosen[0].project_name?.trim() || t("share.autoProject");
+      target =
+        team.find((p) => p.name === wanted)?.id ??
+        (await api.createProjectIn(wanted, "team")).id;
+    }
+    const go = await ask({
+      title: t("up.send"),
+      detail: t("up.confirm", {
+        n: String(chosen.length),
+        project: projects.find((p) => p.id === target)?.name ?? "",
+      }),
+      confirmLabel: t("up.send"),
+    });
+    if (go === null) return;
+    setBusy(true);
+    let proxyMoved = false;
+    try {
+      for (const p of chosen) {
+        const r = await api.uploadProfile(p.id, target);
+        proxyMoved = proxyMoved || r.proxy_moved;
+      }
+      setError(
+        t("up.done", { name: chosen[0].name }) +
+          (proxyMoved ? " " + t("up.proxyMoved") : ""),
+      );
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+      await refreshProfiles();
+    }
+  };
+
+  const handleDeleteSelected = async () => {
+    const go = await ask({
+      title: t("bar.deleteSelected", { n: chosen.length }),
+      detail: t("bar.confirmDeleteMany", { n: chosen.length }),
+      confirmLabel: t("ui.delete"),
+      danger: true,
+    });
+    if (go === null) return;
+    setBusy(true);
+    for (const p of chosen) await api.deleteProfile(p.id, p.origin);
+    setSelected(new Set());
+    await load();
+    await refreshProfiles();
+    setBusy(false);
+  };
+
+  /** The cache alone, over the whole selection.
+   *
+   *  The agent refuses a profile whose browser is open — Chromium holds those
+   *  directories — so the open ones are named before the click rather than
+   *  discovered one failure at a time. */
+  const handleClearCacheSelected = async () => {
+    const targets = chosen.filter((p) => !p.running && p.permissions.includes("edit_profile"));
+    if (targets.length === 0) {
+      await ask({
+        title: t("ext.trim"),
+        detail: t("bar.trimNone"),
+        confirmLabel: t("ui.ok"),
+        alert: true,
+      });
+      return;
+    }
+    const skipped = chosen.length - targets.length;
+    const go = await ask({
+      title: t("bar.clearCacheCount", { n: targets.length }),
+      detail:
+        t("bar.trimConfirm") + (skipped > 0 ? " " + t("bar.trimSkipped", { n: skipped }) : ""),
+      confirmLabel: t("ext.trim"),
+    });
+    if (go === null) return;
+    setBusy(true);
+    let bytes = 0;
+    let done = 0;
+    let failed = 0;
+    for (const p of targets) {
+      try {
+        const r = await api.trimProfile(p.id);
+        bytes += r.bytes;
+        done++;
+      } catch {
+        failed++;
+      }
+    }
+    await refreshProfiles();
+    setBusy(false);
+    setNotice({
+      text:
+        t("bar.trimDone", { n: done, mb: mb(bytes) }) +
+        (failed > 0 ? " " + t("bar.trimFailed", { n: failed }) : ""),
+      forProfile: null,
+    });
+  };
+
+  /** One cookie file per profile, named the way the Cookies dialog names them.
+   *
+   *  The folder is chosen before anything is read: reading a jar opens and
+   *  closes the profile — a team profile pulls its bundle and takes the lock —
+   *  and spending that on an export somebody then cancels is a cost this
+   *  button must not have. */
+  const handleExportCookiesSelected = async () => {
+    const targets = chosen.filter((p) => p.permissions.includes("export_cookies"));
+    if (targets.length === 0) {
+      await ask({
+        title: t("bar.exportCookies"),
+        detail: t("bar.exportNone"),
+        confirmLabel: t("ui.ok"),
+        alert: true,
+      });
+      return;
+    }
+    const go = await ask({
+      title: t("bar.exportCookies"),
+      detail: t("bar.exportConfirm", { n: targets.length }),
+      confirmLabel: t("ck.exportFile"),
+    });
+    if (go === null) return;
+
+    let dir: string | null = null;
+    try {
+      dir = await api.pickFolder(t("ck.exportFilePick"));
+    } catch (e) {
+      setError(say(e));
+      return;
+    }
+    if (dir === null) return;
+
+    setBusy(true);
+    let done = 0;
+    let failed = 0;
+    let firstError: unknown = null;
+    // Two profiles can share a name, and a fast run stamps them with the same
+    // second: the suffix keeps the second file from overwriting the first.
+    const used = new Set<string>();
+    const fileNameFor = (name: string) => {
+      const base = exportFileName(name);
+      let candidate = base;
+      let n = 2;
+      while (used.has(candidate.toLowerCase())) {
+        candidate = base.replace(/\.json$/i, ` (${n}).json`);
+        n++;
+      }
+      used.add(candidate.toLowerCase());
+      return candidate;
+    };
+    for (const p of targets) {
+      try {
+        const { cookies } = await api.exportCookies(p.id);
+        await api.writeCookiesFile(dir, fileNameFor(p.name), JSON.stringify(cookies, null, 2));
+        done++;
+      } catch (e) {
+        failed++;
+        if (firstError === null) firstError = e;
+      }
+    }
+    setBusy(false);
+    if (done === 0) {
+      await ask({
+        title: t("bar.exportCookies"),
+        detail: t("ck.exportFileFailed", { reason: say(firstError ?? "") }),
+        confirmLabel: t("ui.ok"),
+        alert: true,
+      });
+      return;
+    }
+    setNotice({
+      text:
+        t("bar.exportDone", { n: done, path: dir }) +
+        (failed > 0 ? " " + t("bar.exportFailed", { n: failed }) : ""),
+      forProfile: null,
+    });
+  };
+
+  /** Whole profiles — browser data and every saved login — out to a folder or
+   *  a zip.
+   *
+   *  A team profile's logins live on the server, sealed with the organisation
+   *  key, and the server gates reading them on `reveal_secrets`. Without it
+   *  the export would silently leave the accounts behind, so it is refused
+   *  before the dialog opens rather than discovered on the next machine.
+   *  A local profile needs no such right: its logins are in its own store. */
+  const handleOpenExportProfiles = async () => {
+    const targets = chosen.filter((p) => p.permissions.includes("export_cookies"));
+    if (targets.length === 0) {
+      await ask({
+        title: t("bar.exportProfiles"),
+        detail: t("bar.exportProfilesNone"),
+        confirmLabel: t("ui.ok"),
+        alert: true,
+      });
+      return;
+    }
+    const sealed = targets.filter(
+      (p) => p.origin !== "local" && !p.permissions.includes("reveal_secrets"),
+    );
+    if (sealed.length > 0) {
+      await ask({
+        title: t("bar.exportProfiles"),
+        detail: t("bar.exportProfilesSecrets", { n: sealed.length }),
+        confirmLabel: t("ui.ok"),
+        alert: true,
+      });
+      return;
+    }
+    setExportProfilesFor(targets);
+  };
+
+  /** One list of start pages, written to every selected profile.
+   *
+   *  Replacing the list outright is the point: the operator typed what the
+   *  batch should open with, and appending would leave yesterday's sites in
+   *  front of it. */
+  const handleApplyStartUrls = async (urls: string[]) => {
+    const targets = chosen.filter((p) => p.permissions.includes("edit_profile"));
+    const skipped = startUrlsFor ? startUrlsFor.length - targets.length : 0;
+    setBusy(true);
+    let done = 0;
+    let firstError: unknown = null;
+    let failed = 0;
+    for (const p of targets) {
+      try {
+        // A local profile is written through `profiles.upsert`, whose `proxy`
+        // field is the full record rather than the summary a row carries: the
+        // id goes in `proxy_id` and `proxy` is nulled, exactly as the proxy
+        // assignment above does. Spreading the row as-is refuses every profile
+        // that has a proxy.
+        await api.saveProfile(
+          p.origin === "local"
+            ? { ...p, proxy_id: p.proxy?.id ?? "", proxy: null, start_urls: urls }
+            : { ...p, start_urls: urls },
+          p.origin,
+        );
+        done++;
+      } catch (e) {
+        failed++;
+        if (firstError === null) firstError = e;
+      }
+    }
+    await refreshProfiles();
+    setBusy(false);
+    if (done === 0 && firstError !== null) throw new Error(say(firstError));
+    setStartUrlsFor(null);
+    setNotice({
+      text: [
+        t("bar.startUrlsDone", { n: done }),
+        skipped > 0 ? t("bar.startUrlsSkipped", { n: skipped }) : "",
+        failed > 0 ? t("bar.startUrlsFailed", { n: failed }) : "",
+      ]
+        .filter(Boolean)
+        .join(" "),
+      forProfile: null,
+    });
+  };
+
+  const handleOpenStartUrls = async () => {
+    if (!chosen.some((p) => p.permissions.includes("edit_profile"))) {
+      await ask({
+        title: t("bar.changeStartUrls"),
+        detail: t("bar.startUrlsNone"),
+        confirmLabel: t("ui.ok"),
+        alert: true,
+      });
+      return;
+    }
+    setStartUrlsFor(chosen);
+  };
+
+  const handleMoveSelected = async (to: string) => {
+    setBusy(true);
+    try {
+      await api.moveProfiles(
+        chosen.map((p) => p.id),
+        to === "\u0000none" ? null : to,
+        chosen[0].origin,
+      );
+      setSelected(new Set());
+      await load();
+      await refreshProfiles();
+    } catch (err) {
+      setError(say(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleAssignProxySelected = async (v: string) => {
+    const used = new Set(profiles.map((p) => p.proxy?.id).filter(Boolean));
+    const free = (proxyList ?? []).filter((x) => !used.has(x.id));
+    const assign = async (pairs: [Profile, string | null][]) => {
+      setBusy(true);
+      setError(null);
+      let failed = 0;
+      for (const [p, id] of pairs) {
+        try {
+          await api.saveProfile(
+            local ? { ...p, proxy_id: id ?? "", proxy: null } : { ...p, proxy: id ? { id } : null },
+            p.origin,
+          );
+        } catch {
+          failed++;
+        }
+      }
+      setSelected(new Set());
+      await refreshProfiles();
+      setBusy(false);
+      setNotice({
+        text: failed > 0 ? t("bar.proxySetFailed", { n: pairs.length - failed, f: failed }) : t("bar.proxySet", { n: pairs.length }),
+        forProfile: null,
+      });
+    };
+    if (v === "\u0000each") {
+      void assign(chosen.map((p, i) => [p, free[i].id] as [Profile, string]));
+    } else if (v === "\u0000none") {
+      void assign(chosen.map((p) => [p, null] as [Profile, null]));
+    } else {
+      void assign(chosen.map((p) => [p, v] as [Profile, string]));
+    }
+  };
+
+  const handleMirrorSelected = async () => {
+    setMirrorNote(null);
+    try {
+      const r = await api.mirrorStart(chosen.map((p) => p.id), mirror?.typing ?? true);
+      setMirror(r.status.active ? r.status : null);
+      if (r.refused.length > 0) {
+        setMirrorNote(
+          r.refused
+            .map((x) => {
+              const name = profiles.find((p) => p.id === x.id)?.name ?? x.id;
+              return x.reason === "open_without_cdp"
+                ? t("mir.refusedOpen", { name })
+                : `${name}: ${say({ code: x.code, message: x.reason })}`;
+            })
+            .join(" "),
+        );
+      }
+      await refreshProfiles();
+    } catch (e) {
+      setMirrorNote(say(e));
     }
   };
 
@@ -552,7 +1346,7 @@ export function App() {
 
   const commands: Command[] = [
     { id: "act:new", label: t("cmd.newProfile"), run: () => setEditing(null) },
-    { id: "act:settings", label: t("cmd.settings"), run: () => setSettingsOpen(true) },
+    { id: "act:settings", label: t("cmd.settings"), run: () => { setSettingsTab("general"); setSettingsOpen(true); } },
     { id: "act:trash", label: t("cmd.trash"), run: () => setView("trash") },
   ];
 
@@ -565,7 +1359,7 @@ export function App() {
             title: t("ex.exportTitle"),
             detail: t("ex.exportDetail"),
             placeholder: t("ex.path"),
-            initial: `${active.name.replace(/[^\w.-]+/g, "-")}.fury`,
+            initial: `${active.name.replace(/[^\w.-]+/g, "-")}.xchange`,
             confirmLabel: t("nav.export"),
           });
           if (!path) return;
@@ -614,18 +1408,45 @@ export function App() {
   const dl = shell?.core_download ?? null;
 
   return (
-    <div className="app">
+    <div className="app relative overflow-hidden flex flex-col h-screen w-screen bg-[var(--simprint-bg)] text-[var(--simprint-text)]">
+      <AppBackground />
       {askDialog}
-      <Sidebar
+      <SimprintTitlebar
+        view={view}
+        activeProject={active}
+        me={me}
+        shell={shell}
+        sidebarCollapsed={sidebarCollapsed}
+        onToggleSidebar={handleToggleSidebar}
+        onSelectProject={setActive}
+        onView={setView}
+        onSettings={() => setSettingsOpen(true)}
+        onSignOut={signOut}
+        onPaletteOpen={() => setPaletteOpen(true)}
+        coreDownloadRunning={dl?.running}
+        updateAvailable={update?.status === "available"}
+        onDownloadCore={async () => {
+          setCoreBusy(true);
+          try {
+            await api.downloadCore();
+          } catch (e) {
+            setError(say(e));
+          } finally {
+            setTimeout(() => setCoreBusy(false), 3000);
+          }
+        }}
+      />
+      <div className="flex flex-1 min-h-0 overflow-hidden relative">
+      <SimprintSidebar
         projects={projects}
         active={active}
         shell={shell}
         me={me}
+        collapsed={sidebarCollapsed}
         onSelect={setActive}
         view={view}
         onView={setView}
-        onNewProfile={() => setEditing(null)}
-        onSettings={() => setSettingsOpen(true)}
+        onSettings={() => { setSettingsTab("general"); setSettingsOpen(true); }}
         onRenameProject={async (p) => {
           const name = await ask({
             title: t("proj.rename"),
@@ -743,34 +1564,56 @@ export function App() {
             confirmLabel: t("ui.create"),
           });
           if (!name) return;
-          await api.createProjectIn(name, origin);
+          // The sidebar's + takes the same place a project made on the Projects
+          // page would: after the highest weight already in the list.
+          const highest = projects.reduce(
+            (max, p) => (Number.isFinite(p.sort_weight) ? Math.max(max, p.sort_weight) : max),
+            -1,
+          );
+          await api.createProjectIn(name, origin, Math.min(highest + 1, 2_147_483_647));
           await load();
         }}
       />
-      <main className="main">
-        <header className="head">
-          <h1>
-            {view === "trash"
-              ? t("trash.title")
-              : view === "proxies"
-                ? t("nav.proxies")
-                : view === "extensions"
-                ? t("nav.extensions")
-                : view === "assistants"
-                ? t("nav.assistants")
-                : view === "users"
-                  ? t("nav.users")
-                  : view === "sharedWithMe"
-                    ? t("nav.sharedWithMe")
-                    : (active?.name ?? t("nav.profiles"))}
-          </h1>
-          {view === "profiles" && (
-            <span className="muted">{t("app.profileCount", { n: profiles.length })}</span>
-          )}
-          {view === "sharedWithMe" && (
-            <span className="muted">{t("app.profileCount", { n: shared.length })}</span>
-          )}
-        </header>
+      <main className="main flex-1 flex flex-col h-full overflow-hidden relative min-w-0">
+        {(view === "profiles" || view === "sharedWithMe") && (
+          <SimprintHeader
+            title={
+              view === "sharedWithMe"
+                ? t("nav.sharedWithMe")
+                : (active?.name ?? t("nav.profiles"))
+            }
+            totalCount={view === "sharedWithMe" ? shared.length : profiles.length}
+            runningCount={profiles.filter((p) => p.running).length}
+            viewMode={shownViewMode}
+            onViewModeChange={handleViewModeChange}
+            selectMode={selectMode}
+            onSelectModeChange={view === "profiles" ? handleSelectModeChange : undefined}
+            query={query}
+            onQueryChange={setQuery}
+            tags={tags}
+            selectedTag={tag}
+            onTagChange={setTag}
+            projects={projects}
+            selectedProject={projectFilter}
+            onProjectChange={setProjectFilter}
+            sort={sort}
+            onSortChange={setSort}
+            projectCounts={Object.fromEntries(
+              projects.map((proj) => [
+                proj.id,
+                profiles.filter((p) => p.project_id === proj.id).length,
+              ]),
+            )}
+            noProjectCount={profiles.filter((p) => !p.project_id).length}
+            openOnly={openOnly}
+            onOpenOnlyChange={setOpenOnly}
+            onNewProfile={view === "profiles" ? () => setEditing(null) : undefined}
+            onOpenBulk={() => setBulk(null)}
+            onImportProfiles={() => setImportProfilesOpen(true)}
+            onImportAccounts={() => setAccountImport(true)}
+            onRefresh={() => refreshProfiles()}
+          />
+        )}
 
         {!shell.agent_ready && (
           <div className="notice warnBar" role="status">
@@ -803,6 +1646,74 @@ export function App() {
             ))}
             {warm.every((w) => w.finished) && (
               <button className="linky" onClick={async () => { await api.warmClear(); setWarm([]); }}>{t("warm.dismiss")}</button>
+            )}
+          </div>
+        )}
+
+        {farms && (
+          <div className="notice" role="status" style={{ display: "block" }}>
+            {farms.farms.map((f) => {
+              const tracks = f.targets.map((x) => f.tracks[x.id]);
+              const daysDone = Math.min(...tracks.map((tr) => tr?.days_done ?? 0));
+              const finished = tracks.every((tr) => (tr?.days_done ?? 0) >= f.spec.days);
+              const sites = tracks.reduce((n, tr) => n + (tr?.sites ?? 0), 0);
+              const running = tracks.some((tr) => tr?.sessions.some((s) => s.started_ms && !s.ended));
+              const next = Math.min(
+                ...tracks.flatMap((tr) => (tr?.sessions ?? []).filter((s) => !s.started_ms && !s.ended).map((s) => s.at_ms)),
+              );
+              const errors = f.targets
+                .map((x) => ({ name: x.name, err: f.tracks[x.id]?.last_error }))
+                .filter((x) => x.err);
+              const when = (ms: number) => {
+                const d = new Date(ms);
+                const hm = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+                return d.toDateString() === new Date().toDateString() ? hm : `${d.toLocaleDateString([], { day: "numeric", month: "short" })} ${hm}`;
+              };
+              return (
+                <div key={f.id} style={{ marginBottom: "var(--s-1)" }}>
+                  <div className="row" style={{ alignItems: "baseline" }}>
+                    <strong style={{ flexShrink: 0 }}>{f.spec.name || t("farm.untitled")}</strong>
+                    <span className="muted small" style={{ flex: 1, minWidth: 0 }}>
+                      {t("farm.profiles", { n: f.targets.length })}
+                      {" · "}
+                      {finished ? t("farm.finished") : t("farm.dayOf", { done: daysDone, days: f.spec.days })}
+                      {" · "}
+                      {t("farm.sitesRead", { n: sites })}
+                      {!finished && (f.paused
+                        ? ` · ${t("farm.paused")}`
+                        : running
+                          ? ` · ${t("farm.running")}`
+                          : Number.isFinite(next)
+                            ? ` · ${t("farm.next", { at: when(next) })}`
+                            : "")}
+                    </span>
+                    {!finished && (
+                      <button className="ghost" onClick={async () => { await api.farmPause(f.id, !f.paused); await refreshFarms(); }}>
+                        {f.paused ? t("farm.resume") : t("farm.pause")}
+                      </button>
+                    )}
+                    <button
+                      className="ghost"
+                      onClick={async () => {
+                        if (!finished && (await ask({ title: t("farm.deleteAsk"), detail: t("farm.deleteBody"), confirmLabel: t("farm.delete"), danger: true })) === null) return;
+                        await api.farmDelete(f.id);
+                        await refreshFarms();
+                      }}
+                    >
+                      {finished ? t("warm.dismiss") : t("farm.delete")}
+                    </button>
+                  </div>
+                  {errors.length > 0 && (
+                    <div className="hint" title={errors.map((x) => `${x.name}: ${x.err}`).join("\n")}>
+                      {t("farm.lastError", { name: errors[0].name, err: errors[0].err ?? "" })}
+                      {errors.length > 1 ? ` (+${errors.length - 1})` : ""}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+            {farms.farms.some((f) => f.targets.some((x) => x.origin !== "local")) && (
+              <div className="hint">{t("farm.teamNeedsWindow")}</div>
             )}
           </div>
         )}
@@ -919,7 +1830,7 @@ export function App() {
           </div>
         )}
 
-        {/* A newer Fury. The check used to sit behind a button on the About
+        {/* A newer XChange. The check used to sit behind a button on the About
             screen, so nobody saw a release unless they went looking: the
             owner ran 0.2.10 for a week of releases and asked why the
             application never said (08.10.2026). Checked at start and every
@@ -958,7 +1869,7 @@ export function App() {
               disabled={!!installing}
               onClick={() => {
                 try {
-                  localStorage.setItem("fury.update.dismissed", update.latest ?? "");
+                  localStorage.setItem("xchange.update.dismissed", update.latest ?? "");
                 } catch {
                   /* a private window: dismissed for this session only */
                 }
@@ -969,6 +1880,60 @@ export function App() {
             </button>
           </div>
         )}
+
+        {/* The team server behind the newest release. Shown to owners and
+            admins of a server we do not run, once per release; the steps are
+            docs/14-team-server.md, "Обновление". */}
+        {(() => {
+          const latest = (update?.latest ?? update?.current ?? "").replace(/^v/, "");
+          const host = (() => {
+            try {
+              return shell?.server_url ? new URL(shell.server_url).hostname : "";
+            } catch {
+              return "";
+            }
+          })();
+          if (!me || !latest || !host || OUR_SERVERS.includes(host)) return null;
+          if (me.role !== "owner" && me.role !== "admin") return null;
+          if (me.server_version && !versionNewer(latest, me.server_version)) return null;
+          // Without a version the server is older than 0.4.2; only worth
+          // saying once a release that reports one exists.
+          if (!me.server_version && !versionNewer(latest, "0.4.1")) return null;
+          if (dismissedServer === latest) return null;
+          return (
+            <div className="notice" role="status">
+              <div style={{ flex: 1 }}>
+                <strong>
+                  {me.server_version
+                    ? t("app.serverUpdate", { host, version: me.server_version, latest })
+                    : t("app.serverUpdateUnknown", { host, latest })}
+                </strong>
+                <div className="muted" style={{ marginTop: "var(--s-1)" }}>{t("app.serverUpdateHow", { latest })}</div>
+              </div>
+              <button
+                className="ghost"
+                onClick={() =>
+                  void api.openUrl("https://github.com/dx5tool/fury-nomaster/blob/main/docs/14-team-server.md")
+                }
+              >
+                {t("app.serverUpdateSteps")}
+              </button>
+              <button
+                className="ghost"
+                onClick={() => {
+                  try {
+                    localStorage.setItem("xchange.serverUpdate.dismissed", latest);
+                  } catch {
+                    /* a private window: dismissed for this session only */
+                  }
+                  setDismissedServer(latest);
+                }}
+              >
+                {t("app.updateLater")}
+              </button>
+            </div>
+          );
+        })()}
 
         {/* The right Chrome, an older build of it -- agent/src/main.rs,
             core_stale. Profiles keep launching; this only offers the build
@@ -1033,7 +1998,8 @@ export function App() {
 
         {notice && (
           <div className="notice infoBar" role="status">
-            {notice.text}
+            <IconButton icon="close" label={t("app.dismiss")} onClick={() => setNotice(null)} />
+            <span className="noticeText">{notice.text}</span>
             <button className="ghost" onClick={() => setNotice(null)}>
               {t("app.dismiss")}
             </button>
@@ -1042,396 +2008,39 @@ export function App() {
 
         {error && (
           <div className="notice" role="status">
-            {error}
+            <IconButton icon="close" label={t("app.dismiss")} onClick={() => setError(null)} />
+            <span className="noticeText">{error}</span>
             <button className="ghost" onClick={() => setError(null)}>
               {t("app.dismiss")}
             </button>
           </div>
         )}
 
-        {view === "profiles" && (
-          <div className="toolbar">
-            {/* No "New profile" here. It is the first thing in the sidebar,
-                permanently, and a second copy of the primary action a few
-                pixels away is two places to look for one decision.
-
-                Making MANY is a different decision and does belong here: it is
-                the one people reach for after the first few profiles, and it
-                acts on the project this toolbar is already filtering. */}
-            <button onClick={() => setBulk(null)}>{t("bp.button")}</button>
-            {/* Into this computer only: a team profile's proxy carries sealed
-                credentials on the server -- see CsvImport. Shown whenever the
-                profiles would land here: local mode, a local project, or no
-                project on a connected shell. It used to follow the shell's
-                mode alone, so a connected shell never showed it, even inside
-                a local project (reported 10.10.2026: "where is the import"). */}
-            {importsHere && <button className="ghost" onClick={() => setCsv(true)}>{t("csv.button")}</button>}
-            {importsHere && <button className="ghost" onClick={() => setGologin(true)}>{t("gl.button")}</button>}
-            <input
-              className="search"
-              placeholder={t("bar.search")}
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-            />
-            {tags.length > 0 && (
-              <select style={{ width: "auto" }} value={tag} onChange={(e) => setTag(e.target.value)}>
-                <option value="">{t("bar.allTags")}</option>
-                <option value={"\u0000none"}>{t("bar.untagged")}</option>
-                {tags.map((x) => (
-                  <option key={x} value={x}>
-                    {x}
-                  </option>
-                ))}
-              </select>
-            )}
-            {stages.length > 0 && (
-              <select style={{ width: "auto" }} value={stage} onChange={(e) => setStage(e.target.value)}>
-                <option value="">{t("bar.allStages")}</option>
-                <option value={"\u0000none"}>{t("bar.noStage")}</option>
-                {stages.map((x) => (
-                  <option key={x} value={x}>
-                    {isSuggested(x) ? t(`status.${x}` as never) : x} ({profiles.filter((p) => (p.status ?? "").trim().toLowerCase() === x).length})
-                  </option>
-                ))}
-              </select>
-            )}
-            <label className="row" style={{ gap: 6, whiteSpace: "nowrap" }}>
-              <input
-                type="checkbox"
-                style={{ width: 14, height: 14, accentColor: "var(--accent)" }}
-                checked={openOnly}
-                onChange={(e) => setOpenOnly(e.target.checked)}
-              />
-              <span className="muted small">
-                {t("bar.openOnly", { n: profiles.filter((p) => p.running).length })}
-              </span>
-            </label>
-            <div className="spacer" />
-            <IconButton
-              icon="refresh"
-              label={t("bar.refresh")}
-              onClick={() => void refreshProfiles()}
-            />
-            {/* Its own line, always: it appears and disappears with the
-                selection, and a block that reflows the filters above it every
-                time a checkbox is ticked is the "visual mess" this replaced. */}
-            {chosen.length > 0 && (
-              <div className="bulk">
-                <span className="muted small">
-                  {t("bar.selected", { n: chosen.length })}
-                </span>
-                {openable.length > 0 && (
-                  <button disabled={busy} onClick={openMany}>
-                    {t("bar.openSelected", { n: openable.length })}
-                  </button>
-                )}
-                {/* Only what is on the server can be given away, so the button
-                    appears only when every selected row is. A local profile
-                    exists nowhere the other person can reach, and offering to
-                    share it would end in an error that reads like a fault
-                    rather than like an explanation. */}
-                {/* Shown for local rows too, disabled, with the reason on it.
-                    Hiding it was worse: a profile on this machine cannot be
-                    given away until it is on a server, and with no button there
-                    was nothing on screen to say so -- the question "how do I
-                    give somebody this profile" had no answer anywhere in the
-                    window. A greyed control that explains itself teaches the
-                    order of the two steps. */}
-                {/* Enabled for anything. A local profile is copied to the
-                    server on the way, by the dialog, without being asked --
-                    "why can't I just share it and have it appear for them" is
-                    the right question and the answer was four steps of our
-                    bookkeeping. */}
-                {!local && chosen.length > 0 && (
-                  <button className="ghost" disabled={busy} onClick={() => setSharing(chosen)}>
-                    <Icon name="share" /> {t("row.share")}
-                  </button>
-                )}
-                {/* The other direction, and the one that makes sharing reachable
-                    for a profile that started here. Offered only for local rows,
-                    and only when there is a server to send them to. */}
-                {!local && chosen.length > 0 && chosen.every((p) => p.origin === "local") && (
-                  <IconButton
-                    icon="upload"
-                    label={t("up.send")}
-                    disabled={busy}
-                    onClick={async () => {
-                      // Into the project being viewed, or the only one there
-                      // is. No picker: Ask has no list, and adding one for this
-                      // would be a screen of its own -- while choosing a
-                      // project is already what the sidebar is for.
-                      // A folder is bookkeeping, and asking somebody to choose
-                      // one before they may do the thing they asked for is
-                      // making them do ours. The one being viewed if there is
-                      // one, otherwise a server project named after the folder
-                      // these came from, made once and reused.
-                      const team = projects.filter((p) => p.origin === "team");
-                      let target = active?.origin === "team" ? active.id : null;
-                      if (!target) {
-                        const wanted = chosen[0].project_name?.trim() || t("share.autoProject");
-                        target =
-                          team.find((p) => p.name === wanted)?.id ??
-                          (await api.createProjectIn(wanted, "team")).id;
-                      }
-                      const go = await ask({
-                        title: t("up.send"),
-                        detail: t("up.confirm", {
-                          n: String(chosen.length),
-                          project: projects.find((p) => p.id === target)?.name ?? "",
-                        }),
-                        confirmLabel: t("up.send"),
-                      });
-                      if (go === null) return;
-                      setBusy(true);
-                      let proxyMoved = false;
-                      try {
-                        for (const p of chosen) {
-                          const r = await api.uploadProfile(p.id, target);
-                          proxyMoved = proxyMoved || r.proxy_moved;
-                        }
-                        setError(
-                          t("up.done", { name: chosen[0].name }) +
-                            (proxyMoved ? " " + t("up.proxyMoved") : ""),
-                        );
-                      } catch (e) {
-                        setError((e as Error).message);
-                      } finally {
-                        setBusy(false);
-                        await refreshProfiles();
-                      }
-                    }}
-                  />
-                )}
-                {closable.length > 0 && (
-                  <IconButton
-                    icon="close"
-                    label={t("bar.closeSelected", { n: closable.length })}
-                    disabled={busy}
-                    onClick={async () => {
-                      setBusy(true);
-                      for (const p of closable) await api.stop(p.id, p.origin);
-                      await refreshProfiles();
-                      setBusy(false);
-                    }}
-                  />
-                )}
-                <IconButton
-                  icon="trash"
-                  danger
-                  label={t("bar.deleteSelected", { n: chosen.length })}
-                  title={
-                    closable.length > 0
-                      ? t("row.closeFirst")
-                      : t("bar.deleteSelected", { n: chosen.length })
-                  }
-                  disabled={busy || closable.length > 0}
-                  onClick={async () => {
-                    const go = await ask({
-                      title: t("bar.deleteSelected", { n: chosen.length }),
-                      detail: t("bar.confirmDeleteMany", { n: chosen.length }),
-                      confirmLabel: t("ui.delete"),
-                      danger: true,
-                    });
-                    if (go === null) return;
-                    setBusy(true);
-                    for (const p of chosen) await api.deleteProfile(p.id, p.origin);
-                    setSelected(new Set());
-                    await load();
-                    await refreshProfiles();
-                    setBusy(false);
-                  }}
-                />
-                {/* Filing, into folders of the SAME side as the selection.
-                    A local profile goes in a local folder and a team one in a
-                    team project; offering the other list is what produced
-                    "not found" from a server asked about a profile it had never
-                    seen. Hiding it altogether was the over-correction: it left
-                    somebody who just wants their own profiles sorted into
-                    Personal and Work with no way to do it. */}
-                {(() => {
-                  const side = chosen.every((p) => p.origin === "local")
-                    ? "local"
-                    : chosen.every((p) => p.origin === "team")
-                      ? "team"
-                      : null;
-                  const filable = side ? projects.filter((p) => p.origin === side) : [];
-                  return filable.length > 0 && (
-                  <select
-                    style={{ width: "auto" }}
-                    value=""
-                    disabled={busy}
-                    onChange={async (e) => {
-                      const to = e.target.value;
-                      if (to === "") return;
-                      setBusy(true);
-                      try {
-                        // "\u0000none" rather than "" for out-of-every-project:
-                        // an empty value is the placeholder, and the two must
-                        // not be the same string or picking one does nothing.
-                        await api.moveProfiles(
-                          chosen.map((p) => p.id),
-                          to === "\u0000none" ? null : to,
-                          chosen[0].origin,
-                        );
-                        setSelected(new Set());
-                        await load();
-                        await refreshProfiles();
-                      } catch (err) {
-                        setError(say(err));
-                      } finally {
-                        setBusy(false);
-                      }
-                    }}
-                  >
-                    <option value="">{t("bar.moveTo")}</option>
-                    {filable.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.name}
-                      </option>
-                    ))}
-                    {/* Out of every folder is a local idea: on a server a
-                        profile always belongs to a project, because the project
-                        is what carries access to it. */}
-                    {side === "local" && (
-                      <option value={"\u0000none"}>{t("bar.moveOut")}</option>
-                    )}
-                  </select>
-                  );
-                })()}
-                {/* Proxy for the whole selection (5.7). Offered when every
-                    chosen row is on the side the proxy list describes: the
-                    list is this machine's in local mode and the server's
-                    otherwise, and a local profile cannot point at a server
-                    proxy. "Each its own" hands out proxies nobody uses yet,
-                    one per profile — the answer to the household warning in
-                    the proxy column. */}
-                {(() => {
-                  const side = local ? "local" : "team";
-                  if (!proxyList || proxyList.length === 0 || !chosen.every((p) => p.origin === side)) return null;
-                  const used = new Set(profiles.map((p) => p.proxy?.id).filter(Boolean));
-                  const free = proxyList.filter((x) => !used.has(x.id));
-                  const assign = async (pairs: [Profile, string | null][]) => {
-                    setBusy(true);
-                    setError(null);
-                    let failed = 0;
-                    for (const [p, id] of pairs) {
-                      try {
-                        // The agent takes the id and refuses a partial proxy
-                        // object; the server path reads `proxy.id`. Each side
-                        // gets the shape it reads.
-                        await api.saveProfile(
-                          local ? { ...p, proxy_id: id ?? "", proxy: null } : { ...p, proxy: id ? { id } : null },
-                          p.origin,
-                        );
-                      } catch {
-                        failed++;
-                      }
-                    }
-                    setSelected(new Set());
-                    await refreshProfiles();
-                    setBusy(false);
-                    setNotice({ text: failed > 0 ? t("bar.proxySetFailed", { n: pairs.length - failed, f: failed }) : t("bar.proxySet", { n: pairs.length }), forProfile: null });
-                  };
-                  return (
-                    <select
-                      style={{ width: "auto" }}
-                      value=""
-                      disabled={busy}
-                      onChange={(e) => {
-                        const v = e.target.value;
-                        if (v === "") return;
-                        if (v === "\u0000each") {
-                          void assign(chosen.map((p, i) => [p, free[i].id] as [Profile, string]));
-                        } else if (v === "\u0000none") {
-                          void assign(chosen.map((p) => [p, null] as [Profile, null]));
-                        } else {
-                          void assign(chosen.map((p) => [p, v] as [Profile, string]));
-                        }
-                      }}
-                    >
-                      <option value="">{t("bar.proxyTo")}</option>
-                      <option value={"\u0000each"} disabled={free.length < chosen.length}>
-                        {t("bar.proxyEach", { n: free.length })}
-                      </option>
-                      {proxyList.map((x) => (
-                        <option key={x.id} value={x.id}>
-                          {x.name} · {x.last_country ?? x.host}{used.has(x.id) ? ` · ${t("px.usedByN", { n: profiles.filter((p) => p.proxy?.id === x.id).length })}` : ""}
-                        </option>
-                      ))}
-                      {/* A team profile must have a proxy: the server refuses one without. */}
-                      {local && <option value={"\u0000none"}>{t("bar.proxyNone")}</option>}
-                    </select>
-                  );
-                })()}
-                {/* One profile, not many. Copying acts on a single source and
-                    cookies belong to a single jar, so offering either for a
-                    multi-selection would mean guessing which one was meant. */}
-                {chosen.length >= 1 && local && (
-                  <button disabled={busy} title={t("warm.why")} onClick={() => setWarmFor(chosen)}>
-                    {t("warm.button", { n: chosen.length })}
-                  </button>
-                )}
-                {chosen.length >= 2 && local && (
-                  <button
-                    className="primary"
-                    disabled={busy}
-                    title={t("mir.hint")}
-                    onClick={async () => {
-                      setMirrorNote(null);
-                      try {
-                        const r = await api.mirrorStart(chosen.map((p) => p.id), mirror?.typing ?? true);
-                        setMirror(r.status.active ? r.status : null);
-                        if (r.refused.length > 0) {
-                          setMirrorNote(
-                            r.refused
-                              .map((x) => {
-                                const name = profiles.find((p) => p.id === x.id)?.name ?? x.id;
-                                return x.reason === "open_without_cdp" ? t("mir.refusedOpen", { name }) : `${name}: ${say({ code: x.code, message: x.reason })}`;
-                              })
-                              .join(" "),
-                          );
-                        }
-                        await refreshProfiles();
-                      } catch (e) {
-                        setMirrorNote(say(e));
-                      }
-                    }}
-                  >
-                    {t("mir.start", { n: chosen.length })}
-                  </button>
-                )}
-                {chosen.length === 1 && (
-                  <>
-                    <IconButton icon="copy" label={t("bp.clone")} onClick={() => setBulk(chosen[0])} />
-                    <IconButton
-                      icon="cookie"
-                      label={t("ck.cookies")}
-                      onClick={() => setCookiesFor(chosen[0])}
-                    />
-                  </>
-                )}
-                <button className="ghost" onClick={() => setSelected(new Set())}>
-                  {t("bar.clearSelection")}
-                </button>
-              </div>
-            )}
-
-          </div>
-        )}
 
         {/* No project selected is not the same as a project with no profiles,
             and saying the latter to someone who has been granted nothing sends
             them looking for a profile list that was never theirs. */}
-        {view === "proxies" && <Proxies profiles={profiles} />}
+        {view === "proxies" && <Proxies profiles={profiles} local={local} myEmail={me?.email ?? null} />}
         {view === "extensions" && <ExtensionsView profiles={profiles} />}
+        {view === "projects" && (
+          <Projects
+            projects={projects}
+            local={local}
+            onChanged={async () => {
+              await load();
+              await refreshProfiles(null);
+            }}
+          />
+        )}
         {view === "assistants" && <AssistantsView />}
 
         {view === "users" && (
           <Users
             projects={projects}
             local={local}
+            serverUrl={shell.server_url}
             onSignOut={signOut}
-            onConnect={() => setSettingsOpen(true)}
+            onConnect={() => { setSettingsTab("team"); setSettingsOpen(true); }}
           />
         )}
 
@@ -1450,16 +2059,30 @@ export function App() {
             somebody else, and two people can both have a "Shop DE". The column
             that shows a project shows who lent it instead. */}
         {view === "sharedWithMe" && (
-          <div className="tableWrap">
+          <div className="tableWrap flex-1 overflow-auto">
             {shared.length === 0 ? (
               <p className="muted" style={{ padding: "var(--s-3)" }}>{t("shared.empty")}</p>
-            ) : (
-              <ProfileTable
+            ) : shownViewMode === "table" ? (
+              <SimprintProfileTable
                 profiles={shared}
                 showProject
                 selected={new Set()}
                 onToggle={() => {}}
                 onToggleAll={() => {}}
+                me={me}
+                thisMachine={shell.machine_name}
+                local={false}
+                busy={busy}
+                launching={launching}
+                onLaunch={onLaunch}
+                onStop={onStop}
+                onNotes={saveNotes}
+              />
+            ) : (
+              <SimprintProfileGrid
+                profiles={shared}
+                selected={new Set()}
+                onToggle={() => {}}
                 me={me}
                 thisMachine={shell.machine_name}
                 local={false}
@@ -1473,48 +2096,157 @@ export function App() {
         )}
 
         {view === "profiles" && (
-          <div className="tableWrap">
-            <ProfileTable
-              profiles={shown}
-              showProject={active === null}
-              selected={selected}
-              onToggle={toggle}
-              onToggleAll={toggleAll}
-              me={me}
-              thisMachine={shell.machine_name}
-              local={local}
-              busy={busy}
-              launching={launching}
-              onLaunch={onLaunch}
-              onStop={onStop}
-              onEdit={setEditing}
-              onExtensions={setExtFor}
-              onShare={local ? undefined : (p) => setSharing([p])}
-              onNetwork={setNetFor}
-              onClone={(p) => setBulk(p)}
-              personas={personaIds}
-              sharing={exitCounts}
-              /* Offered always, and gated per row rather than per mode.
-                 It used to be handed over only in local mode, so connecting to
-                 a server removed the delete button from EVERY row -- including
-                 the local ones now shown beside the server's, which the server
-                 has no say over at all. The table shows it when the row's own
-                 permissions allow it, and a local row carries all of them. */
-              onDelete={
-                (async (p) => {
-                      const go = await ask({
-                        title: t("row.delete"),
-                        detail: t("row.confirmDelete", { name: p.name }),
-                        confirmLabel: t("ui.delete"),
-                        danger: true,
-                      });
-                      if (go === null) return;
-                      await api.deleteProfile(p.id, p.origin);
-                      await refreshProfiles();
-                })
-              }
-            />
+          <div className="tableWrap flex-1 overflow-auto" ref={listScrollRef}>
+            {shownViewMode === "table" ? (
+              <SimprintProfileTable
+                profiles={paged}
+                offset={(safePage - 1) * pageSize}
+                showProject={active === null}
+                tailSpace={chosen.length > 0 ? 112 : undefined}
+                selected={selected}
+                onToggle={toggle}
+                onToggleAll={toggleAll}
+                selectMode={selectMode}
+                onSetPicked={setPicked}
+                me={me}
+                thisMachine={shell.machine_name}
+                local={local}
+                busy={busy}
+                launching={launching}
+                logging={logging}
+                onLaunch={onLaunch}
+                onLogin={onLogin}
+                withLogin={loginProfileIds}
+                onStop={onStop}
+                onNotes={saveNotes}
+                onEdit={setEditing}
+                onExtensions={setExtFor}
+                onDisk={setDiskFor}
+                onShare={local ? undefined : (p) => setSharing([p])}
+                onNetwork={setNetFor}
+                onClone={(p) => setBulk(p)}
+                personas={personaIds}
+                sharing={exitCounts}
+                onDelete={async (p) => {
+                  const go = await ask({
+                    title: t("row.delete"),
+                    detail: t("row.confirmDelete", { name: p.name }),
+                    confirmLabel: t("ui.delete"),
+                    danger: true,
+                  });
+                  if (go === null) return;
+                  await api.deleteProfile(p.id, p.origin);
+                  await refreshProfiles();
+                }}
+                onReset={async (p) => {
+                  // Naming the destination is the difference between "a reset"
+                  // and knowing which disk the folder will land on.
+                  const storage = await api.storageInfo().catch(() => null);
+                  const root = storage?.profile_root ?? storage?.default_root;
+                  const go = await ask({
+                    title: t("row.reset"),
+                    detail: root
+                      ? t("row.confirmReset", { name: p.name, path: root })
+                      : t("row.confirmResetNoPath", { name: p.name }),
+                    confirmLabel: t("row.reset"),
+                    danger: true,
+                  });
+                  if (go === null) return;
+                  setBusy(true);
+                  setError(null);
+                  try {
+                    const r = await api.resetProfile(p.id);
+                    await refreshProfiles();
+                    setNotice({
+                      text: t("row.resetDone", { name: p.name, path: r.dir }),
+                      forProfile: null,
+                    });
+                  } catch (e) {
+                    setError(say(e));
+                  } finally {
+                    setBusy(false);
+                  }
+                }}
+                onCookies={setCookiesFor}
+                onOpenFolder={openProfileFolder}
+                onQuickEdit={saveNameAndTags}
+              />
+            ) : (
+              <SimprintProfileGrid
+                profiles={paged}
+                selected={selected}
+                onToggle={toggle}
+                me={me}
+                thisMachine={shell.machine_name}
+                local={local}
+                busy={busy}
+                launching={launching}
+                onLaunch={onLaunch}
+                onStop={onStop}
+                onEdit={setEditing}
+                onExtensions={setExtFor}
+                onDisk={setDiskFor}
+                onShare={local ? undefined : (p) => setSharing([p])}
+                onNetwork={setNetFor}
+                onClone={(p) => setBulk(p)}
+                personas={personaIds}
+                sharing={exitCounts}
+                onDelete={async (p) => {
+                  const go = await ask({
+                    title: t("row.delete"),
+                    detail: t("row.confirmDelete", { name: p.name }),
+                    confirmLabel: t("ui.delete"),
+                    danger: true,
+                  });
+                  if (go === null) return;
+                  await api.deleteProfile(p.id, p.origin);
+                  await refreshProfiles();
+                }}
+                onCookies={setCookiesFor}
+                onOpenFolder={openProfileFolder}
+                onQuickEdit={saveNameAndTags}
+              />
+            )}
           </div>
+        )}
+
+        {view === "profiles" && (
+          <SimprintPager
+            page={safePage}
+            pageCount={pageCount}
+            pageSize={pageSize}
+            total={shown.length}
+            onPage={setPage}
+            onPageSize={handlePageSize}
+          />
+        )}
+
+        {view === "profiles" && chosen.length > 0 && (
+          <SimprintBulkBar
+            raised
+            chosen={chosen}
+            busy={busy}
+            local={local}
+            projects={projects}
+            proxyList={proxyList}
+            profiles={profiles}
+            openMany={openMany}
+            onCloseMany={onCloseMany}
+            onShare={() => setSharing(chosen)}
+            onUpload={handleUploadSelected}
+            onDeleteMany={handleDeleteSelected}
+            onMoveTo={handleMoveSelected}
+            onAssignProxy={handleAssignProxySelected}
+            onWarm={() => setWarmFor(chosen)}
+            onMirror={handleMirrorSelected}
+            onClone={(p) => setBulk(p)}
+            onCookies={(p) => setCookiesFor(p)}
+            onClear={() => setSelected(new Set())}
+            onClearCache={handleClearCacheSelected}
+            onExportCookies={handleExportCookiesSelected}
+            onExportProfiles={handleOpenExportProfiles}
+            onChangeStartUrls={handleOpenStartUrls}
+          />
         )}
 
         {sharing && (
@@ -1554,6 +2286,7 @@ export function App() {
         {settingsOpen && (
           <Settings
             shell={shell}
+            initialTab={settingsTab}
             hasProject={active !== null}
             onExport={exportProject}
             onImport={importProject}
@@ -1573,6 +2306,7 @@ export function App() {
         {editing !== undefined && (
           <ProfileDialog
             projectId={active?.id ?? null}
+            projects={projects}
             editing={editing}
             origin={newOrigin}
             canChoose={canChooseOrigin}
@@ -1599,6 +2333,16 @@ export function App() {
             }}
           />
         )}
+        {accountImport && (
+          <AccountImport
+            projectId={active?.origin === "local" ? active.id : null}
+            onDone={() => {
+              void load();
+              void refreshProfiles();
+            }}
+            onClose={() => setAccountImport(false)}
+          />
+        )}
         {csv && (
           <CsvImport
             projectId={active?.origin === "local" ? active.id : null}
@@ -1618,12 +2362,56 @@ export function App() {
         {cookiesFor && (
           <Cookies profile={cookiesFor} onClose={() => setCookiesFor(null)} />
         )}
+        {startUrlsFor && (
+          <SimprintStartUrls
+            profiles={startUrlsFor}
+            onClose={() => setStartUrlsFor(null)}
+            onApply={handleApplyStartUrls}
+          />
+        )}
+        {exportProfilesFor && (
+          <SimprintExportProfiles
+            profiles={exportProfilesFor}
+            onClose={() => setExportProfilesFor(null)}
+            onDone={(result) => {
+              setExportProfilesFor(null);
+              setNotice({
+                text:
+                  t("bar.exportProfilesDone", { n: result.profiles, path: result.path }) +
+                  (result.skipped > 0
+                    ? " " + t("bar.exportProfilesSkipped", { n: result.skipped })
+                    : ""),
+                forProfile: null,
+              });
+            }}
+          />
+        )}
+        {importProfilesOpen && (
+          <SimprintImportProfiles
+            projectId={active?.origin === "local" ? active.id : null}
+            projectName={active?.origin === "local" ? active.name : null}
+            onClose={() => setImportProfilesOpen(false)}
+            onDone={async (result) => {
+              setImportProfilesOpen(false);
+              await load();
+              await refreshProfiles();
+              setNotice({
+                text: t("bar.importProfilesDone", {
+                  n: result.imported,
+                  logins: result.logins,
+                }),
+                forProfile: null,
+              });
+            }}
+          />
+        )}
         {warmFor && (
           <WarmDialog
             profiles={warmFor}
             onStarted={(note) => {
               setMirrorNote(note);
               void refreshProfiles();
+              void refreshFarms();
             }}
             onClose={() => setWarmFor(null)}
           />
@@ -1638,9 +2426,23 @@ export function App() {
             onClose={() => setExtFor(null)}
           />
         )}
+        {diskFor && (
+          <DiskUsage
+            profile={diskFor}
+            running={isOpenHere(diskFor, { local, userId: me?.user_id, machine: shell.machine_name })}
+            onClose={() => setDiskFor(null)}
+          />
+        )}
       </main>
+      </div>
     </div>
   );
+}
+
+/** Bytes as megabytes, one decimal below ten — the reading the storage dialog uses. */
+function mb(bytes: number): string {
+  const m = bytes / (1024 * 1024);
+  return m >= 10 ? Math.round(m).toString() : m.toFixed(1);
 }
 
 /** Search across the three things someone actually looks a profile up by. */

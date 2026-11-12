@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright 2026 Bogdan Shapovalov and the Fury authors
+// Copyright 2026 Bogdan Shapovalov and the XChange authors
 
 //! Moving profiles out of other anti-detect browsers, through their own APIs.
 //!
@@ -197,7 +197,7 @@ pub(crate) async fn send(
     token_hint: &str,
 ) -> Result<(reqwest::StatusCode, Value)> {
     let response = request
-        .header("User-Agent", concat!("fury-agent/", env!("CARGO_PKG_VERSION")))
+        .header("User-Agent", concat!("xchange-agent/", env!("CARGO_PKG_VERSION")))
         .send()
         .await
         .map_err(|e| {
@@ -235,7 +235,7 @@ pub(crate) async fn send(
 
 /// The text of an HTML-ish note: tags out, entities for the five that
 /// matter decoded, runs of whitespace collapsed. Notes in some sources are
-/// rich text, and a profile's notes in Fury are plain.
+/// rich text, and a profile's notes in XChange are plain.
 pub(crate) fn plain_text(html: &str) -> String {
     let mut out = String::with_capacity(html.len());
     let mut in_tag = false;
@@ -302,7 +302,7 @@ pub(crate) fn proxy_line(
         return (None, Some("the proxy has no address in the source".into()));
     }
     if !matches!(kind.as_str(), "http" | "https" | "socks5" | "socks4") {
-        return (None, Some(format!("a {kind} proxy is not one Fury can use")));
+        return (None, Some(format!("a {kind} proxy is not one XChange can use")));
     }
     if user.contains(':') {
         return (None, Some("the proxy username contains a colon".into()));
@@ -524,7 +524,7 @@ mod tests {
     fn a_proxy_line_is_one_the_paste_parser_reads_back() {
         let (line, note) = proxy_line("SOCKS5", "5.6.7.8", 1080, "u@x", "p:a%ss");
         assert_eq!(note, None);
-        let p = fury_shared::proxy_list::parse_line(&line.unwrap()).unwrap();
+        let p = xchange_shared::proxy_list::parse_line(&line.unwrap()).unwrap();
         assert_eq!((p.host.as_str(), p.port), ("5.6.7.8", 1080));
         assert_eq!(p.username.as_deref(), Some("u@x"));
         assert_eq!(p.password.as_deref(), Some("p:a%ss"));

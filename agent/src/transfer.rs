@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright 2026 Bogdan Shapovalov and the Fury authors
+// Copyright 2026 Bogdan Shapovalov and the XChange authors
 
 //! Moving a project between machines.
 //!
@@ -36,6 +36,10 @@ use crate::store::{Profile, Proxy, Store};
 /// Magic and version. Read before anything else, so a file from a later
 /// version says so instead of failing as "wrong passphrase" — which is the
 /// error people spend an hour on.
+///
+/// The tag stays `FURY-`: it is the on-disk format of an export written by an
+/// earlier build, not branding. Renaming it makes every file a user already
+/// exported stop opening.
 const MAGIC: &[u8; 8] = b"FURY-EX2";
 /// The first format. Same layout, weaker key derivation — see `derive_key`.
 /// Still read, never written: a file someone exported last month has to open.
@@ -136,7 +140,7 @@ pub async fn export_project(
     // The file is the accounts. Not readable by anyone else, even for the
     // moment it sits in a Downloads folder — which on Windows is exactly where
     // an inherited ACL is least predictable.
-    let _ = fury_platform::perms::owner_only_file(dest);
+    let _ = xchange_platform::perms::owner_only_file(dest);
     Ok(out.len() as u64)
 }
 
@@ -156,10 +160,10 @@ pub async fn import_project(
     let version = match raw.get(..MAGIC.len()) {
         Some(m) if m == MAGIC => Version::V2,
         Some(m) if m == MAGIC_V1 => Version::V1,
-        _ => anyhow::bail!("this is not a Fury export file"),
+        _ => anyhow::bail!("this is not an XChange export file"),
     };
     if raw.len() < MAGIC.len() + SALT_LEN + NONCE_LEN {
-        anyhow::bail!("this is not a Fury export file");
+        anyhow::bail!("this is not an XChange export file");
     }
 
     let salt = &raw[MAGIC.len()..MAGIC.len() + SALT_LEN];
@@ -215,7 +219,7 @@ pub async fn import_project(
     } else {
         manifest.project_name.clone()
     };
-    let project_id = store.create_project(&name, "").await?;
+    let project_id = store.create_project(&name, "", 0, "").await?;
 
     // Proxies first: a profile references one, so it has to exist. Ids are
     // remapped, because the receiving machine may already have a proxy under
@@ -255,6 +259,18 @@ pub async fn import_project(
         std::fs::write(&target, &bytes)?;
     }
 
+    // Pin each imported profile to the folder its data was just written into.
+    //
+    // An imported profile is unlike a created one: its data already exists. A
+    // row left with no recorded directory would resolve through whatever root
+    // is in force at the first launch, so changing the root in between would
+    // point the profile at an empty folder while its cookies sat at the old
+    // one — a profile that looks logged out with its account still on disk.
+    // Recorded here, while the answer is known.
+    for new_id in ids.values() {
+        store.set_profile_dir(new_id, &profile_dir(new_id)).await?;
+    }
+
     Ok((project_id, manifest.profiles.len()))
 }
 
@@ -281,9 +297,9 @@ fn derive_key(passphrase: &str, salt: &[u8], version: Version) -> anyhow::Result
         Version::V1 => Argon2::default(),
         Version::V2 => {
             let params = argon2::Params::new(
-                fury_shared::keys::KDF_MEMORY_KIB,
-                fury_shared::keys::KDF_PASSES,
-                fury_shared::keys::KDF_LANES,
+                xchange_shared::keys::KDF_MEMORY_KIB,
+                xchange_shared::keys::KDF_PASSES,
+                xchange_shared::keys::KDF_LANES,
                 Some(32),
             )
             .map_err(|e| anyhow::anyhow!("bad Argon2 parameters: {e}"))?;
@@ -403,7 +419,7 @@ mod tests {
         std::fs::create_dir_all(profile_dir(&id)).unwrap();
         std::fs::write(profile_dir(&id).join("Cookies"), b"warm").unwrap();
 
-        let out = dir.join("export.fury");
+        let out = dir.join("export.xchange");
         export_project(&s, &project, &out, "correct horse battery", true, profile_dir.clone())
             .await
             .unwrap();
@@ -433,6 +449,17 @@ mod tests {
             std::fs::read(profile_dir(&r.id).join("Cookies")).unwrap(),
             b"warm"
         );
+
+        // Pinned to the folder the data was written into. An imported profile
+        // has data before it has ever launched, so a row left with no path
+        // would resolve through whatever root is in force at that launch — and
+        // a root changed in between would open an empty browser while these
+        // cookies sat where the import put them.
+        assert_eq!(
+            s.stored_dir(&r.id).await.unwrap(),
+            Some(profile_dir(&r.id).display().to_string()),
+            "an imported profile was left without a recorded directory"
+        );
     }
 
     #[test]
@@ -452,7 +479,7 @@ mod tests {
         let (s, dir) = store().await;
         let project = s.default_project().await.unwrap();
         s.upsert_profile(&profile(&project, "a")).await.unwrap();
-        let out = dir.join("x.fury");
+        let out = dir.join("x.xchange");
         let nowhere = |_: &str| dir.join("nope");
 
         export_project(&s, &project, &out, "the right one", false, nowhere)
@@ -469,7 +496,7 @@ mod tests {
         let (s, dir) = store().await;
         let project = s.default_project().await.unwrap();
         s.upsert_profile(&profile(&project, "a")).await.unwrap();
-        let out = dir.join("x.fury");
+        let out = dir.join("x.xchange");
         let nowhere = |_: &str| dir.join("nope");
         export_project(&s, &project, &out, "a good passphrase", false, nowhere)
             .await
@@ -489,7 +516,7 @@ mod tests {
     async fn a_short_passphrase_is_refused_before_anything_is_written() {
         let (s, dir) = store().await;
         let project = s.default_project().await.unwrap();
-        let out = dir.join("short.fury");
+        let out = dir.join("short.xchange");
         let nowhere = |_: &str| dir.join("nope");
         assert!(export_project(&s, &project, &out, "abc", false, nowhere).await.is_err());
         assert!(!out.exists(), "a refused export still wrote a file");
@@ -498,12 +525,12 @@ mod tests {
     #[tokio::test]
     async fn a_foreign_file_is_named_as_such() {
         let (s, dir) = store().await;
-        let out = dir.join("notours.fury");
+        let out = dir.join("notours.xchange");
         std::fs::write(&out, b"PK\x03\x04 this is a zip").unwrap();
         let err = import_project(&s, &out, "whatever", |_| dir.join("nope"))
             .await
             .unwrap_err();
         // Not "wrong passphrase" — that is the error people spend an hour on.
-        assert!(err.to_string().contains("not a Fury export"), "{err}");
+        assert!(err.to_string().contains("not an XChange export"), "{err}");
     }
 }

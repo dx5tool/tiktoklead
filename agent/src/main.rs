@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright 2026 Bogdan Shapovalov and the Fury authors
+// Copyright 2026 Bogdan Shapovalov and the XChange authors
 
-//! Fury agent — the local daemon.
+//! XChange agent — the local daemon.
 //!
 //! Runs on the operator's machine and is the only component that ever holds
 //! decrypted secrets. Owns the proxy relays, launches the core, keeps profile
@@ -15,24 +15,29 @@ mod browse;
 mod bundle;
 mod capture;
 mod cookies;
+mod cookie_store;
 mod diagnose;
 mod dock;
 mod core_download;
 mod logging;
 mod ext;
+mod export;
 mod geoip;
 mod http;
 mod import_browser;
 mod import_antidetect;
+mod import_profiles;
 mod install_core;
 mod ipc;
 mod mcp;
 mod launcher;
+mod login;
 mod mirror;
 mod paths;
 mod personas;
 mod relay;
 mod store;
+mod syn_shape;
 mod sync;
 #[cfg(test)]
 mod sync_tests;
@@ -43,6 +48,7 @@ mod transfer;
 mod usage;
 mod vault;
 mod warm;
+mod farm;
 mod webstore;
 mod widevine;
 mod wg_stack;
@@ -51,7 +57,7 @@ mod wireguard;
 
 use std::time::Duration;
 
-use fury_shared::fingerprint::samples;
+use xchange_shared::fingerprint::samples;
 use relay::{Credentials, Relay, Upstream};
 
 /// The port for the local automation API, or `None` when it is off.
@@ -82,7 +88,14 @@ async fn main() -> anyhow::Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
         Some("serve") => {
+            // Before anything opens a socket. See xchange_platform::fdlimit: 256
+            // from the Finder was the agent's ceiling, and it hit it.
+            if let Some((before, after)) = xchange_platform::raise_fd_limit() {
+                tracing::info!(before, after, "open-file limit");
+            }
             let agent = ipc::Agent::new().await?;
+            // Farming plans run whether or not a window is open. See farm.rs.
+            agent.start_farming();
 
             // Only when asked for. See http.rs: a loopback port is reachable
             // from a page the browser itself opens, and the defences are worth
@@ -105,6 +118,10 @@ async fn main() -> anyhow::Result<()> {
             print!("{}", mcp::SKILL);
             Ok(())
         }
+        // Stop the daemon before replacing its binary. `status` names a
+        // version, not a build, so two builds of 0.4.20 look identical to the
+        // shell and one cannot be retired by restarting the app alone.
+        Some("shutdown") => cmd_shutdown().await,
         Some("relay") => cmd_relay(&args[1..]).await,
         Some("launch") => cmd_launch(&args[1..]).await,
         Some("check-fingerprint") => cmd_check_fingerprint(&args[1..]),
@@ -114,20 +131,23 @@ async fn main() -> anyhow::Result<()> {
         },
         _ => {
             eprintln!(
-                "fury-agent {}\n\
+                "xchange-agent {}\n\
                  \n\
                  USAGE:\n  \
-                   fury-agent serve\n      \
+                   xchange-agent serve\n      \
                      Run the local daemon: profiles, proxies, launching.\n      \
                      This is what the desktop app talks to.\n  \
-                   fury-agent mcp\n      \
+                   xchange-agent mcp\n      \
                      MCP server on stdin/stdout for Claude Desktop, Cursor, Claude Code.\n      \
-                     Fury's AI assistants settings connect it with one button.\n  \
-                   fury-agent relay <upstream-url> [--port N]\n      \
+                     XChange's AI assistants settings connect it with one button.\n  \
+                   xchange-agent shutdown\n      \
+                     Stop the local daemon. Open profiles close first and the agent\n      \
+                     exits after the last one; nothing open exits at once.\n  \
+                   xchange-agent relay <upstream-url> [--port N]\n      \
                      Start a profile relay. Upstream may be:\n        \
                        http://user:pass@host:port\n        \
                        socks5://user:pass@host:port\n  \
-                   fury-agent launch <persona.json> [options]\n      \
+                   xchange-agent launch <persona.json> [options]\n      \
                      Derive a profile from a persona and run the core on it.\n        \
                        --seed N            profile seed (default 1)\n        \
                        --proxy URL         upstream proxy; everything goes through it\n        \
@@ -143,10 +163,10 @@ async fn main() -> anyhow::Result<()> {
                        --extension DIR     load an unpacked extension (repeatable)\n        \
                        --profile-name NAME name the window as the app does (title, taskbar)\n        \
                        --real-canvas       the machine's own canvas instead of noise\n  \
-                   fury-agent check-fingerprint <config.json>\n      \
+                   xchange-agent check-fingerprint <config.json>\n      \
                      Validate a fingerprint config for internal consistency.\n      \
                      Pass '-' to check the built-in sample.\n  \
-                   fury-agent install-core [file]\n      \
+                   xchange-agent install-core [file]\n      \
                      Install a downloaded core, or report the installed one.\n      \
                      Takes a .tar.xz, .tar.gz, .app or directory — not a URL.\n",
                 env!("CARGO_PKG_VERSION")
@@ -154,6 +174,29 @@ async fn main() -> anyhow::Result<()> {
             Ok(())
         }
     }
+}
+
+async fn cmd_shutdown() -> anyhow::Result<()> {
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+
+    let endpoint = paths::ipc_endpoint();
+    let stream = xchange_platform::Stream::connect(&endpoint).await?;
+    let (read, mut write) = stream.into_split();
+    let request = serde_json::json!({
+        "id": 1,
+        "method": "agent.shutdown",
+        "params": { "when_idle": true },
+    });
+    let mut bytes = serde_json::to_vec(&request)?;
+    bytes.push(b'\n');
+    write.write_all(&bytes).await?;
+    write.flush().await?;
+
+    let mut line = String::new();
+    BufReader::new(read).read_line(&mut line).await?;
+    let response: serde_json::Value = serde_json::from_str(&line)?;
+    println!("{}", serde_json::to_string_pretty(&response)?);
+    Ok(())
 }
 
 async fn cmd_relay(args: &[String]) -> anyhow::Result<()> {
@@ -204,7 +247,7 @@ async fn cmd_launch(args: &[String]) -> anyhow::Result<()> {
             .cloned()
     };
 
-    let persona: fury_shared::persona::Persona =
+    let persona: xchange_shared::persona::Persona =
         serde_json::from_str(&std::fs::read_to_string(persona_path)?)?;
     let seed: u64 = opt("--seed").map_or(Ok(1), |s| s.parse())?;
 
@@ -240,8 +283,8 @@ async fn cmd_launch(args: &[String]) -> anyhow::Result<()> {
     // table. `--lang` still overrides, for testing a combination on purpose.
     let country_locale = opt("--country")
         .as_deref()
-        .and_then(fury_shared::locale::for_country);
-    let locale = country_locale.unwrap_or(fury_shared::locale::FALLBACK);
+        .and_then(xchange_shared::locale::for_country);
+    let locale = country_locale.unwrap_or(xchange_shared::locale::FALLBACK);
 
     let languages: Vec<String> = match opt("--lang") {
         Some(l) => l.split(',').map(str::trim).map(str::to_string).collect(),
@@ -252,10 +295,10 @@ async fn cmd_launch(args: &[String]) -> anyhow::Result<()> {
     // claim to speak.
     let ui_locale = match (&country_locale, opt("--lang")) {
         (Some(l), None) => l.ui.to_string(),
-        _ => fury_shared::locale::ui_locale_for(languages.first().map(|s| s.as_str())),
+        _ => xchange_shared::locale::ui_locale_for(languages.first().map(|s| s.as_str())),
     };
 
-    let ctx = fury_shared::persona::ProfileContext {
+    let ctx = xchange_shared::persona::ProfileContext {
         // TODO: resolve from the relay's effective exit IP, per docs/05. Until
         // that lands the operator has to say, and a mismatch is on them. The
         // launch path in ipc.rs does resolve it; this is the bare CLI.
@@ -279,19 +322,21 @@ async fn cmd_launch(args: &[String]) -> anyhow::Result<()> {
         );
     }
     let mut config = persona.derive_core_config(seed, &ctx);
-    // The canvas mode a profile picks in its Advanced tab, for measuring the
-    // two side by side from a terminal.
-    if args.iter().any(|a| a == "--real-canvas") {
-        fury_shared::overrides::MachineOverrides {
-            canvas: Some(fury_shared::overrides::CanvasMode::Real),
-            ..Default::default()
-        }
-        .apply_config(&mut config);
+    // What a profile with nothing pinned launches with (the monitor's own
+    // screen), plus the canvas mode a profile picks in its Advanced tab, for
+    // measuring the two side by side from a terminal.
+    xchange_shared::overrides::MachineOverrides {
+        canvas: args
+            .iter()
+            .any(|a| a == "--real-canvas")
+            .then_some(xchange_shared::overrides::CanvasMode::Real),
+        ..Default::default()
     }
+    .apply_config(&mut config, seed);
 
     // The installed core is the last resort and it was missing entirely: this
     // took --core or FURY_CORE and nothing else, so on a machine where
-    // `install-core` had just succeeded, `fury-agent launch` still answered
+    // `install-core` had just succeeded, `xchange-agent launch` still answered
     // "no core binary: pass --core or set FURY_CORE". The shell never hit it --
     // ipc.rs asks core_binary() -- so the gap was only in the CLI, which is
     // exactly what a developer reaches for first and what verify-windows.ps1
@@ -306,7 +351,7 @@ async fn cmd_launch(args: &[String]) -> anyhow::Result<()> {
         .or_else(core_binary)
         .ok_or_else(|| {
             anyhow::anyhow!(
-                "no core binary: install one with `fury-agent install-core <file>`, \
+                "no core binary: install one with `xchange-agent install-core <file>`, \
                  or pass --core, or set FURY_CORE"
             )
         })?;
@@ -314,7 +359,7 @@ async fn cmd_launch(args: &[String]) -> anyhow::Result<()> {
     // The directory is named after a digest of the persona and seed, not after
     // the persona itself, and that is not tidiness.
     //
-    // It used to be `fury-profile-{persona.id}-{seed}`, and persona ids describe
+    // It used to be `xchange-profile-{persona.id}-{seed}`, and persona ids describe
     // the machine they imitate: windows-11-rtx4060-1920x1080. The directory ends
     // up in --user-data-dir, Chromium passes that switch to EVERY child process,
     // and a command line is readable by any process this user runs. So the whole
@@ -337,7 +382,7 @@ async fn cmd_launch(args: &[String]) -> anyhow::Result<()> {
         h.update(seed.to_le_bytes());
         let tag = h.finalize();
         std::env::temp_dir().join(format!(
-            "fury-profile-{:02x}{:02x}{:02x}{:02x}",
+            "xchange-profile-{:02x}{:02x}{:02x}{:02x}",
             tag[0], tag[1], tag[2], tag[3]
         ))
     });
@@ -377,8 +422,8 @@ async fn cmd_launch(args: &[String]) -> anyhow::Result<()> {
         extensions: &extensions,
         // A CLI launch is the operator working on their own machine, so nothing
         // is withheld. The server decides this when a profile comes from a team.
-        restrictions: fury_shared::rbac::LaunchRestrictions::for_perms(
-            fury_shared::rbac::PermSet::full_profile_work(),
+        restrictions: xchange_shared::rbac::LaunchRestrictions::for_perms(
+            xchange_shared::rbac::PermSet::full_profile_work(),
         ),
         start_urls: &urls,
         // The bare CLI has no organisation key and no profile key, so there is
@@ -389,6 +434,9 @@ async fn cmd_launch(args: &[String]) -> anyhow::Result<()> {
         // Opt-in: CDP is full cookie access, so it is never on by default even
         // for a local launch.
         debug_port: opt("--debug-port").and_then(|p| p.parse().ok()),
+        // The CLI runs a browser the operator is looking at. The cookie
+        // exchange is the only caller that asks for a windowless one.
+        headless: false,
     };
 
     let mut child = launcher::spawn(&spec)?;
@@ -420,7 +468,7 @@ async fn cmd_launch(args: &[String]) -> anyhow::Result<()> {
 pub fn core_version(exe: &std::path::Path) -> Option<String> {
     #[cfg(windows)]
     {
-        return fury_platform::version::file_version(exe).ok();
+        return xchange_platform::version::file_version(exe).ok();
     }
     #[cfg(target_os = "macos")]
     {
@@ -464,7 +512,7 @@ pub fn core_outdated(exe: &std::path::Path) -> Option<String> {
 /// seventh file a core rebuild touches, beside CHROME_MAJOR for a new Chrome.
 ///
 /// core_outdated only compares Chrome majors, and from 0.2.4 to 0.2.10 the
-/// Windows core was rebuilt three times on Chrome 155: Fury's icon (0.2.4),
+/// Windows core was rebuilt three times on Chrome 155: XChange's icon (0.2.4),
 /// canvas noise pixelscan stopped seeing (0.2.9), edge noise that keeps the
 /// colour (0.2.10). Nothing told an installed copy. A tester ran the 0.2.3 core
 /// until 02.10.2026 and noticed only the icon -- Chromium's blue ball on his
@@ -488,10 +536,14 @@ pub fn core_outdated(exe: &std::path::Path) -> Option<String> {
 ///
 /// 0.3.8 rebuilt only the macOS core: 0903, a profile restoring its session
 /// quits with its last window too.
+///
+/// 0.4.12 rebuilt both: what demo.fingerprint.com named tampering -- client
+/// rects off the layout grid (0033), WebGL extensions out of Chrome's order
+/// (0031) -- and Chrome's own Google voices (0042).
 #[cfg(windows)]
-pub const CORE_BUILD: &str = "0.3.7";
+pub const CORE_BUILD: &str = "0.4.14";
 #[cfg(not(windows))]
-pub const CORE_BUILD: &str = "0.3.8";
+pub const CORE_BUILD: &str = "0.4.14";
 
 /// `0.2.10` as (0, 2, 10); None for anything else.
 pub fn parse_release(s: &str) -> Option<(u32, u32, u32)> {
@@ -538,7 +590,7 @@ pub fn core_stale(exe: &std::path::Path) -> Option<Option<String>> {
 
 /// The library that carries the engine in a CORE_BUILD core, by platform:
 /// (path from the core's executable, SHA-256). The rest of the archive is
-/// resources, and every Fury patch lands in this one file.
+/// resources, and every XChange patch lands in this one file.
 ///
 /// Why this exists: a core installed before 0.2.16 has no record of its build,
 /// so every such install was told "possibly an older build" -- including the
@@ -548,12 +600,12 @@ pub fn core_stale(exe: &std::path::Path) -> Option<Option<String>> {
 #[cfg(target_os = "macos")]
 const CORE_BUILD_ENGINE: Option<(&str, &str)> = Some((
     "../Frameworks/Fury Framework.framework/Versions/Current/Fury Framework",
-    "ebcc89046d7990bc411b2edb919970043228cc2bee42f68a91f1e4b141e4ab8d",
+    "15bd18f402f0c2aad176670a58841d1d9cbdcac63abce1ddfd354cf6714a21fd",
 ));
 #[cfg(windows)]
 const CORE_BUILD_ENGINE: Option<(&str, &str)> = Some((
     "chrome.dll",
-    "4a7f55d5b4c556f578ed1112ff5b3e2c1b3612de8eeae1a1e5c4e3e4f4d00869",
+    "82c85a925edd140cb87ba98cb7f67ab7f7b0f312cbc62674911d41c63bfe1f50",
 ));
 #[cfg(not(any(target_os = "macos", windows)))]
 const CORE_BUILD_ENGINE: Option<(&str, &str)> = None;
@@ -590,7 +642,7 @@ fn engine_matches(path: &std::path::Path, want: &str) -> bool {
 fn core_version_problem(exe: &std::path::Path) -> Option<String> {
     let have = core_outdated(exe)?;
     Some(format!(
-        "The installed browser is Chrome {have}, and this version of Fury needs Chrome \
+        "The installed browser is Chrome {have}, and this version of XChange needs Chrome \
          {CHROME_MAJOR}. Download the new one; it replaces the old."
     ))
 }
@@ -642,7 +694,7 @@ pub fn core_binary() -> Option<std::path::PathBuf> {
     // application, the core is 134 MB and arrives separately.
     //
     // The directory gained a `.bundle` extension so that Spotlight stops
-    // offering the browser as a second application called Fury; anything
+    // offering the browser as a second application called XChange; anything
     // installed before that has to be brought along, or it silently stops
     // being found.
     crate::install_core::migrate_legacy_dir();
@@ -687,7 +739,7 @@ pub fn core_lookup_problem() -> Option<String> {
 /// renamed Chromium.app to Fury.app, living in launchd and in no dotfile, so it
 /// was invisible to every obvious place to look.
 ///
-/// And then found the hard way a second time. "Restart Fury" was the next
+/// And then found the hard way a second time. "Restart XChange" was the next
 /// sentence, and it was also wrong: the agent is a separate process that
 /// deliberately outlives the window (docs/01 — it holds locks and serves the
 /// automation API with the UI closed), so quitting and reopening the
@@ -696,8 +748,8 @@ pub fn core_lookup_problem() -> Option<String> {
 fn how_to_unset(current: &str) -> String {
     // Whatever the source, the agent has to be restarted for the change to
     // reach it, and that is the part everybody gets wrong.
-    const THEN_RESTART: &str = "Then quit Fury and stop the agent — \
-                                `pkill -f fury-agent` — because it is a separate \
+    const THEN_RESTART: &str = "Then quit XChange and stop the agent — \
+                                `pkill -f xchange-agent` — because it is a separate \
                                 process that an application restart does not touch";
 
     #[cfg(target_os = "macos")]
@@ -725,8 +777,8 @@ fn how_to_unset(current: &str) -> String {
 ///
 /// macOS wraps the browser in an application bundle; Windows is a directory
 /// with the executable at the top. The `.exe` is not optional — `Path::exists`
-/// is how the core is found, and a file named `fury` with no extension does not
-/// exist under the name `fury.exe` that everything else would then look for.
+/// is how the core is found, and a file named `xchange` with no extension does not
+/// exist under the name `xchange.exe` that everything else would then look for.
 fn core_leaf() -> &'static str {
     core_leaves()[0]
 }
@@ -739,8 +791,8 @@ fn core_leaf() -> &'static str {
 ///
 /// Found 16.08.2026 by installing a published release onto a Windows machine:
 ///
-///     Error: no core found in fury-core-0.1.0-pre2-windows-x64.tar.xz
-///     -- expected fury.exe somewhere inside it
+///     Error: no core found in xchange-core-0.1.0-pre2-windows-x64.tar.xz
+///     -- expected xchange.exe somewhere inside it
 ///
 /// The first diagnosis of that, written here and committed, said patch 0900 did
 /// not exist and that the macOS core was branded only by uncommitted edits in
@@ -770,7 +822,7 @@ fn core_leaves() -> &'static [&'static str] {
     #[cfg(windows)]
     {
         // The subdirectory is not decoration and not a mistake: the Windows
-        // archive carries a top-level `Fury\` exactly as the macOS one carries
+        // archive carries a top-level `XChange\` exactly as the macOS one carries
         // `Fury.app`, so the leaf is relative to core.bundle and includes it.
         //
         // Without the first two entries `install-core` unpacks a perfectly good
@@ -786,13 +838,13 @@ fn core_leaves() -> &'static [&'static str] {
         &[
             "Fury/chrome.exe",
             "Fury/fury.exe",
-            "fury.exe",
+            "xchange.exe",
             "chrome.exe",
         ]
     }
     #[cfg(all(unix, not(target_os = "macos")))]
     {
-        &["fury-core", "chrome"]
+        &["xchange-core", "chrome"]
     }
 }
 
@@ -872,6 +924,15 @@ pub fn parse_upstream(url: &str) -> anyhow::Result<Upstream> {
         // socks5 is treated as socks5h unconditionally: local DNS resolution
         // would leak the operator's resolver. See docs/05.
         "socks5" | "socks5h" => Upstream::Socks5 { host, port, auth },
+        // The config rides in the password (`wireguard::url`); host and port
+        // are only the endpoint repeated for display. Windows until a launch
+        // says which persona this is (`Upstream::for_os`): a check has no
+        // persona, and Windows is what most of them are.
+        "wireguard" => {
+            let auth = auth.ok_or_else(|| anyhow::anyhow!("a wireguard:// URL carries its config"))?;
+            let config = wireguard::from_url_secret(&auth.password)?;
+            Upstream::WireGuard(wg_stack::Shared::for_config(config), syn_shape::Os::Windows)
+        }
         other => anyhow::bail!("unsupported proxy scheme {other:?}"),
     })
 }
@@ -906,7 +967,7 @@ mod tests {
     #[test]
     fn a_core_that_appears_after_the_first_look_is_found() {
         let _guard = ENV.lock().unwrap_or_else(|e| e.into_inner());
-        let home = std::env::temp_dir().join("fury-core-appears-test");
+        let home = std::env::temp_dir().join("xchange-core-appears-test");
         std::fs::remove_dir_all(&home).ok();
         std::fs::create_dir_all(&home).unwrap();
         // SAFETY: single-threaded test; both variables are read back at once.
@@ -953,9 +1014,9 @@ mod tests {
         // Something to do about it.
         assert!(said.contains("unsetenv") || said.contains("Unset it"), "{said}");
         // And the part that took two failed attempts to get right: the agent
-        // outlives the window, so "restart Fury" is not enough and the advice
+        // outlives the window, so "restart XChange" is not enough and the advice
         // must say what is.
-        assert!(said.contains("pkill -f fury-agent"), "{said}");
+        assert!(said.contains("pkill -f xchange-agent"), "{said}");
         unsafe { std::env::remove_var("FURY_CORE") };
     }
 
@@ -1005,6 +1066,21 @@ mod tests {
     }
 
     #[test]
+    fn a_login_is_taken_as_written() {
+        // A supplier's session parameters ride in the login. The parser does
+        // not percent-decode, so the form must not encode: "%3B" here was a
+        // login the proxy did not know (13.10.2026).
+        let u = parse_upstream("socks5://c8734fb39d__cr.us;sessttl.60:pw@gw.psbproxy.io:10000").unwrap();
+        match u {
+            Upstream::Socks5 { host, port, auth } => {
+                assert_eq!((host.as_str(), port), ("gw.psbproxy.io", 10000));
+                assert_eq!(auth.unwrap().username, "c8734fb39d__cr.us;sessttl.60");
+            }
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
     fn passwords_may_contain_at_signs() {
         // rsplit_once('@') matters: 'p@ss' would otherwise split in the wrong place.
         let u = parse_upstream("http://bob:p@ss@proxy.example:8080").unwrap();
@@ -1039,7 +1115,7 @@ mod tests {
     #[cfg(target_os = "macos")]
     #[test]
     fn a_core_of_another_chrome_is_outdated_and_this_one_is_not() {
-        let root = std::env::temp_dir().join("fury-core-version-test");
+        let root = std::env::temp_dir().join("xchange-core-version-test");
         std::fs::remove_dir_all(&root).ok();
         let exe_for = |version: &str| {
             let app = root.join(version).join("Fury.app/Contents");
@@ -1082,7 +1158,7 @@ mod core_build_tests {
 
     #[test]
     fn an_engine_is_recognised_by_its_hash_and_nothing_else() {
-        let dir = std::env::temp_dir().join(format!("fury-engine-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("xchange-engine-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let f = dir.join("engine");
         std::fs::write(&f, b"abc").unwrap();

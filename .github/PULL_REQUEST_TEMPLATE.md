@@ -43,7 +43,7 @@ So: what did you run, and what did it print?
 - [ ] `cargo test --workspace` passes.
 - [ ] `cargo clippy --all-targets` is clean for anything you touched.
 - [ ] If you touched anything platform-specific:
-      `cargo check -p fury-platform --target x86_64-pc-windows-msvc`.
+      `cargo check -p xchange-platform --target x86_64-pc-windows-msvc`.
 - [ ] No measurement was quoted that you did not take. If a number is an
       estimate, the text says so — that rule is why the README says "measured
       rather than estimated" in some places and not in others.
@@ -52,7 +52,7 @@ So: what did you run, and what did it print?
 
 <!--
 Delete this section unless the PR adds a file under shared/personas/contributed/.
-`cargo run -p fury-detect -- personas-check` must pass; CI runs it. Three
+`cargo run -p xchange-detect -- personas-check` must pass; CI runs it. Three
 questions it cannot answer:
 -->
 
@@ -69,7 +69,7 @@ questions it cannot answer:
 
 <!--
 Delete this section unless the PR edits shared/extensions/catalogue.json.
-`cargo test -p fury-shared extensions` must pass; CI runs it. Two questions it
+`cargo test -p xchange-shared extensions` must pass; CI runs it. Two questions it
 cannot answer:
 -->
 

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright 2026 Bogdan Shapovalov and the Fury authors
+// Copyright 2026 Bogdan Shapovalov and the XChange authors
 
 //! Profile bundles — what a server is allowed to hold.
 //!
@@ -79,7 +79,7 @@ pub enum Sealer<'a> {
 /// from the vault's own prefix so that neither can be mistaken for the other:
 /// silently trying the wrong key would fail as "wrong password" a long way from
 /// the cause.
-const SHARED_PREFIX: &str = "fury:ork1:";
+const SHARED_PREFIX: &str = xchange_shared::keys::SHARED_BUNDLE_PREFIX;
 
 impl Sealer<'_> {
     fn seal(&self, plain: &str) -> String {
@@ -90,7 +90,7 @@ impl Sealer<'_> {
                 format!(
                     "{SHARED_PREFIX}{}",
                     base64::engine::general_purpose::STANDARD
-                        .encode(fury_shared::keys::wrap(key, plain.as_bytes()))
+                        .encode(xchange_shared::keys::wrap(key, plain.as_bytes()))
                 )
             }
         }
@@ -118,7 +118,7 @@ impl Sealer<'_> {
                 base64::engine::general_purpose::STANDARD
                     .decode(rest)
                     .ok()
-                    .and_then(|blob| fury_shared::keys::unwrap(key, &blob).ok())
+                    .and_then(|blob| xchange_shared::keys::unwrap(key, &blob).ok())
                     .and_then(|v| String::from_utf8(v).ok())
                     .unwrap_or_default()
             }
@@ -135,6 +135,9 @@ impl Sealer<'_> {
     }
 }
 
+// On-disk format tag. Not branding: a sealed bundle written by an earlier
+// build carries these eight bytes, and changing them makes every profile already
+// on a server unreadable.
 const MAGIC: &[u8; 8] = b"FURY-BN1";
 const NONCE_LEN: usize = 24;
 
@@ -270,6 +273,17 @@ pub fn is_cache_dir(name: &str) -> bool {
     SKIP_CACHES.iter().any(|s| *s == name)
 }
 
+/// Is this name a browser lock or socket that must never travel?
+pub fn is_skipped_file(name: &str) -> bool {
+    SKIP.contains(&name)
+}
+
+/// Is this directory a component the browser re-downloads, skipped at the root
+/// of a profile only?
+pub fn is_skipped_component(name: &str) -> bool {
+    SKIP_COMPONENTS.contains(&name)
+}
+
 const SKIP_CACHES: &[&str] = &[
     // Whole-profile, measured at 19.7 MB, 5.9 MB, 1.8 MB and 1.6 MB
     // respectively on a 33 MB profile.
@@ -356,7 +370,7 @@ pub fn unpack(
     dest: &Path,
 ) -> anyhow::Result<usize> {
     if sealed.len() < MAGIC.len() + NONCE_LEN || &sealed[..MAGIC.len()] != MAGIC {
-        anyhow::bail!("this is not a Fury bundle");
+        anyhow::bail!("this is not an XChange bundle");
     }
     let key = unhex(&sealer.open(wrapped_key)).ok_or_else(|| {
         anyhow::anyhow!(
@@ -466,8 +480,8 @@ mod tests {
         // wrapped under the packing machine's vault, so a colleague pulling the
         // bundle was told "the bundle key does not belong to this machine" —
         // which was true, and was the point of uploading it.
-        let ork = fury_shared::keys::new_org_key();
-        let key = fury_shared::keys::subkey(&ork, "fury-profile-v1", "profile-a");
+        let ork = xchange_shared::keys::new_org_key();
+        let key = xchange_shared::keys::subkey(&ork, "fury-profile-v1", "profile-a");
 
         let src = dir("src");
         std::fs::create_dir_all(src.join("Default")).unwrap();
@@ -477,7 +491,7 @@ mod tests {
         // Another machine: a different vault entirely, and only the
         // organisation key in common.
         let dest = dir("dest");
-        let same = fury_shared::keys::subkey(&ork, "fury-profile-v1", "profile-a");
+        let same = xchange_shared::keys::subkey(&ork, "fury-profile-v1", "profile-a");
         assert_eq!(
             unpack(&sealed.bytes, &sealed.wrapped_key, &Sealer::Shared { key: same, vault: None }, &dest).unwrap(),
             1
@@ -496,9 +510,9 @@ mod tests {
         std::fs::write(src.join("Default/Cookies"), b"warm-account").unwrap();
         let old = pack(&src, &Sealer::Machine(&vault)).unwrap();
 
-        let ork = fury_shared::keys::new_org_key();
+        let ork = xchange_shared::keys::new_org_key();
         let shared = Sealer::Shared {
-            key: fury_shared::keys::subkey(&ork, "fury-profile-v1", "p"),
+            key: xchange_shared::keys::subkey(&ork, "fury-profile-v1", "p"),
             vault: Some(&vault),
         };
         let dest = dir("dest");
@@ -510,21 +524,21 @@ mod tests {
 
     #[test]
     fn a_team_bundle_does_not_open_under_the_wrong_key() {
-        let ork = fury_shared::keys::new_org_key();
+        let ork = xchange_shared::keys::new_org_key();
         let src = dir("src");
         std::fs::create_dir_all(src.join("Default")).unwrap();
         std::fs::write(src.join("Default/Cookies"), b"warm-account").unwrap();
         let sealed = pack(
             &src,
             &Sealer::Shared {
-                key: fury_shared::keys::subkey(&ork, "fury-profile-v1", "profile-a"),
+                key: xchange_shared::keys::subkey(&ork, "fury-profile-v1", "profile-a"),
                 vault: None,
             },
         )
         .unwrap();
 
         // A different profile in the same organisation.
-        let other = fury_shared::keys::subkey(&ork, "fury-profile-v1", "profile-b");
+        let other = xchange_shared::keys::subkey(&ork, "fury-profile-v1", "profile-b");
         assert!(unpack(&sealed.bytes, &sealed.wrapped_key, &Sealer::Shared { key: other, vault: None }, &dir("d1")).is_err());
 
         // And a machine vault, which is what a local launch would bring.

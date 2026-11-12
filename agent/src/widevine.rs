@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright 2026 Bogdan Shapovalov and the Fury authors
+// Copyright 2026 Bogdan Shapovalov and the XChange authors
 
 //! Staging the Widevine CDM from the Chrome the user already has.
 //!
@@ -15,12 +15,12 @@
 //! (third_party/widevine/cdm/mac/*/LICENSE) says it may not be used, modified,
 //! sold or distributed without a separate agreement with Google, and Chromium's
 //! own annotation records it as approved for Chrome and not for Chromium. So
-//! Fury cannot ship it: not in the repository, not in a release, not in an
+//! XChange cannot ship it: not in the repository, not in a release, not in an
 //! installer.
 //!
-//! What Fury CAN do is notice that the user already has one. Anybody running
+//! What XChange CAN do is notice that the user already has one. Anybody running
 //! Chrome on this machine has a licensed copy sitting in the Chrome bundle. This
-//! copies it into Fury's own directory so the browser can load it. Nothing
+//! copies it into XChange's own directory so the browser can load it. Nothing
 //! leaves the machine and nothing is redistributed — the same argument
 //! core/build/link-widevine.sh makes for a developer's build, applied at the
 //! other end, for a user's install.
@@ -39,7 +39,7 @@
 //! On macOS the CDM used to go INTO the signed, notarised core bundle, beside
 //! where `bundle_widevine_cdm` would have put it. That breaks the bundle's seal,
 //! and measured 10.10.2026 on macOS 27: a core whose seal was broken before its
-//! first launch is "damaged" to Gatekeeper ("Приложение «Fury» повреждено...
+//! first launch is "damaged" to Gatekeeper ("Приложение «XChange» повреждено...
 //! Переместите в Корзину"), while the same core launched once intact and
 //! staged afterwards keeps running. The agent staged at its own startup, so a
 //! user who downloaded a core and restarted the app before opening a profile
@@ -161,7 +161,7 @@ fn find_cdm(chrome: &Path) -> Option<PathBuf> {
 /// Copy the CDM out of the user's Chrome into `dest`, unless it is already
 /// there and the same size.
 ///
-/// `dest` is the WidevineCdm directory beside the Fury core — the same layout
+/// `dest` is the WidevineCdm directory beside the XChange core — the same layout
 /// Chromium's bundled CDM uses, so no switch or preference is needed to find it.
 pub fn stage(dest_root: &Path) -> Result<Staged, StageError> {
     let (chrome, from) = chrome_cdm()?;
@@ -333,7 +333,7 @@ mod tests {
         // Skipped rather than failed where there is no Chrome — this asserts a
         // property of the copy, and a CI machine without Chrome has nothing to
         // copy.
-        let tmp = std::env::temp_dir().join(format!("fury-wv-manifest-{}", std::process::id()));
+        let tmp = std::env::temp_dir().join(format!("xchange-wv-manifest-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&tmp);
         match stage(&tmp) {
             Ok(_) => {
@@ -360,7 +360,7 @@ mod tests {
         // and the library under _platform_specific: what Chrome's own component
         // directory looks like, and the only shape the component updater
         // registers. Skipped where there is no Chrome to copy from.
-        let tmp = std::env::temp_dir().join(format!("fury-wv-profile-{}", std::process::id()));
+        let tmp = std::env::temp_dir().join(format!("xchange-wv-profile-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&tmp);
         match stage_into_profile(&tmp) {
             Ok(s) => {
@@ -393,7 +393,7 @@ mod tests {
 
     #[test]
     fn staging_into_a_directory_with_no_chrome_does_not_panic() {
-        let tmp = std::env::temp_dir().join(format!("fury-wv-test-{}", std::process::id()));
+        let tmp = std::env::temp_dir().join(format!("xchange-wv-test-{}", std::process::id()));
         // Whatever this machine has, the call must return a Result rather than
         // unwrap its way through a missing directory.
         let _ = stage(&tmp);

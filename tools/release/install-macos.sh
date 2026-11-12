@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: AGPL-3.0-or-later
-# Copyright 2026 Bogdan Shapovalov and the Fury authors
+# Copyright 2026 Bogdan Shapovalov and the XChange authors
 #
 # Install the freshly built shell into /Applications, and leave exactly one
-# Fury behind.
+# XChange behind.
 #
 #     tools/release/install-macos.sh
 #
 # WHY THIS IS A SCRIPT. Every step here was done by hand, three times, and the
-# machine ended up with two Fury icons every time -- reported three times, and
+# machine ended up with two XChange icons every time -- reported three times, and
 # twice I blamed the wrong thing before measuring. The cause is dull: `tauri
-# build` writes target/release/bundle/macos/Fury.app, LaunchServices registers
+# build` writes target/release/bundle/macos/XChange.app, LaunchServices registers
 # any application bundle it sees, and Spotlight then offers two. Unregistering
 # it works until the next build recreates it.
 #
@@ -30,8 +30,8 @@
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-built="$here/target/release/bundle/macos/Fury.app"
-dest="/Applications/Fury.app"
+built="$here/target/release/bundle/macos/XChange.app"
+dest="/Applications/XChange.app"
 LSREGISTER=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
 
 [ -d "$built" ] || { echo "!! no build at $built -- run: cd desktop && npm run app:build" >&2; exit 1; }
@@ -41,7 +41,7 @@ LSREGISTER=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchSe
 # bundle_dmg.sh mounts one while making the .dmg and detaches it at the end. A
 # build that dies in between leaves it mounted, and the NEXT build then fails at
 # the packaging step with nothing but "failed to run bundle_dmg.sh" -- met on
-# 17.08.2026. It also registers its copy of Fury.app, which is one of the ways
+# 17.08.2026. It also registers its copy of XChange.app, which is one of the ways
 # two of them keep appearing.
 for v in /Volumes/dmg.*; do
   [ -d "$v" ] || continue
@@ -50,12 +50,12 @@ for v in /Volumes/dmg.*; do
 done
 rm -f "$here/target/release/bundle/macos"/rw.*.dmg
 
-echo "== closing Fury if it is running"
-osascript -e 'quit app "Fury"' 2>/dev/null || true
+echo "== closing XChange if it is running"
+osascript -e 'quit app "XChange"' 2>/dev/null || true
 sleep 2
 # The agent outlives the window on purpose, and holds the socket the next one
 # wants. Same reason the Windows installer has a hook for this.
-pkill -f 'Fury.app/Contents/MacOS/fury-' 2>/dev/null || true
+pkill -f 'XChange.app/Contents/MacOS/xchange-' 2>/dev/null || true
 sleep 1
 
 echo "== installing"
@@ -89,18 +89,18 @@ else
   codesign -v --deep --strict "$dest" 2>&1 && echo "   ad-hoc signature valid"
 fi
 
-echo "== leaving one Fury"
+echo "== leaving one XChange"
 rm -rf "$built"
 "$LSREGISTER" -u "$built" 2>/dev/null || true
 # Stale scratch volumes from bundle_dmg.sh, and any real one left mounted.
-"$LSREGISTER" -dump 2>/dev/null | awk '/path: *\/Volumes\/.*Fury\.app/ { print $2 }' | sort -u |
+"$LSREGISTER" -dump 2>/dev/null | awk '/path: *\/Volumes\/.*XChange\.app/ { print $2 }' | sort -u |
   while read -r v; do "$LSREGISTER" -u "$v" 2>/dev/null || true; done
-for v in /Volumes/Fury /Volumes/dmg.*; do
+for v in /Volumes/XChange /Volumes/dmg.*; do
   [ -e "$v" ] || "$LSREGISTER" -u "$v" 2>/dev/null || true
 done
 
 echo "== what the system knows about now"
-"$LSREGISTER" -dump 2>/dev/null | grep -i "path:.*Fury" | grep -v Helper | grep -v furycrm | sort -u | sed 's/^/   /'
+"$LSREGISTER" -dump 2>/dev/null | grep -i "path:.*XChange" | grep -v Helper | grep -v xchangecrm | sort -u | sed 's/^/   /'
 
 open -a "$dest"
 echo

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright 2026 Bogdan Shapovalov and the Fury authors
+// Copyright 2026 Bogdan Shapovalov and the XChange authors
 
 //! How a persona reaches the browser without being written down.
 //!
@@ -72,7 +72,7 @@ static NEXT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0)
 
 fn unique_name() -> String {
     format!(
-        "fury-fp-{}-{}",
+        "xchange-fp-{}-{}",
         std::process::id(),
         NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
     )
@@ -116,8 +116,12 @@ impl Carrier {
 
     /// The switch that tells the core where to look.
     ///
-    /// `stem` is the family — `"fury-fp"` yields `--fury-fp-fd=3` on Unix and
-    /// `--fury-fp-file-handle=1234` on Windows.
+    /// `stem` is the family — the callers pass `fury-fp`, which yields
+    /// `--fury-fp-fd=3` on Unix and `--fury-fp-file-handle=1234` on Windows.
+    ///
+    /// The name is the core's, not this repository's: patches 0001 and 0110
+    /// read these exact switches out of argv. Anything else is ignored by a
+    /// core that is already built.
     ///
     /// Three names for two things, and the third one is not tidiness. The core
     /// ALREADY has a `--fury-fp-handle`: patch 0001 uses it to hand children a

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright 2026 Bogdan Shapovalov and the Fury authors
+// Copyright 2026 Bogdan Shapovalov and the XChange authors
 
 //! Is there a newer version, and installing it.
 //!
@@ -9,7 +9,7 @@
 //! tauri.conf.json, and only then replaces the application. Installing an
 //! update is running code the person did not choose, so the signature is the
 //! whole point: the private key lives on the release machine
-//! (~/.private_keys/fury-updater.key) and nothing that reaches GitHub, the
+//! (~/.private_keys/xchange-updater.key) and nothing that reaches GitHub, the
 //! network or this process can make an unsigned build install.
 //!
 //! What a person sees: one button. If profiles are open it says to close them
@@ -19,6 +19,7 @@
 //! download link, which is all the button did before.
 
 use serde::Serialize;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use tauri_plugin_updater::UpdaterExt;
 
@@ -31,7 +32,11 @@ use tauri_plugin_updater::UpdaterExt;
 // that sounds right would have told every user "nothing has been published"
 // while two releases sat on the page. Measured 16.08.2026, the day the second
 // one went up. The list is newest-first, so the first entry is the answer.
-const RELEASES: &str = "https://api.github.com/repos/furyteamtop/fury-antidetect-browser/releases?per_page=5";
+//
+// Fork: `plugins.updater.endpoints` in tauri.conf.json is the installer feed,
+// and this is the version-check feed. Both are placeholders until the Simprint
+// fork publishes its own builds; replace both together.
+const RELEASES: &str = "https://api.github.com/repos/dx5tool/fury-nomaster/releases?per_page=5";
 
 #[derive(Serialize)]
 pub struct UpdateCheck {
@@ -116,7 +121,7 @@ pub async fn check_update(state: tauri::State<'_, crate::commands::AppState>) ->
         .get(RELEASES)
         // GitHub refuses anonymous requests without one, and a version in it
         // makes a support question answerable from the server's own logs.
-        .header("User-Agent", format!("Fury/{}", current()))
+        .header("User-Agent", format!("XChange/{}", current()))
         .header("Accept", "application/vnd.github+json")
         .send()
         .await;
@@ -242,9 +247,12 @@ mod tests {
 /// here rather than be handed to the operating system.
 #[tauri::command]
 pub async fn open_url(url: String) -> Result<(), crate::commands::ApiErr> {
-    if !url.starts_with("https://") {
+    // mailto: as well, for "send the invitation by email" (Users): it opens a
+    // draft in the mail client and runs nothing, which is the property the
+    // check is for.
+    if !url.starts_with("https://") && !url.starts_with("mailto:") {
         return Err(crate::commands::ApiErr::local(format!(
-            "refusing to open {url}: only https links"
+            "refusing to open {url}: only https and mailto links"
         )));
     }
 
@@ -281,6 +289,18 @@ pub struct InstallProgress {
 
 static PROGRESS: Mutex<InstallProgress> =
     Mutex::new(InstallProgress { stage: "idle", received: 0, total: None, error: None });
+
+/// Set from the moment the agent is asked to stop until this process restarts
+/// (or the install fails). While it is set `agent::ensure_running` starts
+/// nothing: the window goes on polling during an install, and on 28.10.2026 a
+/// poll 0.4 s after the agent stopped started it again, from the old bundle the
+/// updater had just moved to a temporary folder. The new version would then
+/// have talked to the old agent, the one thing stopping it was for.
+static INSTALLING: AtomicBool = AtomicBool::new(false);
+
+pub fn installing() -> bool {
+    INSTALLING.load(Ordering::SeqCst)
+}
 
 fn set_stage(stage: &'static str) {
     if let Ok(mut p) = PROGRESS.lock() {
@@ -375,11 +395,12 @@ async fn install(app: &tauri::AppHandle) -> Result<(), crate::commands::ApiErr> 
     // machine restarts. An agent older than 0.3.0 does not know the method;
     // that is not a reason to stop (Windows' installer kills it anyway).
     set_stage("stopping");
+    INSTALLING.store(true, Ordering::SeqCst);
     match crate::agent::call::<serde_json::Value>("agent.shutdown", serde_json::json!({})).await {
         Ok(_) => {
             for _ in 0..30 {
                 tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-                if fury_platform::Stream::connect(&crate::agent::ipc_endpoint()).await.is_err() {
+                if xchange_platform::Stream::connect(&crate::agent::ipc_endpoint()).await.is_err() {
                     break;
                 }
             }
@@ -390,6 +411,7 @@ async fn install(app: &tauri::AppHandle) -> Result<(), crate::commands::ApiErr> 
     set_stage("installing");
     if let Err(e) = update.install(bytes) {
         // Nothing replaced: bring the agent back for the version still here.
+        INSTALLING.store(false, Ordering::SeqCst);
         let _ = crate::agent::ensure_running().await;
         return Err(coded("update_failed", e.to_string()));
     }
@@ -397,8 +419,18 @@ async fn install(app: &tauri::AppHandle) -> Result<(), crate::commands::ApiErr> 
     // On Windows the installer has already taken over and this process is on
     // its way out; on macOS the new bundle is in place and this restarts into
     // it, and the new shell starts the new agent.
+    //
+    // request_restart, not restart. Called off the main thread, restart()
+    // asks for the exit and then sleeps forever in this tokio worker. On
+    // 28.10.2026 (0.4.16 -> 0.4.17) that worker was the last one to have held
+    // the runtime's I/O and timer driver: the other nine were parked on a
+    // condvar, none on the driver, and the exit handler's block_on on the main
+    // thread waited for a socket and a 1.5 s timeout that nothing would ever
+    // drive. The bar sat on "stopping" with the new bundle already installed.
+    // request_restart returns, and this worker goes back to the runtime.
     set_stage("restarting");
-    app.restart();
+    app.request_restart();
+    Ok(())
 }
 
 /// FURY_UPDATE_INSTALL_NOW with FURY_UPDATE_FEED: install at start, for an end

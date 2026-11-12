@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright 2026 Bogdan Shapovalov and the Fury authors
+// Copyright 2026 Bogdan Shapovalov and the XChange authors
 
 //! Driving the page of an open profile: go to an address, read what is there,
 //! click, type, take a picture.
@@ -103,7 +103,7 @@ pub fn normalise(url: &str) -> anyhow::Result<String> {
     Ok(full)
 }
 
-struct Page {
+pub(crate) struct Page {
     cdp: Cdp,
     session: String,
     target: String,
@@ -112,7 +112,7 @@ struct Page {
 impl Page {
     /// The tab the person is looking at: the first page target, which is the
     /// one Chrome lists as most recently active.
-    async fn attach(ws: &str) -> anyhow::Result<Self> {
+    pub(crate) async fn attach(ws: &str) -> anyhow::Result<Self> {
         let mut cdp = Cdp::connect(ws).await?;
         let targets = timed(&mut cdp, None, "Target.getTargets", json!({})).await?;
         let target = targets
@@ -146,7 +146,7 @@ impl Page {
         Ok(Self { cdp, session, target })
     }
 
-    async fn detach(mut self) {
+    pub(crate) async fn detach(mut self) {
         let _ = timed(
             &mut self.cdp,
             None,
@@ -162,7 +162,7 @@ impl Page {
 
     /// A script's value, run in a world of its own. A fresh world per call:
     /// one made earlier dies with the document it was made for.
-    async fn eval(&mut self, expression: &str) -> anyhow::Result<Value> {
+    pub(crate) async fn eval(&mut self, expression: &str) -> anyhow::Result<Value> {
         let tree = self.call("Page.getFrameTree", json!({})).await?;
         let frame = tree
             .pointer("/frameTree/frame/id")
@@ -172,7 +172,7 @@ impl Page {
         let world = self
             .call(
                 "Page.createIsolatedWorld",
-                json!({ "frameId": frame, "worldName": "fury", "grantUniveralAccess": false }),
+                json!({ "frameId": frame, "worldName": "xchange", "grantUniveralAccess": false }),
             )
             .await?;
         let context = world
@@ -201,13 +201,13 @@ impl Page {
         Ok(r.pointer("/result/value").cloned().unwrap_or(Value::Null))
     }
 
-    async fn where_am_i(&mut self) -> Value {
+    pub(crate) async fn where_am_i(&mut self) -> Value {
         self.eval("({ url: location.href, title: document.title })")
             .await
             .unwrap_or_else(|_| json!({}))
     }
 
-    async fn navigate(&mut self, url: &str) -> anyhow::Result<Value> {
+    pub(crate) async fn navigate(&mut self, url: &str) -> anyhow::Result<Value> {
         let url = normalise(url)?;
         let r = self.call("Page.navigate", json!({ "url": url })).await?;
         if let Some(e) = r.get("errorText").and_then(Value::as_str) {
@@ -221,7 +221,7 @@ impl Page {
 
     /// Until the document says it has loaded, or the time is up. A page that
     /// keeps a connection open never reaches "complete", and is still usable.
-    async fn settle(&mut self, within: Duration) {
+    pub(crate) async fn settle(&mut self, within: Duration) {
         let start = Instant::now();
         // The old document can still answer "complete" for a moment.
         tokio::time::sleep(Duration::from_millis(300)).await;
@@ -281,7 +281,7 @@ impl Page {
         }
     }
 
-    async fn click_at(&mut self, x: f64, y: f64) -> anyhow::Result<()> {
+    pub(crate) async fn click_at(&mut self, x: f64, y: f64) -> anyhow::Result<()> {
         self.call("Input.dispatchMouseEvent", json!({ "type": "mouseMoved", "x": x, "y": y }))
             .await?;
         for kind in ["mousePressed", "mouseReleased"] {
@@ -328,6 +328,110 @@ impl Page {
         Ok(self.where_am_i().await)
     }
 
+    /// Type like a person: one real key event per character with an uneven
+    /// delay. `Input.insertText` puts the whole string in at once and produces
+    /// no keydowns; the point of a login is to look like a keyboard, not a
+    /// paste.
+    pub(crate) async fn type_human(&mut self, text: &str) -> anyhow::Result<()> {
+        use rand::Rng;
+
+        for (index, ch) in text.chars().enumerate() {
+            let key = ch.to_string();
+            let code = key_code(ch);
+            let vk = if ch.is_ascii() { ch.to_ascii_uppercase() as u32 } else { 0 };
+            let shifted = ch.is_ascii_uppercase() || "~!@#$%^&*()_+{}|:\"<>?".contains(ch);
+            let modifiers = if shifted { 8 } else { 0 };
+            let (delay, pause) = {
+                let mut rng = rand::thread_rng();
+                let delay = rng.gen_range(40..=140);
+                // A person stops now and then; a metronome is a signature.
+                let pause = if index > 0 && rng.gen_range(0..12) == 0 {
+                    rng.gen_range(180..=420)
+                } else {
+                    0
+                };
+                (delay, pause)
+            };
+
+            self.call(
+                "Input.dispatchKeyEvent",
+                json!({
+                    "type": "keyDown",
+                    "text": key.as_str(),
+                    "unmodifiedText": key.as_str(),
+                    "key": key.as_str(),
+                    "code": code.as_str(),
+                    "windowsVirtualKeyCode": vk,
+                    "nativeVirtualKeyCode": vk,
+                    "modifiers": modifiers,
+                }),
+            )
+            .await?;
+            self.call(
+                "Input.dispatchKeyEvent",
+                json!({
+                    "type": "keyUp",
+                    "key": key.as_str(),
+                    "code": code.as_str(),
+                    "windowsVirtualKeyCode": vk,
+                    "nativeVirtualKeyCode": vk,
+                    "modifiers": modifiers,
+                }),
+            )
+            .await?;
+
+            if pause > 0 {
+                tokio::time::sleep(Duration::from_millis(pause)).await;
+            }
+            tokio::time::sleep(Duration::from_millis(delay)).await;
+        }
+        Ok(())
+    }
+
+    /// Select everything in the focused field and delete it, with the shortcut
+    /// a person would use. Called only when the field already has a value.
+    pub(crate) async fn clear_field(&mut self) -> anyhow::Result<()> {
+        let modifier = if cfg!(target_os = "macos") { 4 } else { 2 };
+        for kind in ["keyDown", "keyUp"] {
+            self.call(
+                "Input.dispatchKeyEvent",
+                json!({
+                    "type": kind, "key": "a", "code": "KeyA",
+                    "windowsVirtualKeyCode": 65, "nativeVirtualKeyCode": 65,
+                    "modifiers": modifier,
+                }),
+            )
+            .await?;
+        }
+        for kind in ["keyDown", "keyUp"] {
+            self.call(
+                "Input.dispatchKeyEvent",
+                json!({
+                    "type": kind, "key": "Backspace", "code": "Backspace",
+                    "windowsVirtualKeyCode": 8, "nativeVirtualKeyCode": 8,
+                }),
+            )
+            .await?;
+        }
+        Ok(())
+    }
+
+    /// Enter, when a form has no button the finder could see.
+    pub(crate) async fn press_enter(&mut self) -> anyhow::Result<()> {
+        for kind in ["keyDown", "keyUp"] {
+            self.call(
+                "Input.dispatchKeyEvent",
+                json!({
+                    "type": kind, "key": "Enter", "code": "Enter",
+                    "windowsVirtualKeyCode": 13, "nativeVirtualKeyCode": 13,
+                    "text": if kind == "keyDown" { "\r" } else { "" },
+                }),
+            )
+            .await?;
+        }
+        Ok(())
+    }
+
     async fn screenshot(&mut self) -> anyhow::Result<Value> {
         // Bringing the tab forward first: a background tab paints nothing.
         let _ = timed(&mut self.cdp, None, "Target.activateTarget", json!({ "targetId": self.target })).await;
@@ -341,6 +445,28 @@ impl Page {
         let mut out = self.where_am_i().await;
         out["image"] = json!({ "mime": "image/jpeg", "data": data });
         Ok(out)
+    }
+}
+
+/// The `code` a real keyboard would report. Best effort: Chrome puts it in
+/// `event.code`, and an empty string is better than a wrong one for the
+/// punctuation this does not know.
+fn key_code(ch: char) -> String {
+    if ch.is_ascii_alphabetic() {
+        format!("Key{}", ch.to_ascii_uppercase())
+    } else if ch.is_ascii_digit() {
+        format!("Digit{ch}")
+    } else {
+        match ch {
+            ' ' => "Space".into(),
+            '.' => "Period".into(),
+            ',' => "Comma".into(),
+            '-' | '_' => "Minus".into(),
+            '/' => "Slash".into(),
+            ':' => "Semicolon".into(),
+            '@' => "Digit2".into(),
+            _ => String::new(),
+        }
     }
 }
 

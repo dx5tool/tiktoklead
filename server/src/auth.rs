@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright 2026 Bogdan Shapovalov and the Fury authors
+// Copyright 2026 Bogdan Shapovalov and the XChange authors
 
 //! Session tokens and the request-time identity.
 //!
@@ -16,7 +16,7 @@ use std::sync::Arc;
 
 use axum::extract::FromRequestParts;
 use axum::http::request::Parts;
-use fury_shared::rbac::{OrgRole, PermSet};
+use xchange_shared::rbac::{OrgRole, PermSet};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
@@ -126,7 +126,7 @@ impl Caller {
     /// everyone else starts from nothing.
     #[allow(dead_code)] // consumed by the org-wide listing endpoints
     pub fn implicit_permissions(&self) -> PermSet {
-        if fury_shared::rbac::has_implicit_project_access(self.role) {
+        if xchange_shared::rbac::has_implicit_project_access(self.role) {
             PermSet::all()
         } else {
             PermSet::NONE

@@ -29,14 +29,14 @@ returning another organisation's rows, a proxy password recoverable from disk,
 an escape from Chromium's sandbox that our patches introduced.
 
 **The kind specific to this project: a fingerprint that gives the profile away.**
-If you can distinguish a Fury profile from the browser it claims to be, that is
+If you can distinguish an XChange profile from the browser it claims to be, that is
 a real defect and we want it. Concretely:
 
 - a value the persona sets that some context reports differently — a Worker, a
   ServiceWorker, an iframe, an AudioWorklet. Cross-context disagreement is the
   single most valuable class of report, because it is what real detectors look
   for and it is invisible from the main frame.
-- a property that reveals automation, a patched engine, or Fury itself.
+- a property that reveals automation, a patched engine, or XChange itself.
 - a real value leaking through a spoofed one — a timezone, a locale, a font
   list, a device, an address.
 
@@ -44,7 +44,7 @@ A working page that demonstrates it is worth more than a description, and
 `tools/detect-suite/` is the harness we use ourselves.
 
 **Not a vulnerability:** that a site detects a *proxy*, a datacentre IP, or an
-account's behaviour. Fury spoofs a browser, and never claimed to spoof a network
+account's behaviour. XChange spoofs a browser, and never claimed to spoof a network
 or a person. The README's "Not done yet" table lists what is known to be
 missing, and something already on it is not a new finding — though a measurement
 that makes it worse than the table says certainly is.

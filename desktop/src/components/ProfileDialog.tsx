@@ -1,25 +1,38 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright 2026 Bogdan Shapovalov and the Fury authors
+// Copyright 2026 Bogdan Shapovalov and the XChange authors
 
 import { useEffect, useState, useRef } from "react";
+import { Eye, EyeOff } from "lucide-react";
 import { useI18n } from "../i18n";
 import { spreadPastedProxy } from "../proxyLine";
+import { proxyUrl, wgEndpoint } from "../proxyUrl";
+import { WireGuardConf } from "./WireGuardConf";
 import { SUGGESTED } from "../status";
-import { api, type DomainList, type LocalProxy, type MachineOverrides, type Persona, type Preview, type Profile } from "../api";
+import { api, type DomainList, type LocalProxy, type MachineOverrides, type Persona, type Preview, type Profile, type Project } from "../api";
 import { Logins } from "./Logins";
+import { Select } from "./Select";
+import { SuggestInput } from "./SuggestInput";
+import {
+  PROVIDERS,
+  PROVIDER_MODE,
+  providerForProxy,
+  providerKeyHint,
+  providerKeyLabel,
+  proxyOptionLabel,
+  upsertProviderProxy,
+} from "../providerProxy";
 
 // "Logins" only exists for a profile that has been saved: a login belongs to a
 // profile id, and there is no id until the first save. Showing an empty tab on
 // a new profile would invite somebody to type a password into something that
 // cannot store it yet.
-const TABS = ["General", "Proxy", "Device", "Machine", "Logins", "Advanced"] as const;
+const TABS = ["General", "Proxy", "Device", "Machine", "Logins"] as const;
 const TAB_KEYS = {
   General: "pd.tabGeneral",
   Proxy: "pd.tabProxy",
   Device: "pd.tabDevice",
   Machine: "pd.tabMachine",
   Logins: "pd.tabLogins",
-  Advanced: "pd.tabAdvanced",
 } as const;
 type Tab = (typeof TABS)[number];
 
@@ -112,6 +125,30 @@ function compact(o: MachineOverrides): MachineOverrides {
   return Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined)) as MachineOverrides;
 }
 
+/** What a profile that does not exist yet starts with. */
+function newProfileOverrides(): MachineOverrides {
+  return { canvas: "real", webrtc: { mode: "base_on_ip" } };
+}
+
+/** The OS this computer runs, as a persona's `os` starts: "macOS" or
+ *  "Windows"; null elsewhere. Read from the webview, which is WKWebView on a
+ *  Mac and WebView2 on Windows, so it names the real machine.
+ *
+ *  A machine of another OS is caught: on demo.fingerprint.com on 24.10.2026 a
+ *  Windows profile on a Mac and a macOS profile on Windows were both flagged as
+ *  an anti-detect browser, the same profiles on their own OS were not. So new
+ *  profiles get this OS's machines, they come first in the list, and picking
+ *  another says why not (catalogue::pick_weighted_on does the same in bulk). */
+function hostOs(): string | null {
+  const ua = navigator.userAgent;
+  if (/Macintosh|Mac OS X/.test(ua)) return "macOS";
+  if (/Windows/.test(ua)) return "Windows";
+  return null;
+}
+const HOST_OS = hostOs();
+const osOf = (p: Persona) => p.os.split(" ")[0];
+const foreign = (p: Persona) => HOST_OS !== null && osOf(p) !== HOST_OS;
+
 function pickWeighted(list: Persona[]): string | undefined {
   if (list.length === 0) return undefined;
   const total = list.reduce((sum, p) => sum + (p.weight || 0), 0);
@@ -126,15 +163,20 @@ function pickWeighted(list: Persona[]): string | undefined {
 
 export function ProfileDialog({
   projectId,
+  projects,
   editing,
   origin,
   canChoose,
   onClose,
   onSaved,
 }: {
-  /** Null when Profiles is unfiltered: a new profile then belongs to no
-   *  project, which is a place it can live. It can be filed later. */
+  /** Null when Profiles is unfiltered: a new local profile then belongs to
+   *  no project, which is a place it can live. It can be filed later. */
   projectId: string | null;
+  /** Every project the caller can see, in both worlds. The dialog offers the
+   *  ones belonging to the world this profile is in, and refuses to save a
+   *  team profile into none — the server has no such place. */
+  projects: Project[];
   editing: Profile | null;
   /** Where a NEW profile is made: the open project's world, or the shell's
    *  when no project is open. A team profile has to have a proxy, so the
@@ -156,6 +198,37 @@ export function ProfileDialog({
   const [where, setWhere] = useState<"local" | "team">(origin);
   // The world this profile lives in, or will: an existing one keeps its own.
   const target = editing ? editing.origin : where;
+  // A borrowed profile is the server's, filed where its owner put it. The
+  // field shows that project rather than offering to move somebody else's
+  // work into a folder they may not be able to reach.
+  const projectWorld = target === "shared" ? "team" : target;
+  const worldProjects = projects.filter((p) => p.origin === projectWorld);
+  const projectLocked = editing?.origin === "shared";
+  // Where it is filed. An existing profile starts in its own project; a new
+  // one in the project being viewed. A team profile must name one — with none
+  // open the dialog asks, rather than sending none and being refused after
+  // the whole form is filled (28.10.2026).
+  const [pickedProject, setPickedProject] = useState(
+    editing
+      ? (editing.project_id ?? "")
+      : (projectId ?? (target === "team" && worldProjects.length === 1 ? worldProjects[0].id : "")),
+  );
+  const needsProject = !editing && target === "team" && !pickedProject;
+  // A project id belongs to one world, so switching worlds cannot keep the
+  // old selection. It falls back to the open project of that world or, for a
+  // team profile that must be filed, the only project there is.
+  const enterWorld = (w: "local" | "team") => {
+    setWhere(w);
+    setProxyId("");
+    // A provider proxy is this machine's; the server only stores network
+    // kinds, so a team profile cannot reference one.
+    if (w !== "local") setPxKind((k) => (k === PROVIDER_MODE ? "socks5" : k));
+    const opened = projectId ? projects.find((p) => p.id === projectId) : undefined;
+    const there = projects.filter((p) => p.origin === w);
+    setPickedProject(
+      opened?.origin === w ? opened.id : w === "team" && there.length === 1 ? there[0].id : "",
+    );
+  };
   const [personas, setPersonas] = useState<Persona[]>([]);
   // The picked machine is chosen at random from twenty-six, so it is usually
   // NOT the one on screen. Selecting a card nobody can see reads as selecting
@@ -177,17 +250,38 @@ export function ProfileDialog({
   const [proxyMode, setProxyMode] = useState<"configure" | "saved">(
     editing?.proxy ? "saved" : "configure",
   );
-  const [pxKind, setPxKind] = useState("socks5");
+  /** The provider entry behind the profile's current proxy, when it has one. */
+  const pxEntry = editing?.proxy ? providerForProxy(editing.proxy.id) : null;
+  const [pxKind, setPxKind] = useState(
+    pxEntry ||
+      editing?.proxy?.kind === PROVIDER_MODE ||
+      (!editing && target === "local")
+      ? PROVIDER_MODE
+      : "socks5",
+  );
+  const pxProviderMode = pxKind === PROVIDER_MODE;
+  /** Provider rows live on this machine, and the server has no such kind. */
+  const pxProviderAllowed = target === "local";
+  const [pxProvider, setPxProvider] = useState(pxEntry?.provider ?? PROVIDERS[0]);
+  const [pxApiKey, setPxApiKey] = useState(pxEntry?.api_key ?? "");
+  const [pxShowApiKey, setPxShowApiKey] = useState(false);
+  const [pxLabel, setPxLabel] = useState(pxEntry?.name ?? "");
   // What a pasted address answered on, and whether a type button was pressed
   // since — see ProxyForm, which does the same.
   const [pxSniffed, setPxSniffed] = useState<string | null>(null);
   const pxKindTouched = useRef(false);
-  const [pxHost, setPxHost] = useState("");
-  const [pxPort, setPxPort] = useState("");
+  const [pxTypedHost, setPxHost] = useState("");
+  const [pxTypedPort, setPxPort] = useState("");
+  /** A WireGuard proxy's .conf; see ProxyForm. */
+  const [pxConf, setPxConf] = useState("");
+  const pxWg = pxKind === "wireguard";
+  const pxEndpoint = pxWg ? wgEndpoint(pxConf) : null;
+  const pxHost = pxWg ? (pxEndpoint?.host ?? "") : pxTypedHost;
+  const pxPort = pxWg ? String(pxEndpoint?.port ?? "") : pxTypedPort;
   const [pxUser, setPxUser] = useState("");
   const [pxPass, setPxPass] = useState("");
-  const [pxRotate, setPxRotate] = useState("");
-  const [pxChecker, setPxChecker] = useState("");
+  const [pxRotate, setPxRotate] = useState(pxEntry?.rotate_url ?? "");
+  const [pxChecker, setPxChecker] = useState(pxEntry?.checker_url ?? "");
   const [pxCheck, setPxCheck] = useState<{
     ok: boolean; error?: string; ip?: string; country?: string;
     city?: string; timezone?: string; ms?: number; error_code?: string | null;
@@ -196,6 +290,7 @@ export function ProfileDialog({
   const [name, setName] = useState(editing?.name ?? "");
   const [tags, setTags] = useState((editing?.tags ?? []).join(", "));
   const [personaId, setPersonaId] = useState(editing?.persona_id ?? "");
+  const chosenPersona = personas.find((p) => p.id === personaId);
   const [proxyId, setProxyId] = useState(editing?.proxy?.id ?? "");
   /** Permission for THIS profile to open with none. Off unless it was already
    *  on: the refusal is the default and stays the default. */
@@ -209,8 +304,17 @@ export function ProfileDialog({
   // Machine fields pinned by hand. Each key absent means "as the persona has
   // it"; the whole is validated with the persona by the preview, the save and
   // the launch alike.
-  const [overrides, setOverrides] = useState<MachineOverrides>(editing?.overrides ?? {});
+  const [overrides, setOverrides] = useState<MachineOverrides>(
+    editing ? (editing.overrides ?? {}) : newProfileOverrides(),
+  );
   const setOv = (patch: Partial<MachineOverrides>) => setOverrides((o) => compact({ ...o, ...patch }));
+  const setWebrtcField = (field: "public_ip" | "local_ip", value: string) => {
+    const current = overrides.webrtc;
+    if (!current || current.mode === "off") return;
+    setOv({
+      webrtc: { ...current, [field]: value.trim() ? value : undefined },
+    });
+  };
   // Typed as text and parsed, so a half-typed "52.5" is not thrown away while
   // it is being written. Only a whole pair reaches the overrides.
   const [geoText, setGeoText] = useState(
@@ -243,7 +347,8 @@ export function ProfileDialog({
   useEffect(() => {
     void api.personas().then((p) => {
       setPersonas(p);
-      setPersonaId((current) => current || pickWeighted(p) || "");
+      const here = p.filter((x) => !foreign(x));
+      setPersonaId((current) => current || pickWeighted(here.length ? here : p) || "");
     });
     void api.blocklists().then(setLists).catch(() => setLists([]));
   }, []);
@@ -286,6 +391,46 @@ export function ProfileDialog({
 
   const problems = preview?.problems ?? [];
 
+  /** Re-roll the machine a new profile is built from.
+   *
+   *  The persona is one measured computer, taken whole. Re-rolling only the
+   *  hardware pins would describe a machine that does not exist, which is the
+   *  failure this dialog exists to prevent — so the pins go and the rolled
+   *  persona supplies the screen, cores, memory and GPU together. Choices that
+   *  are not hardware (canvas, WebRTC, browser language, position) stay as the
+   *  operator left them.
+   */
+  const randomize = () => {
+    const here = personas.filter((p) => !foreign(p));
+    const pool = here.length ? here : personas;
+    if (pool.length === 0) return;
+    let next = pickWeighted(pool);
+    if (pool.length > 1) {
+      // A button that sometimes does nothing reads as broken.
+      for (let i = 0; i < 8 && next === personaId; i++) next = pickWeighted(pool);
+      if (next === personaId) {
+        const at = pool.findIndex((p) => p.id === personaId);
+        next = pool[(at + 1) % pool.length].id;
+      }
+    }
+    setPersonaId(next || "");
+    setOverrides((o) => {
+      const nextOverrides = { ...o };
+      delete nextOverrides.screen;
+      delete nextOverrides.cores;
+      delete nextOverrides.memory_gb;
+      delete nextOverrides.gpu;
+      return nextOverrides;
+    });
+    setTab("Device");
+  };
+
+  /** Provider mode is complete with a provider and a key; every other type
+   *  needs an address. */
+  const pxComplete = pxProviderMode
+    ? pxProvider.trim() !== "" && pxApiKey.trim() !== ""
+    : pxHost.trim() !== "" && Number(pxPort) > 0;
+
   const save = async () => {
     setBusy(true);
     setError(null);
@@ -293,28 +438,71 @@ export function ProfileDialog({
       // A proxy typed inline is saved first, so the profile can point at it.
       let useProxyId = proxyId;
       if (proxyMode === "configure" && pxComplete) {
-        const saved = await api.saveProxy({
-          id: "",
-          name: `${pxHost.trim()}:${pxPort}`,
-          kind: pxKind,
-          host: pxHost.trim(),
-          port: Number(pxPort),
-          username: pxUser || null,
-          password: pxPass || null,
-          last_country: pxCheck?.country ?? null,
-          last_ip: pxCheck?.ip ?? null,
-          rotate_url: pxRotate.trim() || null,
-          checker_url: pxChecker.trim() || null,
-        }, target === "shared" ? undefined : target);
-        useProxyId = saved.id;
+        if (pxProviderMode) {
+          const key = pxApiKey.trim();
+          const label = pxLabel.trim() || pxProvider;
+          const currentProxy = editing?.proxy ?? null;
+          const entry = currentProxy ? providerForProxy(currentProxy.id) : null;
+          const current = currentProxy
+            ? proxies.find((x) => x.id === currentProxy.id) ?? null
+            : null;
+          // Editing the profile's own provider proxy updates that row instead
+          // of adding a second one with the same key.
+          const reuse =
+            current && (entry || current.kind === PROVIDER_MODE) ? current : null;
+          const changed =
+            !entry || entry.provider !== pxProvider || entry.api_key !== key;
+          const reset = !reuse || changed || reuse.kind === PROVIDER_MODE;
+          const saved = await api.saveProxy(
+            {
+              id: reuse?.id ?? "",
+              name: label,
+              kind: reset ? PROVIDER_MODE : reuse!.kind,
+              host: reset ? pxProvider : reuse!.host,
+              port: reset ? 0 : reuse!.port,
+              username: reuse?.username ?? null,
+              password: reuse?.password ?? null,
+              last_country: reset ? null : reuse!.last_country,
+              last_ip: reset ? null : reuse!.last_ip,
+              rotate_url: pxRotate.trim() || null,
+              checker_url: pxChecker.trim() || null,
+            },
+            target === "shared" ? undefined : target,
+          );
+          upsertProviderProxy({
+            provider: pxProvider,
+            name: label,
+            api_key: key,
+            proxy_id: saved.id,
+            rotate_url: pxRotate.trim() || null,
+            checker_url: pxChecker.trim() || null,
+            saved_at: new Date().toISOString(),
+            ...(changed ? { next_request_at: 0, expires_at: 0, last_ip: null } : {}),
+          });
+          useProxyId = saved.id;
+        } else {
+          const saved = await api.saveProxy({
+            id: "",
+            name: `${pxHost.trim()}:${pxPort}`,
+            kind: pxKind,
+            host: pxHost.trim(),
+            port: Number(pxPort),
+            username: pxWg ? null : (pxUser || null),
+            password: pxWg ? pxConf : (pxPass || null),
+            last_country: pxCheck?.country ?? null,
+            last_ip: pxCheck?.ip ?? null,
+            rotate_url: pxWg ? null : (pxRotate.trim() || null),
+            checker_url: pxChecker.trim() || null,
+          }, target === "shared" ? undefined : target);
+          useProxyId = saved.id;
+        }
       }
 
       await api.saveProfile({
         id: editing?.id ?? "",
-        // An existing profile keeps where it is filed; only a new one takes
-        // the project currently being viewed. Editing a profile from the flat
-        // list would otherwise move it out of its project.
-        project_id: editing ? editing.project_id : projectId,
+        // Where the Project field says. A local profile may be in none; a
+        // team profile always is one, and the select cannot be left empty.
+        project_id: pickedProject || null,
         name: name.trim() || "Untitled",
         notes,
         status: status.trim(),
@@ -345,6 +533,12 @@ export function ProfileDialog({
       // with both worlds in one list, the shell's mode no longer says which.
       // A new one goes where the dialog says, never to the shell's default.
       editing?.origin ?? where);
+      // A team profile's project is not part of its PATCH: the server files
+      // profiles with a separate move, which checks rights on both ends. A
+      // local profile was moved by the upsert itself.
+      if (pickedProject && editing && editing.origin !== "local" && pickedProject !== (editing.project_id ?? "")) {
+        await api.moveProfiles([editing.id], pickedProject, editing.origin);
+      }
       onSaved();
     } catch (e) {
       setError(say(e));
@@ -353,7 +547,6 @@ export function ProfileDialog({
     }
   };
 
-  const pxComplete = pxHost.trim() !== "" && Number(pxPort) > 0;
   // A team profile goes out through a proxy, always: the server refuses one
   // without, because launching it would send a colleague's traffic from their
   // own address. Said here, under the fields, with the button off, rather than
@@ -390,10 +583,7 @@ export function ProfileDialog({
     </div>
   );
 
-  const pxUrl = () => {
-    const auth = pxUser ? `${encodeURIComponent(pxUser)}:${encodeURIComponent(pxPass)}@` : "";
-    return `${pxKind}://${auth}${pxHost.trim()}:${Number(pxPort)}`;
-  };
+  const pxUrl = () => proxyUrl(pxKind, pxHost, pxPort, pxUser, pxWg ? pxConf : pxPass);
 
   return (
     <div className="scrim" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
@@ -427,19 +617,13 @@ export function ProfileDialog({
                       <div className="segmented">
                         <button
                           aria-pressed={where === "local"}
-                          onClick={() => {
-                            setWhere("local");
-                            setProxyId("");
-                          }}
+                          onClick={() => enterWorld("local")}
                         >
                           {t("pd.whereLocal")}
                         </button>
                         <button
                           aria-pressed={where === "team"}
-                          onClick={() => {
-                            setWhere("team");
-                            setProxyId("");
-                          }}
+                          onClick={() => enterWorld("team")}
                         >
                           {t("pd.whereTeam")}
                         </button>
@@ -448,6 +632,40 @@ export function ProfileDialog({
                     </div>
                   </div>
                 )}
+                <div className="field">
+                  <label htmlFor="p-project">{t("pd.project")}</label>
+                  <div>
+                    <Select
+                      id="p-project"
+                      value={pickedProject}
+                      disabled={projectLocked}
+                      onChange={(e) => setPickedProject(e.target.value)}
+                    >
+                      {/* "No project" is a place only a local profile can be.
+                          A team profile lives in one because the project is
+                          what carries access to it. */}
+                      {(!editing || editing.origin === "local") && (
+                        <option value="">{t("pd.projectNone")}</option>
+                      )}
+                      {/* The current project may not be in the list — a
+                          borrowed one whose grant no longer includes it — and
+                          a blank box would look like the profile is unfiled. */}
+                      {pickedProject !== "" && !worldProjects.some((p) => p.id === pickedProject) && (
+                        <option value={pickedProject}>{editing?.project_name ?? pickedProject}</option>
+                      )}
+                      {worldProjects.map((p) => (
+                        <option key={p.id} value={p.id}>{p.name}</option>
+                      ))}
+                    </Select>
+                    <p className="hint">
+                      {projectLocked
+                        ? t("pd.projectShared")
+                        : projectWorld === "team"
+                          ? (worldProjects.length > 0 ? t("pd.projectHint") : t("pd.noTeamProjects"))
+                          : t("pd.projectHintLocal")}
+                    </p>
+                  </div>
+                </div>
                 <div className="field">
                   <label htmlFor="p-name">{t("pd.name")}</label>
                   <div>
@@ -463,18 +681,13 @@ export function ProfileDialog({
                 <div className="field">
                   <label htmlFor="p-status">{t("pd.status")}</label>
                   <div>
-                    <input
+                    <SuggestInput
                       id="p-status"
-                      list="p-status-options"
                       value={status}
                       placeholder={t("pd.statusPlaceholder")}
-                      onChange={(e) => setStatus(e.target.value)}
+                      onChange={setStatus}
+                      suggestions={SUGGESTED.map((s) => ({ value: s, label: t(`status.${s}`) }))}
                     />
-                    <datalist id="p-status-options">
-                      {SUGGESTED.map((s) => (
-                        <option key={s} value={s}>{t(`status.${s}`)}</option>
-                      ))}
-                    </datalist>
                     <p className="hint">{t("pd.statusHint")}</p>
                   </div>
                 </div>
@@ -512,7 +725,11 @@ export function ProfileDialog({
                           <input
                             type="checkbox"
                             style={{ width: 14, height: 14, accentColor: "var(--accent)" }}
-                            checked={blocklists.includes(l.name)}
+                            // A @local list applies to every profile on
+                            // this machine (load_local_lists in the agent):
+                            // shown ticked, not offered as a choice.
+                            checked={l.local || blocklists.includes(l.name)}
+                            disabled={l.local}
                             onChange={(e) =>
                               setBlocklists((cur) =>
                                 e.target.checked ? [...cur, l.name] : cur.filter((n) => n !== l.name),
@@ -521,7 +738,7 @@ export function ProfileDialog({
                           />
                           {l.name}
                           <span className="muted small">
-                            {l.allow_only ? t("pd.listAllowOnly", { n: l.domains }) : t("pd.listBlocks", { n: l.domains })}
+                            {l.local ? t("pd.listLocal", { n: l.domains }) : l.allow_only ? t("pd.listAllowOnly", { n: l.domains }) : t("pd.listBlocks", { n: l.domains })}
                           </span>
                         </label>
                       ))}
@@ -548,7 +765,7 @@ export function ProfileDialog({
                 <div />
                 <div>
                   {editing?.id ? (
-                    <Logins profileId={editing.id} />
+                    <Logins profileId={editing.id} origin={editing.origin} />
                   ) : (
                     <p className="hint">{t("pd.loginsAfterSave")}</p>
                   )}
@@ -580,7 +797,7 @@ export function ProfileDialog({
                   <div className="field">
                     <label htmlFor="p-proxy">{t("px.saved")}</label>
                     <div>
-                      <select
+                      <Select
                         id="p-proxy"
                         value={proxyId}
                         onChange={(e) => setProxyId(e.target.value)}
@@ -588,10 +805,10 @@ export function ProfileDialog({
                         <option value="">{t("pd.proxyNone")}</option>
                         {proxies.map((p) => (
                           <option key={p.id} value={p.id}>
-                            {p.name} · {p.kind}://{p.host}:{p.port}
+                            {proxyOptionLabel(p)}
                           </option>
                         ))}
-                      </select>
+                      </Select>
                       {!proxyId && !needsProxy && noProxyChoice}
                       {!proxyId && needsProxy && <p className="hint">{t("pd.proxyRequired")}</p>}
                     </div>
@@ -601,7 +818,13 @@ export function ProfileDialog({
                     <div className="field">
                       <label>{t("px.type")}</label>
                       <div className="segmented">
-                        {["socks5", "http", "https"].map((k) => (
+                        {pxProviderAllowed && (
+                          <button aria-pressed={pxProviderMode}
+                            onClick={() => { setPxKind(PROVIDER_MODE); pxKindTouched.current = true; setPxSniffed(null); }}>
+                            {t("px.providerTab")}
+                          </button>
+                        )}
+                        {["socks5", "http", "https", "wireguard"].map((k) => (
                           <button key={k} aria-pressed={pxKind === k}
                             onClick={() => { setPxKind(k); pxKindTouched.current = true; setPxSniffed(null); }}>
                             {k}
@@ -611,10 +834,92 @@ export function ProfileDialog({
                       {pxSniffed && <div className="hint">{t("px.kindSniffed", { kind: pxSniffed })}</div>}
                     </div>
 
-                    <div className="field">
-                      <label htmlFor="px-host">{t("px.address")}</label>
+                    {pxProviderMode && (
+                      <>
+                        <div className="field">
+                          <label htmlFor="px-provider">{t("px.provider")}</label>
+                          <div>
+                            <Select
+                              id="px-provider"
+                              value={pxProvider}
+                              onChange={(e) => setPxProvider(e.target.value)}
+                            >
+                              {PROVIDERS.map((p) => (
+                                <option key={p} value={p}>{p}</option>
+                              ))}
+                            </Select>
+                          </div>
+                        </div>
+
+                        <div className="field">
+                          <label htmlFor="px-api-key">{t(providerKeyLabel(pxProvider))}</label>
+                          <div>
+                            <div style={{ position: "relative" }}>
+                              <input
+                                id="px-api-key"
+                                type={pxShowApiKey ? "text" : "password"}
+                                value={pxApiKey}
+                                autoComplete="off"
+                                placeholder={t(providerKeyLabel(pxProvider))}
+                                style={{ paddingRight: 34 }}
+                                onChange={(e) => setPxApiKey(e.target.value)}
+                              />
+                              <button
+                                type="button"
+                                onClick={() => setPxShowApiKey((v) => !v)}
+                                aria-label={pxShowApiKey ? t("px.hideKey") : t("px.showKey")}
+                                title={pxShowApiKey ? t("px.hideKey") : t("px.showKey")}
+                                style={{
+                                  position: "absolute", right: 6, top: "50%", transform: "translateY(-50%)",
+                                  width: 26, height: 26, padding: 0, border: 0, borderRadius: 6,
+                                  background: "transparent", color: "var(--text-dim)", display: "flex",
+                                  alignItems: "center", justifyContent: "center", cursor: "pointer",
+                                }}
+                              >
+                                {pxShowApiKey ? <EyeOff size={15} /> : <Eye size={15} />}
+                              </button>
+                            </div>
+                            <p className="hint">{t(providerKeyHint(pxProvider))}</p>
+                            {!pxComplete && (needsProxy
+                              ? <p className="hint">{t("pd.proxyRequired")}</p>
+                              : noProxyChoice)}
+                          </div>
+                        </div>
+
+                        <div className="field">
+                          <label htmlFor="px-label">{t("px.label")}</label>
+                          <div>
+                            <input
+                              id="px-label"
+                              value={pxLabel}
+                              placeholder={pxProvider}
+                              onChange={(e) => setPxLabel(e.target.value)}
+                            />
+                            <p className="hint">{t("px.labelHintProvider")}</p>
+                          </div>
+                        </div>
+
+                        {editing && pxEntry && (
+                          <div className="field">
+                            <label>{t("prov.currentExit")}</label>
+                            <div>
+                              <p className="hint" style={{ margin: 0 }}>
+                                {editing.proxy?.kind === PROVIDER_MODE
+                                  ? t("prov.noIpYet")
+                                  : `${pxEntry.last_ip ?? editing.proxy?.display ?? ""} · ${editing.proxy?.kind ?? ""}`}
+                              </p>
+                            </div>
+                          </div>
+                        )}
+                      </>
+                    )}
+
+                    {!pxProviderMode && <div className="field">
+                      <label htmlFor={pxWg ? "px-conf" : "px-host"}>{pxWg ? t("px.wgConf") : t("px.address")}</label>
                       <div>
-                        <div className="row">
+                        {pxWg && <WireGuardConf id="px-conf" value={pxConf} onChange={setPxConf} />}
+                        <div className="row" style={pxWg ? { marginTop: "var(--s-2)" } : undefined}>
+                          {!pxWg && <>
                           <input
                             id="px-host"
                             value={pxHost}
@@ -641,6 +946,7 @@ export function ProfileDialog({
                             inputMode="numeric"
                             onChange={(e) => setPxPort(e.target.value.replace(/\D/g, ""))}
                           />
+                          </>}
                           <button
                             style={{ whiteSpace: "nowrap" }}
                             disabled={busy || !pxComplete}
@@ -691,9 +997,9 @@ export function ProfileDialog({
                           </p>
                         )}
                       </div>
-                    </div>
+                    </div>}
 
-                    <div className="field">
+                    {!pxWg && !pxProviderMode && <div className="field">
                       <label htmlFor="px-user">{t("px.credentials")}</label>
                       <div className="row">
                         <input
@@ -711,9 +1017,9 @@ export function ProfileDialog({
                           onChange={(e) => setPxPass(e.target.value)}
                         />
                       </div>
-                    </div>
+                    </div>}
 
-                    <div className="field">
+                    {!pxWg && <div className="field">
                       <label htmlFor="px-rotate">{t("px.rotate")}</label>
                       <div>
                         <input
@@ -725,7 +1031,7 @@ export function ProfileDialog({
                         />
                         <p className="hint">{t("px.rotateHint")}</p>
                       </div>
-                    </div>
+                    </div>}
 
                     <div className="field">
                       <label htmlFor="px-checker">{t("px.checker")}</label>
@@ -750,34 +1056,60 @@ export function ProfileDialog({
                 <div className="field grow">
                   <label>{t("pd.machine")}</label>
                   <div className="personaList">
-                    {personas.map((p) => (
-                      <button
-                        key={p.id}
-                        ref={p.id === personaId ? selectedCard : undefined}
-                        className="personaCard"
-                        aria-pressed={p.id === personaId}
-                        disabled={machineLocked && p.id !== personaId}
-                        onClick={() => {
-                          // Another OS takes a different list of screens and
-                          // GPUs; a pinned one from the old list would only be
-                          // refused, so it goes with the machine it came from.
-                          const was = personas.find((x) => x.id === personaId)?.os.split(" ")[0];
-                          if (was && was !== p.os.split(" ")[0]) setOv({ gpu: undefined, screen: undefined });
-                          setPersonaId(p.id);
-                        }}
-                      >
-                        <div className="name">
-                          {p.os} · {p.screen}
+                    {/* Machines of one's own above the catalogue, under their
+                        own heading: mixed in by share, a capture sank to the
+                        bottom of fourteen others and a tester asked for a list
+                        of his own (13.10.2026). */}
+                    {[
+                      { own: true, title: t("pd.ownMachines") },
+                      { own: false, title: t("pd.catalogue") },
+                    ].map((g) => {
+                      // This computer's OS first; the rest keep their order.
+                      const list = personas
+                        .filter((p) => !!p.own === g.own)
+                        .sort((x, y) => Number(foreign(x)) - Number(foreign(y)));
+                      if (list.length === 0) return null;
+                      return (
+                        <div key={String(g.own)}>
+                          {personas.some((p) => p.own) && (
+                            <div className="muted small personaGroup">{g.title}</div>
+                          )}
+                          {list.map((p) => (
+                            <button
+                              key={p.id}
+                              ref={p.id === personaId ? selectedCard : undefined}
+                              className="personaCard"
+                              aria-pressed={p.id === personaId}
+                              disabled={machineLocked && p.id !== personaId}
+                              onClick={() => {
+                                // Another OS takes a different list of screens and
+                                // GPUs; a pinned one from the old list would only be
+                                // refused, so it goes with the machine it came from.
+                                const was = personas.find((x) => x.id === personaId)?.os.split(" ")[0];
+                                if (was && was !== p.os.split(" ")[0]) setOv({ gpu: undefined, screen: undefined });
+                                setPersonaId(p.id);
+                              }}
+                            >
+                              <div className="name">
+                                {p.os} · {p.screen}
+                              </div>
+                              <div className="muted small sub">
+                                <span className="gpu">{p.gpu}</span>
+                                <span className="share">
+                                  {/* A machine of one's own has no share of anything:
+                                      its weight is a placeholder, not a census. */}
+                                  {p.own
+                                    ? t("pd.captured")
+                                    : t("pd.share", { pct: (p.weight * 100).toFixed(1) })}
+                                  {p.source === "measured" ? ` · ${t("pd.measured")}` : ""}
+                                  {foreign(p) && <span className="otherOs">{` · ${t("pd.otherOs")}`}</span>}
+                                </span>
+                              </div>
+                            </button>
+                          ))}
                         </div>
-                        <div className="muted small sub">
-                          <span className="gpu">{p.gpu}</span>
-                          <span className="share">
-                            {t("pd.share", { pct: (p.weight * 100).toFixed(1) })}
-                            {p.source === "measured" ? ` · ${t("pd.measured")}` : ""}
-                          </span>
-                        </div>
-                      </button>
-                    ))}
+                      );
+                    })}
                     <p className="hint">
                       {machineLocked ? t("pd.machineLockedTeam") : t("pd.machineHint")}
                     </p>
@@ -839,7 +1171,7 @@ export function ProfileDialog({
                       placeholder={t("pd.followExit")}
                       onChange={(e) => setLanguages(e.target.value)}
                     />
-                    <select
+                    <Select
                       value=""
                       style={{ marginTop: "var(--s-2)" }}
                       onChange={(e) => e.target.value && setLanguages(e.target.value)}
@@ -848,14 +1180,14 @@ export function ProfileDialog({
                       {LANGUAGE_SETS.map((l) => (
                         <option key={l} value={l}>{languageName(l.split(",")[0], lang)} · {l}</option>
                       ))}
-                    </select>
+                    </Select>
                     <p className="hint">{t("pd.languagesHint")}</p>
                   </div>
                 </div>
                 <div className="field">
                   <label htmlFor="p-ui">{t("pd.uiLocale")}</label>
                   <div>
-                    <select
+                    <Select
                       id="p-ui"
                       value={overrides.ui_locale ?? ""}
                       onChange={(e) => setOv({ ui_locale: e.target.value || undefined })}
@@ -866,23 +1198,20 @@ export function ProfileDialog({
                       {(preview?.options?.ui_locales ?? []).map((l) => (
                         <option key={l} value={l}>{languageName(l, lang)}</option>
                       ))}
-                    </select>
+                    </Select>
                     <p className="hint">{t("pd.uiLocaleHint")}</p>
                   </div>
                 </div>
                 <div className="field">
                   <label htmlFor="p-tz">{t("pd.timezone")}</label>
                   <div>
-                    <input
+                    <SuggestInput
                       id="p-tz"
-                      list="p-tz-list"
                       value={timezone}
                       placeholder={t("pd.followExit")}
-                      onChange={(e) => setTimezone(e.target.value)}
+                      onChange={setTimezone}
+                      suggestions={TIME_ZONES.map((z) => ({ value: z }))}
                     />
-                    <datalist id="p-tz-list">
-                      {TIME_ZONES.map((z) => <option key={z} value={z} />)}
-                    </datalist>
                     <p className="hint">{t("pd.timezoneHint")}</p>
                   </div>
                 </div>
@@ -903,7 +1232,7 @@ export function ProfileDialog({
                   <label htmlFor="p-screen">{t("pd.screen")}</label>
                   <div>
                     <div className="row">
-                      <select
+                      <Select
                         id="p-screen"
                         value={overrides.screen ? `${overrides.screen.width}x${overrides.screen.height}` : ""}
                         onChange={(e) => {
@@ -919,14 +1248,12 @@ export function ProfileDialog({
                           });
                         }}
                       >
-                        <option value="">
-                          {t("pd.asMachine", { v: preview?.base ? preview.base.screen.join("×") : "…" })}
-                        </option>
+                        <option value="">{t("pd.asMonitor")}</option>
                         {(preview?.options?.screens ?? []).map(([w, h]) => (
                           <option key={`${w}x${h}`} value={`${w}x${h}`}>{w}×{h}</option>
                         ))}
-                      </select>
-                      <select
+                      </Select>
+                      {overrides.screen && <Select
                         aria-label={t("pd.dpr")}
                         title={t("pd.dpr")}
                         value={overrides.screen?.device_pixel_ratio ?? preview?.base?.device_pixel_ratio ?? 1}
@@ -941,7 +1268,7 @@ export function ProfileDialog({
                         {(preview?.options?.device_pixel_ratios ?? [1]).map((d) => (
                           <option key={d} value={d}>{Math.round(d * 100)}%</option>
                         ))}
-                      </select>
+                      </Select>}
                     </div>
                     <p className="hint">{t("pd.screenHint")}</p>
                   </div>
@@ -949,34 +1276,34 @@ export function ProfileDialog({
                 <div className="field">
                   <label htmlFor="p-cores">{t("pd.cores")}</label>
                   <div>
-                    <select
+                    <Select
                       id="p-cores"
                       value={overrides.cores ?? ""}
                       onChange={(e) => setOv({ cores: e.target.value ? Number(e.target.value) : undefined })}
                     >
                       <option value="">{t("pd.asMachine", { v: preview?.base?.cores ?? "…" })}</option>
                       {(preview?.options?.cores ?? []).map((c) => <option key={c} value={c}>{c}</option>)}
-                    </select>
+                    </Select>
                   </div>
                 </div>
                 <div className="field">
                   <label htmlFor="p-mem">{t("pd.memory")}</label>
                   <div>
-                    <select
+                    <Select
                       id="p-mem"
                       value={overrides.memory_gb ?? ""}
                       onChange={(e) => setOv({ memory_gb: e.target.value ? Number(e.target.value) : undefined })}
                     >
                       <option value="">{t("pd.asMachine", { v: preview?.base?.memory_gb ?? "…" })}</option>
                       {(preview?.options?.memory_gb ?? []).map((m) => <option key={m} value={m}>{m}</option>)}
-                    </select>
+                    </Select>
                     <p className="hint">{t("pd.memoryHint")}</p>
                   </div>
                 </div>
                 <div className="field">
                   <label htmlFor="p-gpu">{t("pd.gpu")}</label>
                   <div>
-                    <select
+                    <Select
                       id="p-gpu"
                       value={overrides.gpu ?? ""}
                       onChange={(e) => setOv({ gpu: e.target.value || undefined })}
@@ -985,25 +1312,67 @@ export function ProfileDialog({
                       {(preview?.options?.gpus ?? []).map((g) => (
                         <option key={g.id} value={g.id}>{gpuName(g.renderer)}</option>
                       ))}
-                    </select>
+                    </Select>
                     <p className="hint">{t("pd.gpuHint")}</p>
                   </div>
                 </div>
-                {Object.keys(overrides).length > 0 && (
-                  <div className="field">
-                    <label />
-                    <div>
-                      <button className="ghost" onClick={() => { setOverrides({}); setGeoText(""); }}>
-                        {t("pd.resetOverrides")}
-                      </button>
-                    </div>
+                <div className="field">
+                  <label htmlFor="p-webrtc">{t("pd.webrtc")}</label>
+                  <div>
+                    <Select
+                      id="p-webrtc"
+                      value={overrides.webrtc?.mode ?? "off"}
+                      disabled={machineLocked}
+                      onChange={(e) => {
+                        const mode = e.target.value as "off" | "base_on_ip" | "fixed";
+                        if (mode === "off") return setOv({ webrtc: undefined });
+                        setOv({
+                          webrtc: {
+                            mode,
+                            public_ip:
+                              mode === "fixed" ? overrides.webrtc?.public_ip : undefined,
+                            local_ip: overrides.webrtc?.local_ip,
+                          },
+                        });
+                      }}
+                    >
+                      <option value="off">{t("pd.webrtcOff")}</option>
+                      <option value="base_on_ip">{t("pd.webrtcBaseOnIp")}</option>
+                      <option value="fixed">{t("pd.webrtcFixed")}</option>
+                    </Select>
+                    {overrides.webrtc?.mode === "fixed" && (
+                      <div className="row" style={{ marginTop: "var(--s-2)" }}>
+                        <input
+                          aria-label={t("pd.webrtcPublicIp")}
+                          placeholder={t("pd.webrtcPublicIp")}
+                          value={overrides.webrtc.public_ip ?? ""}
+                          disabled={machineLocked}
+                          onChange={(e) => setWebrtcField("public_ip", e.target.value)}
+                        />
+                        <input
+                          aria-label={t("pd.webrtcLocalIp")}
+                          placeholder={t("pd.webrtcLocalIp")}
+                          value={overrides.webrtc.local_ip ?? ""}
+                          disabled={machineLocked}
+                          onChange={(e) => setWebrtcField("local_ip", e.target.value)}
+                        />
+                      </div>
+                    )}
+                    {overrides.webrtc?.mode === "base_on_ip" && (
+                      <input
+                        aria-label={t("pd.webrtcLocalIp")}
+                        placeholder={t("pd.webrtcLocalIp")}
+                        value={overrides.webrtc.local_ip ?? ""}
+                        disabled={machineLocked}
+                        style={{ marginTop: "var(--s-2)" }}
+                        onChange={(e) => setWebrtcField("local_ip", e.target.value)}
+                      />
+                    )}
+                    <p className="hint">
+                      {machineLocked ? t("pd.machineLockedTeam") : t("pd.webrtcHint")}
+                    </p>
                   </div>
-                )}
-              </>
-            )}
-
-            {tab === "Advanced" && (
-              <>
+                </div>
                 <div className="field">
                   <label>{t("pd.noise")}</label>
                   <div>
@@ -1015,28 +1384,51 @@ export function ProfileDialog({
                 <div className="field">
                   <label htmlFor="pd-canvas">{t("pd.canvasMode")}</label>
                   <div>
-                    <select
+                    <Select
                       id="pd-canvas"
-                      value={overrides.canvas ?? "noise"}
+                      value={overrides.canvas ?? (editing ? "noise" : "real")}
                       disabled={machineLocked}
                       onChange={(e) =>
-                        setOv({ canvas: e.target.value === "real" ? "real" : undefined })
+                        setOv({ canvas: e.target.value === "real" ? "real" : "noise" })
                       }
                     >
                       <option value="noise">{t("pd.canvasNoise")}</option>
                       <option value="real">{t("pd.canvasReal")}</option>
-                    </select>
+                    </Select>
                     <div className="muted small">
                       {machineLocked ? t("pd.machineLockedTeam") : t("pd.canvasHint")}
                     </div>
                   </div>
                 </div>
+                {Object.keys(overrides).length > 0 && (
+                  <div className="field">
+                    <label />
+                    <div>
+                      <button
+                        className="ghost"
+                        onClick={() => {
+                          setOverrides(editing ? {} : newProfileOverrides());
+                          setGeoText("");
+                        }}
+                      >
+                        {t("pd.resetOverrides")}
+                      </button>
+                    </div>
+                  </div>
+                )}
               </>
             )}
           </div>
 
           <aside className="overview">
             <h3>{t("pd.overview")}</h3>
+            {/* Here rather than under the machine list: the list scrolls and this
+                column is beside every tab, so the warning cannot scroll away. */}
+            {chosenPersona && foreign(chosenPersona) && (
+              <div className="verdict bad" style={{ marginBottom: "var(--s-3)" }}>
+                {t("pd.osMismatch", { host: HOST_OS ?? "", os: osOf(chosenPersona) })}
+              </div>
+            )}
             {preview ? (
               <>
                 <dl className="kv">
@@ -1050,9 +1442,11 @@ export function ProfileDialog({
                   <dd className="small">{preview.client_hints}</dd>
                   <dt>{t("pd.ovScreen")}</dt>
                   <dd>
-                    {preview.screen}
+                    {preview.screen ?? t("pd.ovScreenMonitor")}
                     <span className="muted small">
-                      {" "}{t("pd.ovScreenDetail", { avail: preview.avail, dpr: preview.device_pixel_ratio, depth: preview.color_depth })}
+                      {" "}{preview.screen
+                        ? t("pd.ovScreenDetail", { avail: preview.avail ?? "", dpr: preview.device_pixel_ratio ?? "", depth: preview.color_depth })
+                        : t("pd.ovScreenDepth", { depth: preview.color_depth })}
                     </span>
                   </dd>
                   <dt>{t("pd.ovGpu")}</dt>
@@ -1096,7 +1490,22 @@ export function ProfileDialog({
                   <dt>{t("pd.ovMedia")}</dt>
                   <dd>{preview.media_devices ?? t("pd.ovFollowsHost")}</dd>
                   <dt>{t("pd.ovWebrtc")}</dt>
-                  <dd className="small">{preview.webrtc}</dd>
+                  <dd className="small">
+                    {preview.webrtc === "base_on_ip"
+                      ? t("pd.webrtcBaseOnIp")
+                      : preview.webrtc === "fixed"
+                        ? t("pd.webrtcFixed")
+                        : t("pd.webrtcOff")}
+                    {preview.webrtc === "base_on_ip" && (
+                      <span className="muted"> · {t("pd.webrtcExitAtLaunch")}</span>
+                    )}
+                    {preview.webrtc_local_ip && (
+                      <span className="muted"> · {preview.webrtc_local_ip}</span>
+                    )}
+                    {preview.webrtc_public_ip && (
+                      <span className="muted"> · {preview.webrtc_public_ip}</span>
+                    )}
+                  </dd>
                   <dt>{t("pd.ovGeo")}</dt>
                   <dd className="small">
                     {preview.geolocation
@@ -1141,14 +1550,26 @@ export function ProfileDialog({
         </div>
 
         <div className="modalFoot">
+          {!editing && (
+            <button
+              type="button"
+              className="ghost"
+              onClick={randomize}
+              disabled={busy || personas.length === 0}
+              title={t("pd.randomizeHint")}
+            >
+              {t("pd.randomize")}
+            </button>
+          )}
           {error && <span className="error">{error}</span>}
+          {!error && needsProject && !pickedProject && <span className="hint">{t("pd.needProject")}</span>}
           <div className="spacer" />
           <button className="ghost" onClick={onClose}>
             {t("ui.cancel")}
           </button>
           <button
             className="primary"
-            disabled={busy || !personaId || problems.length > 0 || geoBad || (needsProxy && !hasProxy)}
+            disabled={busy || !personaId || problems.length > 0 || geoBad || (needsProxy && !hasProxy) || (needsProject && !pickedProject)}
             onClick={save}
           >
             {busy ? t("ui.saving") : editing ? t("ui.save") : t("ui.create")}

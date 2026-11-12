@@ -29,7 +29,7 @@ Octo: в мобильных профилях нет расширений и см
 
 ## Замер: эмуляция DevTools в нашем ядре
 
-09.10.2026, ядро 155.0.8059.39 (macOS, M5), чистый профиль без конфига Fury.
+09.10.2026, ядро 155.0.8059.39 (macOS, M5), чистый профиль без конфига XChange.
 Через CDP: `Emulation.setDeviceMetricsOverride` (384×832, DPR 2.8125,
 `mobile: true`), `setTouchEmulationEnabled` (5 точек),
 `setEmitTouchEventsForMouse`, `setUserAgentOverride` с метаданными Android
@@ -59,12 +59,12 @@ Octo: в мобильных профилях нет расширений и см
 | SharedWorker, ServiceWorker | Mac UA, `userAgentData.platform = macOS`, `mobile: false` |
 | Dedicated Worker | UA Android, но `platform = MacIntel` |
 | везде | colorDepth 30 (у Android 24), `pdfViewerEnabled: true` и PDF-плагины, `navigator.hid` и `navigator.serial` |
-| без конфига Fury | GPU Apple M5, 43 шрифта Mac, 10 ядер / 16 ГБ, `connection.type` отсутствует |
+| без конфига XChange | GPU Apple M5, 43 шрифта Mac, 10 ядер / 16 ГБ, `connection.type` отсутствует |
 
 Кросс-доменный iframe — то, чем антифрод встраивается на страницу, поэтому
 эмуляция через CDP как продукт не годится (и CDP у нас по умолчанию выключен,
 `cdp: false`, см. README). Вывод: те же настройки Blink должны включаться
-**из конфига Fury в каждом процессе рендерера и в каждом воркере**, как уже
+**из конфига XChange в каждом процессе рендерера и в каждом воркере**, как уже
 сделаны остальные патчи — тогда согласованность между контекстами получается
 тем же способом, что для десктопных персон.
 
@@ -186,7 +186,7 @@ WebNFC, DigitalGoods, ContentIndex, DisplayCutoutAPI. Их интерфейсы 
    Найдено при проверке: виртуальные датчики переживали своего поставщика при
    закрытии вкладки, и ядро падало на выходе; теперь они отпускаются раньше.
    Параметры модели подогнаны по физике, не по замерам: когда придут снимки с
-   настоящих телефонов (страница https://furybrowser.dev/probe/ теперь пишет и
+   настоящих телефонов (страница https://xchange.dev/probe/ теперь пишет и
    датчики), их надо сверить.
 5. **Скрыть десктопное:** PDF viewer и плагины, HID, Serial, File System
    Access; colorDepth.

@@ -1,0 +1,700 @@
+/* Simprint Design System Tokens - Full Light & Dark Mode Support */
+:root {
+  /* DARK THEME (Default) */
+  --simprint-bg: #090d16;
+  --simprint-surface: #111827;
+  --simprint-surface-elevated: #161f30;
+  --simprint-sidebar-bg: #0b0f19;
+  --simprint-header-bg: #0a0e1a;
+  --simprint-table-th: #0b0f19;
+  --simprint-table-row: #0e1320;
+  --simprint-table-row-hover: #151d30;
+  --simprint-table-row-selected: rgba(6, 182, 212, 0.12);
+  --simprint-card: #111827;
+  --simprint-card-hover: #161f30;
+  --simprint-border: #1e293b;
+  --simprint-border-subtle: rgba(255, 255, 255, 0.08);
+  --simprint-border-glow: rgba(6, 182, 212, 0.3);
+  --simprint-pager-h: 2.75rem;
+
+  --simprint-text: #f8fafc;
+  --simprint-text-muted: #94a3b8;
+  --simprint-text-dim: #64748b;
+
+  --simprint-btn-bg: #1e293b;
+  --simprint-btn-hover: #334155;
+  --simprint-btn-text: #e2e8f0;
+  --simprint-btn-border: #334155;
+
+  --simprint-input-bg: #0b0f19;
+  --simprint-input-border: #1e293b;
+  --simprint-input-text: #f1f5f9;
+
+  --simprint-cyan: #06b6d4;
+  --simprint-cyan-glow: rgba(6, 182, 212, 0.25);
+  --simprint-blue: #0284c7;
+  --simprint-emerald: #10b981;
+  --stage-sat: 45%;
+  --stage-bg-lightness: 18%;
+  --stage-border-lightness: 30%;
+  --stage-text-lightness: 85%;
+  --stage-null-bg: #1e293b;
+  --stage-null-border: #334155;
+  --stage-null-text: #94a3b8;
+  --simprint-emerald-glow: rgba(16, 185, 129, 0.25);
+  --simprint-amber: #f59e0b;
+  --simprint-amber-glow: rgba(245, 158, 11, 0.25);
+  --simprint-rose: #f43f5e;
+  --simprint-rose-glow: rgba(244, 63, 94, 0.25);
+
+  --simprint-btn-gradient: linear-gradient(135deg, #06b6d4 0%, #2563eb 100%);
+  --simprint-btn-gradient-hover: linear-gradient(135deg, #22d3ee 0%, #3b82f6 100%);
+
+  /* XChange base variables for dark mode */
+  --bg: #090d16;
+  --surface: #111827;
+  --raised: #161f30;
+  --hover: #1e293b;
+  --line: #1e293b;
+  --line-strong: #334155;
+  --accent: #06b6d4;
+  --accent-hover: #22d3ee;
+  --accent-dim: rgba(6, 182, 212, 0.15);
+  --ok: #10b981;
+  --warn: #f59e0b;
+}
+
+:root[data-theme="light"] {
+  /* LIGHT THEME - Crisp, High-Contrast Modern Slate Studio */
+  --simprint-bg: #f8fafc;
+  --simprint-surface: #ffffff;
+  --simprint-surface-elevated: #f1f5f9;
+  --simprint-sidebar-bg: #ffffff;
+  --simprint-header-bg: #ffffff;
+  --simprint-table-th: #f1f5f9;
+  --simprint-table-row: #ffffff;
+  --simprint-table-row-hover: #f8fafc;
+  --simprint-table-row-selected: #e0f2fe;
+  --simprint-card: #ffffff;
+  --simprint-card-hover: #f8fafc;
+  --simprint-border: #e2e8f0;
+  --simprint-border-subtle: rgba(0, 0, 0, 0.06);
+  --simprint-border-glow: rgba(2, 132, 199, 0.25);
+
+  --stage-sat: 75%;
+  --stage-bg-lightness: 92%;
+  --stage-border-lightness: 75%;
+  --stage-text-lightness: 25%;
+  --stage-null-bg: #f1f5f9;
+  --stage-null-border: #cbd5e1;
+  --stage-null-text: #334155;
+  --simprint-text: #0f172a;
+  --simprint-text-muted: #475569;
+  --simprint-text-dim: #94a3b8;
+
+  --simprint-btn-bg: #ffffff;
+  --simprint-btn-hover: #f1f5f9;
+  --simprint-btn-text: #1e293b;
+  --simprint-btn-border: #cbd5e1;
+
+  --simprint-input-bg: #ffffff;
+  --simprint-input-border: #cbd5e1;
+  --simprint-input-text: #0f172a;
+
+  /* XChange base variables for light mode */
+  --bg: #f8fafc;
+  --surface: #ffffff;
+  --raised: #f1f5f9;
+  --hover: #e2e8f0;
+  --line: #e2e8f0;
+  --line-strong: #cbd5e1;
+  --accent: #0284c7;
+  --accent-hover: #0369a1;
+  --accent-dim: rgba(2, 132, 199, 0.12);
+  --ok: #10b981;
+  --warn: #d97706;
+}
+
+/* Glassmorphism utility classes */
+.simprint-glass {
+  background: var(--simprint-surface);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid var(--simprint-border);
+}
+
+.simprint-glass-dock {
+  background: rgba(15, 23, 42, 0.94);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 1px solid rgba(51, 65, 85, 0.8);
+}
+
+.simprint-card-glow:hover {
+  border-color: var(--simprint-cyan);
+  box-shadow: 0 0 20px rgba(6, 182, 212, 0.15);
+}
+
+.tableWrap {
+  background: var(--simprint-table-row) !important;
+  border-color: var(--simprint-border) !important;
+}
+
+.app button:where([class*="!bg-transparent"]) {
+  background-color: transparent !important;
+  border-color: transparent !important;
+}
+
+.app button:where([class*="!border-0"]) {
+  border-width: 0 !important;
+}
+
+/* Custom scrollbar styling for Simprint tables and containers */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #94a3b8;
+  border-radius: 9999px;
+}
+:root:not([data-theme="light"]) ::-webkit-scrollbar-thumb {
+  background: #334155;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #64748b;
+}
+
+/* Modal & Dialog Studio Styling - Dark Mode */
+.scrim {
+  background: rgba(0, 0, 0, 0.75) !important;
+  backdrop-filter: blur(8px) !important;
+  -webkit-backdrop-filter: blur(8px) !important;
+  z-index: 50 !important;
+}
+
+.modal {
+  border: 1px solid #1e293b !important;
+  border-radius: 18px !important;
+  background: #111827 !important;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.75), 0 0 0 1px rgba(255, 255, 255, 0.06), 0 0 30px rgba(6, 182, 212, 0.08) !important;
+}
+
+.modalHead {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  padding: 18px 24px 14px !important;
+}
+
+.modalHead h2 {
+  color: #f8fafc !important;
+  font-weight: 700 !important;
+  font-size: 18px !important;
+  letter-spacing: -0.01em;
+}
+
+.tabs {
+  border-bottom: 1px solid #1e293b !important;
+  padding: 0 24px !important;
+}
+
+.tab {
+  color: #94a3b8 !important;
+  font-weight: 500 !important;
+  font-size: 13px !important;
+  border-bottom: 2px solid transparent !important;
+  transition: all 0.15s ease-in-out;
+}
+
+.tab:hover:not(:disabled) {
+  color: #e2e8f0 !important;
+  border-bottom-color: #334155 !important;
+}
+
+.tab[aria-selected="true"] {
+  color: #22d3ee !important;
+  border-bottom-color: #06b6d4 !important;
+  text-shadow: 0 0 12px rgba(6, 182, 212, 0.4);
+}
+
+.modalFoot {
+  border-top: 1px solid #1e293b !important;
+  padding: 14px 24px !important;
+  background: rgba(9, 13, 22, 0.6) !important;
+}
+
+/* Fingerprint Inspector Preview Terminal */
+.overview {
+  background: #090d16 !important;
+  border-left: 1px solid #1e293b !important;
+  padding: 20px 18px !important;
+}
+
+.overview h3 {
+  color: #06b6d4 !important;
+  font-size: 11px !important;
+  font-weight: 700 !important;
+  letter-spacing: 0.1em !important;
+  text-transform: uppercase !important;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.overview h3::before {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #06b6d4;
+  box-shadow: 0 0 6px #06b6d4;
+}
+
+.kv dt {
+  color: #64748b !important;
+  font-family: var(--mono) !important;
+  font-size: 11px !important;
+}
+
+.kv dd {
+  color: #10b981 !important;
+  font-family: var(--mono) !important;
+  font-size: 11.5px !important;
+  text-shadow: 0 0 8px rgba(16, 185, 129, 0.2);
+}
+
+/* Form inputs & buttons polish - Dark Mode Default */
+input[type="text"],
+input[type="password"],
+input[type="number"],
+select,
+textarea {
+  border-radius: 10px !important;
+  border: 1px solid #1e293b !important;
+  background: #0b0f19 !important;
+  color: #f1f5f9 !important;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+input[type="text"]:focus,
+input[type="password"]:focus,
+input[type="number"]:focus,
+select:focus,
+textarea:focus {
+  border-color: #06b6d4 !important;
+  box-shadow: 0 0 0 2px rgba(6, 182, 212, 0.2) !important;
+  outline: none !important;
+}
+
+button.primary {
+  background: var(--simprint-btn-gradient) !important;
+  border: 1px solid rgba(6, 182, 212, 0.4) !important;
+  color: #ffffff !important;
+  font-weight: 600 !important;
+  border-radius: 10px !important;
+  box-shadow: 0 4px 14px rgba(6, 182, 212, 0.25) !important;
+}
+
+button.primary:hover:not(:disabled) {
+  background: var(--simprint-btn-gradient-hover) !important;
+  box-shadow: 0 6px 20px rgba(6, 182, 212, 0.35) !important;
+}
+
+button.ghost {
+  border-radius: 10px !important;
+  border: 1px solid #1e293b !important;
+  background: rgba(17, 24, 39, 0.7) !important;
+  color: #cbd5e1 !important;
+}
+
+button.ghost:hover:not(:disabled) {
+  background: #1e293b !important;
+  color: #ffffff !important;
+  border-color: #334155 !important;
+}
+
+/* ==========================================================================
+   LIGHT MODE OVERRIDES FOR MODALS, TERMINALS, INPUTS & BUTTONS
+   ========================================================================== */
+:root[data-theme="light"] .scrim {
+  background: rgba(15, 23, 42, 0.45) !important;
+  backdrop-filter: blur(6px) !important;
+}
+
+:root[data-theme="light"] .modal {
+  border: 1px solid #e2e8f0 !important;
+  background: #ffffff !important;
+  box-shadow: 0 20px 40px -10px rgba(15, 23, 42, 0.15), 0 0 0 1px rgba(0, 0, 0, 0.05) !important;
+}
+
+:root[data-theme="light"] .modalHead {
+  border-bottom: 1px solid #f1f5f9 !important;
+}
+
+:root[data-theme="light"] .modalHead h2 {
+  color: #0f172a !important;
+}
+
+:root[data-theme="light"] .tabs {
+  border-bottom: 1px solid #e2e8f0 !important;
+}
+
+:root[data-theme="light"] .tab {
+  color: #64748b !important;
+}
+
+:root[data-theme="light"] .tab:hover:not(:disabled) {
+  color: #0f172a !important;
+  border-bottom-color: #cbd5e1 !important;
+}
+
+:root[data-theme="light"] .tab[aria-selected="true"] {
+  color: #0284c7 !important;
+  border-bottom-color: #0284c7 !important;
+  text-shadow: none !important;
+}
+
+:root[data-theme="light"] .modalFoot {
+  border-top: 1px solid #e2e8f0 !important;
+  background: #f8fafc !important;
+}
+
+:root[data-theme="light"] .overview {
+  background: #f8fafc !important;
+  border-left: 1px solid #e2e8f0 !important;
+}
+
+:root[data-theme="light"] .overview h3 {
+  color: #0284c7 !important;
+}
+
+:root[data-theme="light"] .overview h3::before {
+  background: #0284c7;
+  box-shadow: 0 0 4px #0284c7;
+}
+
+:root[data-theme="light"] .kv dt {
+  color: #64748b !important;
+}
+
+:root[data-theme="light"] .kv dd {
+  color: #047857 !important;
+  text-shadow: none !important;
+}
+
+:root[data-theme="light"] input[type="text"],
+:root[data-theme="light"] input[type="password"],
+:root[data-theme="light"] input[type="number"],
+:root[data-theme="light"] select,
+:root[data-theme="light"] textarea {
+  border: 1px solid #cbd5e1 !important;
+  background: #ffffff !important;
+  color: #0f172a !important;
+}
+
+:root[data-theme="light"] input[type="text"]:focus,
+:root[data-theme="light"] input[type="password"]:focus,
+:root[data-theme="light"] input[type="number"]:focus,
+:root[data-theme="light"] select:focus,
+:root[data-theme="light"] textarea:focus {
+  border-color: #0284c7 !important;
+  box-shadow: 0 0 0 2px rgba(2, 132, 199, 0.2) !important;
+}
+
+:root[data-theme="light"] button.ghost {
+  border: 1px solid #e2e8f0 !important;
+  background: #f1f5f9 !important;
+  color: #334155 !important;
+}
+
+:root[data-theme="light"] button.ghost:hover:not(:disabled) {
+  background: #e2e8f0 !important;
+  color: #0f172a !important;
+  border-color: #cbd5e1 !important;
+}
+
+/* Open / Close in the profile row. Named rules rather than utilities because
+   the global `button` rule above owns color and background, and an unlayered
+   rule beats a Tailwind utility. Green means open, red means close, and the
+   icon inherits the same colour through currentColor. */
+.simprint-action-open {
+  color: var(--simprint-emerald) !important;
+  background: color-mix(in srgb, var(--simprint-emerald) 12%, transparent) !important;
+  border: 1px solid color-mix(in srgb, var(--simprint-emerald) 35%, transparent) !important;
+  border-radius: 12px !important;
+}
+
+.simprint-action-open:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--simprint-emerald) 20%, transparent) !important;
+  border-color: color-mix(in srgb, var(--simprint-emerald) 50%, transparent) !important;
+}
+
+.simprint-action-close {
+  color: var(--simprint-rose) !important;
+  background: color-mix(in srgb, var(--simprint-rose) 12%, transparent) !important;
+  border: 1px solid color-mix(in srgb, var(--simprint-rose) 35%, transparent) !important;
+  border-radius: 12px !important;
+}
+
+.simprint-action-close:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--simprint-rose) 20%, transparent) !important;
+  border-color: color-mix(in srgb, var(--simprint-rose) 50%, transparent) !important;
+}
+
+/* Login sits beside Open and means a different thing: the profile is closed,
+   and pressing this opens it through its proxy and signs the saved account in.
+   Blue rather than green so it does not read as a second Open. */
+.simprint-action-login {
+  color: var(--simprint-blue) !important;
+  background: color-mix(in srgb, var(--simprint-blue) 12%, transparent) !important;
+  border: 1px solid color-mix(in srgb, var(--simprint-blue) 35%, transparent) !important;
+  border-radius: 12px !important;
+}
+
+.simprint-action-login:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--simprint-blue) 20%, transparent) !important;
+  border-color: color-mix(in srgb, var(--simprint-blue) 50%, transparent) !important;
+}
+
+:root[data-theme="light"] .simprint-action-open {
+  color: #047857 !important;
+}
+
+:root[data-theme="light"] .simprint-action-close {
+  color: #be123c !important;
+}
+
+:root[data-theme="light"] .simprint-action-login {
+  color: #0369a1 !important;
+}
+
+/* The two file actions in the Cookies dialog: cookies in from a file, cookies
+   out to one. Import is emerald and export is cyan, so the pair is read as a
+   direction rather than as two buttons with the same job — and neither takes
+   the accent, which belongs to the dialog's one committing action (Write to
+   profile). Both are theme-driven; the light overrides at the end only deepen
+   the same hues for contrast on white. */
+.ck-file {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 10px !important;
+  font-weight: 560 !important;
+}
+
+.ck-file-import {
+  color: var(--simprint-emerald) !important;
+  background: color-mix(in srgb, var(--simprint-emerald) 12%, transparent) !important;
+  border: 1px solid color-mix(in srgb, var(--simprint-emerald) 38%, transparent) !important;
+}
+
+.ck-file-import:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--simprint-emerald) 20%, transparent) !important;
+  border-color: color-mix(in srgb, var(--simprint-emerald) 55%, transparent) !important;
+}
+
+.ck-file-export {
+  color: var(--simprint-cyan) !important;
+  background: color-mix(in srgb, var(--simprint-cyan) 12%, transparent) !important;
+  border: 1px solid color-mix(in srgb, var(--simprint-cyan) 38%, transparent) !important;
+}
+
+.ck-file-export:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--simprint-cyan) 20%, transparent) !important;
+  border-color: color-mix(in srgb, var(--simprint-cyan) 55%, transparent) !important;
+}
+
+:root[data-theme="light"] .ck-file-import { color: #047857 !important; }
+:root[data-theme="light"] .ck-file-export { color: #0e7490 !important; }
+
+/* Floating bulk-selection bar. A light surface in light mode, the dark
+   surface in dark mode, with buttons from the same token set — the bar used
+   to be hardcoded slate-900 and stayed dark over a white page. */
+.simprint-bulk-bar {
+  background: color-mix(in srgb, var(--simprint-surface) 96%, transparent) !important;
+  border: 1px solid var(--simprint-border) !important;
+  color: var(--simprint-text) !important;
+  border-radius: 16px !important;
+  box-shadow: 0 16px 40px rgba(15, 23, 42, 0.18) !important;
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+
+:root:not([data-theme="light"]) .simprint-bulk-bar {
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45) !important;
+}
+
+.simprint-bulk-btn {
+  background: var(--simprint-btn-bg) !important;
+  color: var(--simprint-btn-text) !important;
+  border: 1px solid var(--simprint-btn-border) !important;
+  border-radius: 12px !important;
+  padding: 6px 12px !important;
+}
+
+.simprint-bulk-btn:hover:not(:disabled) {
+  background: var(--simprint-btn-hover) !important;
+}
+
+.simprint-bulk-danger {
+  color: var(--simprint-rose) !important;
+  background: color-mix(in srgb, var(--simprint-rose) 12%, transparent) !important;
+  border: 1px solid color-mix(in srgb, var(--simprint-rose) 35%, transparent) !important;
+  border-radius: 12px !important;
+  padding: 6px 12px !important;
+}
+
+.simprint-bulk-danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--simprint-rose) 20%, transparent) !important;
+}
+
+.simprint-bulk-warn {
+  color: var(--simprint-amber) !important;
+  background: color-mix(in srgb, var(--simprint-amber) 12%, transparent) !important;
+  border: 1px solid color-mix(in srgb, var(--simprint-amber) 35%, transparent) !important;
+  border-radius: 12px !important;
+  padding: 6px 10px !important;
+}
+
+.simprint-bulk-warn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--simprint-amber) 20%, transparent) !important;
+}
+
+.simprint-bulk-info {
+  color: var(--simprint-cyan) !important;
+  background: color-mix(in srgb, var(--simprint-cyan) 12%, transparent) !important;
+  border: 1px solid color-mix(in srgb, var(--simprint-cyan) 35%, transparent) !important;
+  border-radius: 12px !important;
+  padding: 6px 10px !important;
+}
+
+.simprint-bulk-info:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--simprint-cyan) 20%, transparent) !important;
+}
+
+.simprint-bulk-select {
+  background: var(--simprint-input-bg) !important;
+  color: var(--simprint-input-text) !important;
+  border: 1px solid var(--simprint-input-border) !important;
+  border-radius: 12px !important;
+  padding: 6px 24px 6px 28px !important;
+}
+
+.simprint-bulk-select:focus {
+  border-color: var(--simprint-cyan) !important;
+}
+
+.simprint-bulk-icon {
+  background: transparent !important;
+  color: var(--simprint-text-dim) !important;
+  border: 0 !important;
+  border-radius: 10px !important;
+  padding: 6px !important;
+}
+
+.simprint-bulk-icon:hover:not(:disabled) {
+  background: var(--simprint-btn-hover) !important;
+  color: var(--simprint-text) !important;
+}
+
+/* The Tool popover on the bulk bar. Same surface tokens as the bar it hangs
+   from: a menu drawn in hardcoded slate floats invisibly over a light page. */
+.simprint-tool-menu {
+  background: var(--simprint-surface) !important;
+  border: 1px solid var(--simprint-border) !important;
+  color: var(--simprint-text) !important;
+  box-shadow: 0 16px 40px rgba(15, 23, 42, 0.18) !important;
+}
+
+:root:not([data-theme="light"]) .simprint-tool-menu {
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45) !important;
+}
+
+.simprint-tool-item {
+  width: 100% !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+  padding: 7px 10px !important;
+  border-radius: 10px !important;
+  text-align: left !important;
+  background: transparent !important;
+  border: 0 !important;
+  color: var(--simprint-text) !important;
+  font-size: 12px !important;
+}
+
+.simprint-tool-item:hover:not(:disabled) {
+  background: var(--simprint-btn-hover) !important;
+}
+
+.simprint-tool-item:disabled {
+  opacity: 0.45;
+}
+
+:root[data-theme="light"] .simprint-bulk-danger { color: #be123c !important; }
+:root[data-theme="light"] .simprint-bulk-warn { color: #b45309 !important; }
+:root[data-theme="light"] .simprint-bulk-info { color: #0369a1 !important; }
+
+.simprint-pager {
+  background: var(--simprint-surface) !important;
+  color: var(--simprint-text) !important;
+}
+
+.simprint-pager-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--simprint-text-muted) !important;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 150ms ease, color 150ms ease;
+}
+
+.simprint-pager-btn:hover:not(:disabled) {
+  background: var(--simprint-btn-hover) !important;
+  color: var(--simprint-text) !important;
+}
+
+.simprint-pager-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.simprint-pager-input {
+  width: 3rem;
+  padding: 0;
+  background: var(--simprint-input-bg) !important;
+  border: 1px solid var(--simprint-input-border) !important;
+  color: var(--simprint-input-text) !important;
+}
+
+.simprint-pager-input:focus {
+  border-color: var(--simprint-cyan) !important;
+}
+
+.simprint-pager-select {
+  width: auto;
+  height: 32px;
+  padding: 0 28px 0 10px;
+  border-radius: 12px;
+  border: 1px solid var(--simprint-input-border) !important;
+  background: var(--simprint-input-bg) !important;
+  color: var(--simprint-input-text) !important;
+  appearance: none;
+  cursor: pointer;
+  outline: none;
+}
+
+.simprint-pager-select:focus {
+  border-color: var(--simprint-cyan) !important;
+}

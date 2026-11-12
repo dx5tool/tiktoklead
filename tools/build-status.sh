@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: AGPL-3.0-or-later
-# Copyright 2026 Bogdan Shapovalov and the Fury authors
+# Copyright 2026 Bogdan Shapovalov and the XChange authors
 #
 # How far along is the Windows build, in percent and in minutes.
 #
@@ -31,7 +31,7 @@ set -euo pipefail
 # reading that there is a machine at that address taking root over SSH. The
 # address is somebody's own and belongs in their environment.
 SERVER="${FURY_BUILD_SERVER:?set FURY_BUILD_SERVER to user@host of your Windows build machine}"
-KEY="${FURY_BUILD_KEY:-$HOME/.ssh/fury_winbuild}"
+KEY="${FURY_BUILD_KEY:-$HOME/.ssh/xchange_winbuild}"
 TARGET="${1:-windows-x64}"
 case "$TARGET" in --watch) TARGET="windows-x64" ;; esac
 
@@ -51,7 +51,7 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # A file crosses all three unchanged.
 remote() {
   local tmp
-  tmp=$(mktemp -t fury-status)
+  tmp=$(mktemp -t xchange-status)
   cat > "$tmp" <<'REMOTE'
 out=OUT_ROOT_PLACEHOLDER/TARGET_PLACEHOLDER.noindex
 log="$out/build-progress.log"
@@ -74,10 +74,10 @@ echo "steps=${last}"
 # five minutes below the high-water mark; nothing inside one run does that.
 #
 # The total cannot be recovered this way at all -- a log of finished steps says
-# nothing about steps not taken -- so it comes from .fury-total, written by
+# nothing about steps not taken -- so it comes from .xchange-total, written by
 # whoever last saw a full build of this target finish.
 echo "fallback_done=$(awk '{ if ($1 + 300000 < max) { start = NR - 1; max = $1 } if ($1 > max) max = $1 } END { print NR - start }' "$out/.ninja_log" 2>/dev/null || echo 0)"
-echo "fallback_total=$(cat "$out/.fury-total" 2>/dev/null || echo 0)"
+echo "fallback_total=$(cat "$out/.xchange-total" 2>/dev/null || echo 0)"
 # When this build started. args.gn is written by gn gen, the first thing build.sh
 # does, and it is rewritten every run -- so unlike .ninja_log it never carries a
 # time from the previous build.
@@ -109,12 +109,12 @@ REMOTE
     return
   fi
 
-  sed -i '' "s#OUT_ROOT_PLACEHOLDER#/c/fury/core/src/out#; s/TARGET_PLACEHOLDER/$TARGET/" "$tmp" 2>/dev/null \
-    || sed -i "s#OUT_ROOT_PLACEHOLDER#/c/fury/core/src/out#; s/TARGET_PLACEHOLDER/$TARGET/" "$tmp"
-  scp -i "$KEY" -o BatchMode=yes -q "$tmp" "$SERVER:C:/Users/root/fury-status.sh"
+  sed -i '' "s#OUT_ROOT_PLACEHOLDER#/c/xchange/core/src/out#; s/TARGET_PLACEHOLDER/$TARGET/" "$tmp" 2>/dev/null \
+    || sed -i "s#OUT_ROOT_PLACEHOLDER#/c/xchange/core/src/out#; s/TARGET_PLACEHOLDER/$TARGET/" "$tmp"
+  scp -i "$KEY" -o BatchMode=yes -q "$tmp" "$SERVER:C:/Users/root/xchange-status.sh"
   rm -f "$tmp"
   ssh -i "$KEY" -o BatchMode=yes -o ConnectTimeout=20 "$SERVER" \
-    "$BASH_EXE -lc \"bash /c/Users/root/fury-status.sh\""
+    "$BASH_EXE -lc \"bash /c/Users/root/xchange-status.sh\""
 }
 
 show() {

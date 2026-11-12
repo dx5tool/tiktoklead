@@ -1,19 +1,25 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright 2026 Bogdan Shapovalov and the Fury authors
+// Copyright 2026 Bogdan Shapovalov and the XChange authors
 
 //! Cookie import and export, over CDP.
 //!
 //! # Why not the SQLite file
 //!
 //! The obvious implementation is to open `Default/Cookies` and read it. It does
-//! not work, and the way it fails is expensive.
+//! not work in general, and the way it fails is expensive.
 //!
 //! Since schema v24 a cookie's plaintext is `SHA256(host_key) || value`,
 //! encrypted under a key from the OS: the "Chromium Safe Storage" keychain item
 //! on macOS, DPAPI or an app-bound key on Windows. The Windows app-bound key
 //! ("v20") can only be unwrapped by a COM call into an elevation service running
-//! as SYSTEM, so on Windows there is no general way to read a cookie value
-//! outside the browser at all.
+//! as SYSTEM, so there is no general way to read any cookie value outside the
+//! browser.
+//!
+//! There is one case that is not general and does not need the browser: a local
+//! profile on Windows writes `v10` rows under a DPAPI-wrapped key in
+//! `Local State`, and the agent runs as that same user. `cookie_store.rs`
+//! reads those directly for export (never for import); everything else — a
+//! team profile, `v20`, macOS — still comes through the browser.
 //!
 //! Writing is worse than reading. `LoadCookiesForDomains`
 //! (net/extras/sqlite/sqlite_persistent_cookie_store.cc:916-935) does not skip a
@@ -32,7 +38,7 @@
 //!
 //! The format is CDP's own `Network.Cookie` / `Network.CookieParam` JSON. One
 //! format, both directions, and it is the wire format of the thing doing the
-//! writing — any other choice would need a translation table between Fury's idea
+//! writing — any other choice would need a translation table between XChange's idea
 //! of a cookie and Chromium's, which is a second source of truth for one fact.
 
 use futures_util::{SinkExt, StreamExt};
@@ -130,42 +136,84 @@ pub async fn export(ws_endpoint: &str) -> anyhow::Result<Vec<serde_json::Value>>
         .unwrap_or_default())
 }
 
+/// Ask the browser to shut down, flushing the profile on the way.
+///
+/// `Browser.close` is the shutdown path the window's own close button takes:
+/// cookies, history and the session are written before the process exits. A
+/// browser launched without a window cannot be reached by `ask_to_close`, and a
+/// cookie exchange that ends in a kill is exactly the tail loss the stop path
+/// exists to avoid.
+pub async fn close(ws_endpoint: &str) -> anyhow::Result<()> {
+    let mut cdp = Cdp::connect(ws_endpoint).await?;
+    // The browser tears the socket down as it goes, so the reply may never
+    // arrive. Sending the command is what matters.
+    let _ = cdp.call("Browser.close", serde_json::json!({})).await;
+    Ok(())
+}
+
 /// Add cookies to the profile.
 ///
 /// Additive, not replacing. Clearing first would make a failed import
 /// destructive, and the case that matters — seeding a fresh profile — has
 /// nothing to clear.
 pub async fn import(ws_endpoint: &str, cookies: &[serde_json::Value]) -> anyhow::Result<Imported> {
-    let prepared = prepare(cookies)?;
+    let mut prepared = prepare(cookies)?;
     if prepared.is_empty() {
         anyhow::bail!("nothing to import: no line carried both a name and a domain");
     }
     let accepted = prepared.len();
-    // A cookie with no expiry is a session cookie, and Chromium does not write
-    // those to disk — so when this import opened the profile itself, they are
-    // gone the moment it closes again. Measured: two cookies in, one out.
-    //
-    // That is the browser behaving correctly, and it is still a surprise worth
-    // naming. Someone importing a warmed account from a dump full of session
-    // cookies would otherwise see "imported: 40" and find eleven.
-    let session_only = prepared
-        .iter()
-        .filter(|c| c.get("expires").is_none())
-        .count();
     let skipped = cookies.len().saturating_sub(accepted);
+
+    // A cookie with no expiry is a session cookie, and Chromium never writes
+    // one to disk. This exchange closes the profile straight afterwards, so an
+    // import that left one as-is would be a write that disappears — and it is
+    // the shape our own export produces, because `Storage.getCookies` reports
+    // `expires: -1` for them. The dialog already gives a pasted Cookie header a
+    // one-year expiry for the same reason; this is that rule for every shape.
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs_f64())
+        .unwrap_or(0.0);
+    let extended = persist_session_cookies(&mut prepared, now);
 
     let mut cdp = Cdp::connect(ws_endpoint).await?;
     cdp.call("Storage.setCookies", serde_json::json!({ "cookies": prepared }))
         .await?;
-    Ok(Imported { accepted, session_only, skipped })
+    Ok(Imported { accepted, extended, skipped })
+}
+
+/// How long a session cookie is given when it has to become persistent. The
+/// same one year the dialog uses for a pasted header: long enough to be useful,
+/// short enough to expire like a session eventually should.
+const SESSION_TTL_SECONDS: f64 = 365.0 * 24.0 * 60.0 * 60.0;
+
+/// Gives every session cookie a persistent expiry, in place, and says how many
+/// it changed. A missing `expires` and a non-positive one are the same thing:
+/// CDP omits the field for a session cookie and reports -1 when reading one
+/// back, and `Storage.setCookies` treats -1 as a date in the past. A positive
+/// expiry is left exactly as the caller sent it, even when it is already past —
+/// that is how a caller asks for a cookie to be dropped, not rescued.
+fn persist_session_cookies(cookies: &mut [serde_json::Value], now: f64) -> usize {
+    let mut extended = 0;
+    for cookie in cookies {
+        let persistent = cookie
+            .get("expires")
+            .and_then(|v| v.as_f64())
+            .is_some_and(|e| e > 0.0);
+        if !persistent {
+            cookie["expires"] = serde_json::json!(now + SESSION_TTL_SECONDS);
+            extended += 1;
+        }
+    }
+    extended
 }
 
 /// What an import did, in enough detail to explain a number that looks wrong.
 pub struct Imported {
     pub accepted: usize,
-    /// Of those, how many have no expiry and will not survive the profile
-    /// closing.
-    pub session_only: usize,
+    /// Of those, how many had no expiry and were given one so they survive the
+    /// profile closing.
+    pub extended: usize,
     /// Entries that carried no name, or neither a domain nor a url.
     pub skipped: usize,
 }
@@ -317,6 +365,28 @@ mod tests {
         assert_eq!(out.len(), 2, "{out:?}");
         assert_eq!(out[0]["name"], "good");
         assert_eq!(out[1]["name"], "by-url");
+    }
+
+    #[test]
+    fn session_cookies_are_given_an_expiry_so_they_survive_the_close() {
+        let now = 1_700_000_000.0;
+        let mut cookies = vec![
+            serde_json::json!({ "name": "missing" }),
+            serde_json::json!({ "name": "minus-one", "expires": -1.0 }),
+            serde_json::json!({ "name": "zero", "expires": 0 }),
+            serde_json::json!({ "name": "kept", "expires": 1893456000.0 }),
+        ];
+        assert_eq!(persist_session_cookies(&mut cookies, now), 3);
+        for cookie in &cookies[..3] {
+            assert_eq!(
+                cookie["expires"].as_f64(),
+                Some(now + SESSION_TTL_SECONDS),
+                "{} was left as a session cookie",
+                cookie["name"]
+            );
+        }
+        // A caller-supplied expiry is not second-guessed, even a past one.
+        assert_eq!(cookies[3]["expires"].as_f64(), Some(1893456000.0));
     }
 
     #[tokio::test]

@@ -8,12 +8,12 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Fury — a free anti-detect browser</title>
+<title>XChange — a free anti-detect browser</title>
 <meta name="description" content="An anti-detect browser with an open core: its own Chromium {{CHROME_MAJOR}} fork, {{PATCHES}} patches in the repository, teamwork and a server of your own. Free, no per-profile fee and no telemetry.">
 <link rel="icon" href="icon.png">
-<meta property="og:title" content="Fury — a free anti-detect browser">
+<meta property="og:title" content="XChange — a free anti-detect browser">
 <meta property="og:description" content="Its own Chromium {{CHROME_MAJOR}} fork. A team costs nothing. Every spoofing vector measured and published.">
-<meta property="og:image" content="https://furybrowser.dev/logo.png">
+<meta property="og:image" content="https://xchange.dev/logo.png">
 <meta property="og:type" content="website">
 <style>
   :root {
@@ -132,7 +132,7 @@
 
 <div class="wrap">
   <div class="top">
-    <img src="logo.png" alt="Fury">
+    <img src="logo.png" alt="XChange">
     <div class="lang" role="group" aria-label="Language">
       <button type="button" data-lang="en" aria-pressed="true">Eng</button>
       <button type="button" data-lang="ru" aria-pressed="false">Рус</button>
@@ -193,7 +193,7 @@
        «создай десять профилей под Windows с этими прокси», «открой профили с меткой warm, проверь почту, закрой».
        Ассистент создаёт профили и прокси, открывает их, ходит по сайтам, кликает, вводит текст и прогревает профили.</p>
     <p class="dim">У других это «AI-агент» за кредиты, на их модели и их сервере, с доступом к вашим профилям.
-       Здесь MCP-сервер встроен в Fury и работает на вашей машине. Ассистент, аккаунт и ключ ваши,
+       Здесь MCP-сервер встроен в XChange и работает на вашей машине. Ассистент, аккаунт и ключ ваши,
        пароли прокси ему не передаются, удалить профиль насовсем он не может.</p>
   </section>
 
@@ -222,12 +222,12 @@
       <li><b>Стенд в комплекте.</b> <code>tools/detect-suite</code> снимает ~460 значений
         отпечатка в девяти контекстах исполнения — главный фрейм, воркеры, ворклет,
         четыре вида iframe, включая кросс-доменный в своём процессе.</li>
-      <li><b>Гейт.</b> <code>fury-detect gate</code> проверяет отпечаток на внутренние
+      <li><b>Гейт.</b> <code>xchange-detect gate</code> проверяет отпечаток на внутренние
         противоречия и возвращает ненулевой код — его можно поставить в CI.</li>
       <li><b>Отчёт в каждом релизе.</b> <code>REPORT.md</code> называет sha256 ядра,
         серию патчей и коммит, из которого всё собрано.</li>
       <li><b>Сравнение рядом.</b> <a href="https://github.com/{{REPO}}/blob/main/tools/detect-suite/status.html">status.html</a>
-        — последний замер: Fury и настоящий Chrome на одной машине, поле к полю.</li>
+        — последний замер: XChange и настоящий Chrome на одной машине, поле к полю.</li>
       <li><b>Сайты проверки.</b> Последний полный прогон 29–30.09.2026 на версии 0.2.10:
         pixelscan «No masking detected, consistent», iphey «Trustworthy» без сигналов,
         fv.pro и bot.sannysoft без замечаний, BrowserScan 90% без признаков бота.
@@ -273,7 +273,7 @@
   </section>
 
   <footer>
-    <p>Fury — инструмент приватности и управления несколькими аккаунтами: QA, проверка рекламы,
+    <p>XChange — инструмент приватности и управления несколькими аккаунтами: QA, проверка рекламы,
        исследования рынка, ведение нескольких легальных бизнес-аккаунтов.
        <a href="https://github.com/{{REPO}}/blob/main/ACCEPTABLE_USE.md">Допустимое использование</a>.</p>
     <p>AGPL-3.0-or-later. Независимый проект, не связанный с Google; Chromium используется
@@ -346,7 +346,7 @@
        "make ten Windows profiles with these proxies", "open the profiles tagged warm, check the inbox, close them".
        The assistant creates profiles and proxies, opens them, goes to sites, clicks, types and warms profiles up.</p>
     <p class="dim">Elsewhere this is an "AI agent" sold for credits, on their model and their server, with access to your profiles.
-       Here the MCP server is built into Fury and runs on your machine. The assistant, the account and the key are yours,
+       Here the MCP server is built into XChange and runs on your machine. The assistant, the account and the key are yours,
        proxy passwords never reach it, and it cannot erase a profile for good.</p>
   </section>
 
@@ -375,12 +375,12 @@
       <li><b>The bench ships with it.</b> <code>tools/detect-suite</code> dumps ~460 fingerprint
         values across nine execution contexts — main frame, workers, a worklet and four
         kinds of iframe, including a cross-origin one in its own process.</li>
-      <li><b>The gate.</b> <code>fury-detect gate</code> checks a fingerprint for internal
+      <li><b>The gate.</b> <code>xchange-detect gate</code> checks a fingerprint for internal
         contradictions and exits non-zero, so it drops straight into CI.</li>
       <li><b>A report in every release.</b> <code>REPORT.md</code> names the core's sha256, the
         patch series and the commit it was all built from.</li>
       <li><b>Side by side.</b> <a href="https://github.com/{{REPO}}/blob/main/tools/detect-suite/status.html">status.html</a>
-        is the last measurement: Fury and real Chrome on the same machine, field by field.</li>
+        is the last measurement: XChange and real Chrome on the same machine, field by field.</li>
       <li><b>Checker sites.</b> Last full run on 29–30.09.2026, version 0.2.10: pixelscan
         "No masking detected, consistent", iphey "Trustworthy" with no signals, fv.pro and
         bot.sannysoft clean, BrowserScan 90% with no bot detected. What they caught before
@@ -426,7 +426,7 @@
   </section>
 
   <footer>
-    <p>Fury is a privacy and multi-account management tool, built for QA, ad verification,
+    <p>XChange is a privacy and multi-account management tool, built for QA, ad verification,
        market research and running several legitimate business accounts.
        <a href="https://github.com/{{REPO}}/blob/main/ACCEPTABLE_USE.md">Acceptable use</a>.</p>
     <p>AGPL-3.0-or-later. An independent project, not affiliated with Google; Chromium is used
@@ -462,10 +462,10 @@
     blocks.forEach(function (b) { b.hidden = b.dataset.block !== lang; });
     buttons.forEach(function (b) { b.setAttribute('aria-pressed', String(b.dataset.lang === lang)); });
     document.documentElement.lang = lang;
-    try { localStorage.setItem('fury-lang', lang); } catch (e) { /* private window */ }
+    try { localStorage.setItem('xchange-lang', lang); } catch (e) { /* private window */ }
   }
   var stored = null;
-  try { stored = localStorage.getItem('fury-lang'); } catch (e) { /* ignore */ }
+  try { stored = localStorage.getItem('xchange-lang'); } catch (e) { /* ignore */ }
   apply(stored || 'en');
   buttons.forEach(function (b) {
     b.addEventListener('click', function () { apply(b.dataset.lang); });

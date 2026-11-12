@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright 2026 Bogdan Shapovalov and the Fury authors
+// Copyright 2026 Bogdan Shapovalov and the XChange authors
 
 //! A temporary directory that removes itself.
 //!
@@ -15,7 +15,7 @@ impl TempDir {
     /// A fresh directory tagged with what it is for, so a run interrupted
     /// before `Drop` leaves something identifiable rather than a bare uuid.
     pub fn new(tag: &str) -> Self {
-        let d = std::env::temp_dir().join(format!("fury-{tag}-{}", uuid::Uuid::now_v7()));
+        let d = std::env::temp_dir().join(format!("xchange-{tag}-{}", uuid::Uuid::now_v7()));
         std::fs::create_dir_all(&d).unwrap();
         Self(d)
     }

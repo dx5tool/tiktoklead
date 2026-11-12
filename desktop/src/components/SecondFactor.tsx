@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright 2026 Bogdan Shapovalov and the Fury authors
+// Copyright 2026 Bogdan Shapovalov and the XChange authors
 
 import { useCallback, useEffect, useState } from "react";
 import { api, type SessionRow } from "../api";
@@ -36,7 +36,7 @@ export function SecondFactor() {
     void load();
   }, [load]);
 
-  const mustEnrol = sessionStorage.getItem("fury.mustEnrolTotp") === "1";
+  const mustEnrol = sessionStorage.getItem("xchange.mustEnrolTotp") === "1";
 
   return (
     <div className="settingsGroup">
@@ -95,7 +95,7 @@ export function SecondFactor() {
                     setError(null);
                     try {
                       await api.totpConfirm(code);
-                      sessionStorage.removeItem("fury.mustEnrolTotp");
+                      sessionStorage.removeItem("xchange.mustEnrolTotp");
                       setSetup(null);
                       await load();
                     } catch (e) {

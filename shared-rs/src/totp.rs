@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright 2026 Bogdan Shapovalov and the Fury authors
+// Copyright 2026 Bogdan Shapovalov and the XChange authors
 
 //! Time-based one-time passwords — RFC 6238, and what a shared account needs
 //! from them.
@@ -258,7 +258,7 @@ impl std::fmt::Display for Error {
             Self::BadUri => "this otpauth:// link is malformed",
             Self::NotTotp => {
                 "this is an otpauth://hotp link, which counts logins rather than \
-                 seconds. Fury generates time-based codes only"
+                 seconds. XChange generates time-based codes only"
             }
             Self::NoSecret => "this otpauth:// link carries no secret",
         };

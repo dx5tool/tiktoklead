@@ -1,6 +1,6 @@
 # An issue with a probe dump becomes a pull request with a persona.
 #
-# The manual path — checkout, cargo, `fury-detect persona`, personas-check,
+# The manual path — checkout, cargo, `xchange-detect persona`, personas-check,
 # PR — is why the catalogue had 27 machines and two of them measured
 # (docs/16, 3.4). This runs that path for the person who dropped a file into
 # the form, and comments on their issue with the result either way.
@@ -79,8 +79,8 @@ jobs:
           N: ${{ github.event.issue.number }}
         run: |
           set -euo pipefail
-          cargo build -q -p fury-detect
-          if ! ./target/debug/fury-detect persona capture.json --weight "$WEIGHT" > persona.json 2> convert.log; then
+          cargo build -q -p xchange-detect
+          if ! ./target/debug/xchange-detect persona capture.json --weight "$WEIGHT" > persona.json 2> convert.log; then
             echo "ok=false" >> "$GITHUB_OUTPUT"; exit 0
           fi
           id=$(python3 -c 'import json; print(json.load(open("persona.json"))["id"])')
@@ -103,7 +103,7 @@ jobs:
           json.dump(ordered, open(f"shared/personas/contributed/{id}.json", "w", encoding="utf-8"), indent=2, ensure_ascii=False)
           open(f"shared/personas/contributed/{id}.json", "a").write("\n")
           PY
-          if ./target/debug/fury-detect personas-check > check.log 2>&1; then
+          if ./target/debug/xchange-detect personas-check > check.log 2>&1; then
             echo "ok=true" >> "$GITHUB_OUTPUT"
             echo "id=$id" >> "$GITHUB_OUTPUT"
           else
@@ -125,7 +125,7 @@ jobs:
           body: |
             `${{ steps.capture.outputs.machine }}` — ${{ steps.capture.outputs.display }}.
             Sent by @${{ github.event.issue.user.login }} in #${{ github.event.issue.number }}; converted with
-            `fury-detect persona`, `personas-check` passes. Weight ${{ steps.capture.outputs.weight }} from the
+            `xchange-detect persona`, `personas-check` passes. Weight ${{ steps.capture.outputs.weight }} from the
             contributor's own guess — adjust from public distributions when merging (contributed/README.md).
 
             Closes #${{ github.event.issue.number }}.
@@ -144,5 +144,5 @@ jobs:
             const log = fs.existsSync('convert.log') ? fs.readFileSync('convert.log', 'utf8').trim().slice(0, 3000) : '';
             const body = ok
               ? `Thank you. The machine is \`${process.env.ID}\`; a pull request with the persona is open under your name and will close this issue when merged.`
-              : `The capture could not be turned into a persona. What the converter said:\n\n\`\`\`\n${log || 'no output'}\n\`\`\`\n\nMost often this is a dump from Fury or another modified browser rather than ordinary Chrome, or a file that was not the probe's JSON. Edit the issue with a new file and the workflow runs again.`;
+              : `The capture could not be turned into a persona. What the converter said:\n\n\`\`\`\n${log || 'no output'}\n\`\`\`\n\nMost often this is a dump from XChange or another modified browser rather than ordinary Chrome, or a file that was not the probe's JSON. Edit the issue with a new file and the workflow runs again.`;
             await github.rest.issues.createComment({ ...context.repo, issue_number: context.issue.number, body });

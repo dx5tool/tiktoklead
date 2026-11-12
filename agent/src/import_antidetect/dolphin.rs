@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright 2026 Bogdan Shapovalov and the Fury authors
+// Copyright 2026 Bogdan Shapovalov and the XChange authors
 
 //! Dolphin{anty}, through its cloud API (OpenAPI "Dolphin{anty} Public API"
 //! v1.0.7, docs.dolphin-anty-cdn.com). Token: dolphin-anty.com/panel, API.

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-# Copyright 2026 Bogdan Shapovalov and the Fury authors
+# Copyright 2026 Bogdan Shapovalov and the XChange authors
 #
 # What can honestly be checked on a hosted runner.
 #
@@ -34,7 +34,7 @@ jobs:
   #     error: failed to run custom build command for `gobject-sys v0.18.0`
   #     The system library `gobject-2.0` was not found.
   #
-  # fury-desktop is Tauri, and on Linux Tauri is GTK and WebKitGTK. On macOS it
+  # xchange-desktop is Tauri, and on Linux Tauri is GTK and WebKitGTK. On macOS it
   # is WKWebView and on Windows it is WebView2, so that dependency exists on
   # exactly the platform this project does not ship. Installing a GTK stack on
   # the runner would have made the red tick go away and would have tested the
@@ -52,11 +52,11 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      # --exclude fury-desktop, not --exclude tauri: the crate is what pulls
+      # --exclude xchange-desktop, not --exclude tauri: the crate is what pulls
       # GTK, and naming the crate says which platform decision is behind it.
-      - run: cargo test --workspace --exclude fury-desktop --all-targets
+      - run: cargo test --workspace --exclude xchange-desktop --all-targets
       - name: cargo build --release
-        run: cargo build --release --workspace --exclude fury-desktop
+        run: cargo build --release --workspace --exclude xchange-desktop
 
   shell-rust:
     name: cargo test (the shell, on macOS)
@@ -66,13 +66,13 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       # The sidecar has to exist before the shell's Rust will compile at all.
-      # tauri.conf.json declares externalBin: ["binaries/fury-agent"], and
-      # tauri-build resolves that to binaries/fury-agent-<target-triple> in its
+      # tauri.conf.json declares externalBin: ["binaries/xchange-agent"], and
+      # tauri-build resolves that to binaries/xchange-agent-<target-triple> in its
       # build script. desktop/src-tauri/binaries/ is gitignored — a 7 MB binary
       # per platform has no business in the history — so a fresh checkout does
       # not have one and the build script stops with
       #
-      #     resource path `binaries/fury-agent-aarch64-apple-darwin` doesn't exist
+      #     resource path `binaries/xchange-agent-aarch64-apple-darwin` doesn't exist
       #
       # scripts/sidecar.mjs builds the agent and puts it there under the right
       # name, which is the same script a release uses.
@@ -101,7 +101,7 @@ jobs:
 
       # The port's riskiest code — named pipes, security descriptors, handle
       # inheritance, six unsafe FFI calls — lives in one crate precisely so this
-      # job can exist. `cargo check -p fury-agent --target
+      # job can exist. `cargo check -p xchange-agent --target
       # x86_64-pc-windows-msvc` does NOT work: ring's build script wants a
       # Windows C toolchain and ring arrives through both sqlx and reqwest, so
       # without the split this would all be written blind and first compiled on
@@ -118,7 +118,7 @@ jobs:
       # handle survives CreateProcess, that a pipe is not squatted. Those need a
       # running Windows — tools/verify-windows.ps1.
       - name: the Windows surface type-checks
-        run: cargo check -p fury-platform --target x86_64-pc-windows-msvc --all-targets
+        run: cargo check -p xchange-platform --target x86_64-pc-windows-msvc --all-targets
 
       # Windows PowerShell 5.1 -- what `powershell.exe` still is on Windows 11 --
       # reads a .ps1 as Windows-1252 unless the file carries a UTF-8 BOM. Every
@@ -145,11 +145,11 @@ jobs:
       - name: nothing heavy crept into the platform crate
         run: |
           set -euo pipefail
-          deps=$(cargo tree -p fury-platform --target x86_64-pc-windows-msvc \
+          deps=$(cargo tree -p xchange-platform --target x86_64-pc-windows-msvc \
                  --prefix none --no-dedupe | awk '{print $1}' | sort -u)
           for banned in ring aws-lc-sys openssl-sys libsqlite3-sys; do
             if grep -qx "$banned" <<<"$deps"; then
-              echo "!! $banned is in fury-platform's dependency graph."
+              echo "!! $banned is in xchange-platform's dependency graph."
               echo "   It needs a Windows C toolchain, so the cross-check above"
               echo "   stops working on a developer's Mac and the Windows code"
               echo "   goes back to being written blind."
@@ -157,7 +157,7 @@ jobs:
               exit 1
             fi
           done
-          echo "fury-platform is still checkable from a Mac"
+          echo "xchange-platform is still checkable from a Mac"
 
   desktop:
     name: shell typecheck and build
@@ -255,13 +255,13 @@ jobs:
       # A capture is taken by running a browser on somebody's real machine, so
       # this recurs on every measurement anybody ever takes. The .gitignore
       # holds until somebody types `git add -f`.
-      - run: cargo run -p fury-detect -- redact --check
+      - run: cargo run -p xchange-detect -- redact --check
       # A contributed persona is a pull request with one JSON file. This is
       # the whole review the file gets from a machine: it parses, validates,
       # does not reuse an id, says "capture" and not "measured", and carries no
       # address. What it cannot check -- that the machine exists -- is what the
       # PR template asks the contributor.
-      - run: cargo run -p fury-detect -- personas-check
+      - run: cargo run -p xchange-detect -- personas-check
       # The ServiceWorker payload is generated from the Worker's. If they drift,
       # a capture reports a cross-context disagreement that belongs to the
       # harness rather than to the browser — the one false positive the headline
@@ -307,10 +307,10 @@ jobs:
       # deploy/server-install.sh creates and the only arrangement these tests
       # mean anything in.
       #
-      # The first version let the image create POSTGRES_USER=fury, and the
+      # The first version let the image create POSTGRES_USER=xchange, and the
       # image makes that role a superuser. A superuser bypasses row security
       # outright — measured: as `postgres`, an unbound connection saw all three
-      # projects; as `fury`, it saw none — so every RLS test would have run
+      # projects; as `xchange`, it saw none — so every RLS test would have run
       # against a database where the policies did not apply. They would have
       # failed rather than passed silently, which is the better direction, but a
       # security job that cannot run is not a security job.
@@ -318,20 +318,20 @@ jobs:
         env:
           PGPASSWORD: postgres
         run: |
-          psql -h 127.0.0.1 -U postgres -c "CREATE ROLE fury LOGIN PASSWORD 'fury';"
-          psql -h 127.0.0.1 -U postgres -c "CREATE DATABASE fury OWNER fury;"
+          psql -h 127.0.0.1 -U postgres -c "CREATE ROLE xchange LOGIN PASSWORD 'xchange';"
+          psql -h 127.0.0.1 -U postgres -c "CREATE DATABASE xchange OWNER xchange;"
           psql -h 127.0.0.1 -U postgres -tAc \
-            "SELECT rolsuper OR rolbypassrls FROM pg_roles WHERE rolname = 'fury'" \
-            | grep -qx f || { echo "!! fury can bypass row security — the tests would prove nothing"; exit 1; }
+            "SELECT rolsuper OR rolbypassrls FROM pg_roles WHERE rolname = 'xchange'" \
+            | grep -qx f || { echo "!! xchange can bypass row security — the tests would prove nothing"; exit 1; }
 
-      - run: cargo test -p fury-server
+      - run: cargo test -p xchange-server
         env:
-          DATABASE_URL: postgres://fury:fury@127.0.0.1:5432/fury
+          DATABASE_URL: postgres://xchange:xchange@127.0.0.1:5432/xchange
           # For the one assertion that needs to read past the policies: an audit
           # row orphaned by a deleted organisation is invisible to every
           # application user by design, so only a superuser can confirm it
           # survived.
-          DATABASE_SUPERUSER_URL: postgres://postgres:postgres@127.0.0.1:5432/fury
+          DATABASE_SUPERUSER_URL: postgres://postgres:postgres@127.0.0.1:5432/xchange
 
   licensing:
     name: every file says what it is
@@ -343,7 +343,8 @@ jobs:
           set -euo pipefail
           missing=0
           for f in $(git ls-files '*.rs' '*.ts' '*.tsx' '*.py' '*.sh' \
-                     | grep -v '^core/patches/'); do
+                     | grep -v '^core/patches/' \
+                     | grep -v '^agent/vendor/'); do
             head -5 "$f" | grep -q 'SPDX-License-Identifier' || {
               echo "!! no SPDX header: $f"; missing=1; }
           done

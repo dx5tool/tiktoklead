@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright 2026 Bogdan Shapovalov and the Fury authors
+// Copyright 2026 Bogdan Shapovalov and the XChange authors
 
-//! The parts of Fury that differ between operating systems.
+//! The parts of XChange that differ between operating systems.
 //!
 //! Everything here was in the agent until Windows came along, and moving it out
 //! was not tidying. It was the only way to check it.
 //!
-//! `cargo check -p fury-agent --target x86_64-pc-windows-msvc` does not run on
+//! `cargo check -p xchange-agent --target x86_64-pc-windows-msvc` does not run on
 //! a Mac. It fails in `ring`'s build script, which wants a Windows C toolchain,
 //! and `ring` arrives through both sqlx and reqwest, so there is no feature
 //! flag that removes it. The consequence is that the riskiest code in the port
@@ -42,6 +42,7 @@
 
 pub mod carrier;
 pub mod dirs;
+pub mod fdlimit;
 pub mod ipc;
 pub mod perms;
 pub mod process;
@@ -51,6 +52,7 @@ pub mod version;
 
 pub use carrier::Carrier;
 pub use dirs::{data_dir, ipc_endpoint, short_tag};
+pub use fdlimit::{is_out_of_descriptors, raise_fd_limit};
 pub use ipc::{Endpoint, Listener, Stream};
 pub use process::ask_to_close;
 pub use tree::copy_tree;

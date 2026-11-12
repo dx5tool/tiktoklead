@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: AGPL-3.0-or-later
-# Copyright 2026 Bogdan Shapovalov and the Fury authors
+# Copyright 2026 Bogdan Shapovalov and the XChange authors
 
 """Serve probe.html and accept dumps posted back to disk.
 
 Why this exists: capturing a baseline means opening probe.html inside the browser
-under test — real Chrome, AdsPower, Fury — and getting the JSON out. Downloading
+under test — real Chrome, AdsPower, XChange — and getting the JSON out. Downloading
 it by hand and moving the file works but is slow and error-prone when you are
 capturing a dozen of them, and browsers under test often have downloads locked
 down. So the page POSTs its dump straight into ./baselines/.
@@ -90,7 +90,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         # two bytes short -- a body that is complete on the wire arrives as
         # `\r\n{...` with its last brace missing, and json fails at the final
         # character with "Expecting ',' delimiter". That reads exactly like
-        # truncation and is not. Measured 10.09.2026 on a Fury profile posting
+        # truncation and is not. Measured 10.09.2026 on an XChange profile posting
         # through the relay; the same POST direct from a bare browser is clean.
         body = raw.lstrip(b"\r\n")
         if len(body) < length:

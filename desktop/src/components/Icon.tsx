@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright 2026 Bogdan Shapovalov and the Fury authors
+// Copyright 2026 Bogdan Shapovalov and the XChange authors
 
 /** The line icons the toolbars use.
  *
@@ -21,6 +21,9 @@ const P = {
   share:
     "M4 12v7a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7M12 3v13M12 3 8 7M12 3l4 4",
   upload: "M12 20V8M12 4 7 9M12 4l5 5M4 20h16",
+  /** The mirror of it: something arriving rather than leaving. Paired with
+   *  `upload` on the two buttons that move cookies between a file and the box. */
+  download: "M12 4v12M12 20 7 15M12 20l5-5M4 4h16",
   copy: "M9 9h10v10a1 1 0 0 1-1 1H9a1 1 0 0 1-1-1V9ZM6 15H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h9a1 1 0 0 1 1 1v1",
   cookie:
     "M21 12a9 9 0 1 1-9-9 3 3 0 0 0 3 3 3 3 0 0 0 3 3 3 3 0 0 0 3 3ZM9 10h.01M8 15h.01M13 15h.01M15 11h.01",
@@ -39,6 +42,15 @@ const P = {
   /** Two people: somebody else holds this too. */
   people:
     "M9 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM3 20a6 6 0 0 1 12 0M16 5.5a3 3 0 0 1 0 5.8M18 20a5.5 5.5 0 0 0-2-4.2",
+  /** A padlock: who may open this profile -- its access, not its secrets. */
+  lock: "M7 11h10a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1ZM8.5 11V8a3.5 3.5 0 0 1 7 0v3M12 15v2",
+  /** Leaving the application: a link that opens in the browser. */
+  external: "M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5",
+  mail: "M5 6h14a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1ZM4.5 7l7.5 6 7.5-6",
+  globe:
+    "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18ZM3 12h18M12 3c2.5 2.6 3.8 5.6 3.8 9s-1.3 6.4-3.8 9c-2.5-2.6-3.8-5.6-3.8-9S9.5 5.6 12 3Z",
+  /** A paper plane: write to someone (Telegram). */
+  send: "M21 3 10 14M21 3l-7 18-4-7-7-4 18-7Z",
 } as const;
 
 export type IconName = keyof typeof P;

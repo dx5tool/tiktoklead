@@ -40,7 +40,7 @@ def find_core():
 def derive_config(dest):
     """A real persona config, from the catalogue, via the agent's own CLI."""
     out = subprocess.run(
-        ["cargo", "run", "-q", "-p", "fury-agent", "--", "check-fingerprint", "-"],
+        ["cargo", "run", "-q", "-p", "xchange-agent", "--", "check-fingerprint", "-"],
         cwd=ROOT, capture_output=True, text=True,
     )
     # check-fingerprint validates the built-in sample and prints it; if the
@@ -57,7 +57,7 @@ CORE = find_core()
 cfg = pathlib.Path(tempfile.mkdtemp()) / "config.json"
 derive_config(cfg)
 
-d = tempfile.mkdtemp(prefix="fury-ci-")
+d = tempfile.mkdtemp(prefix="xchange-ci-")
 fd = os.open(cfg, os.O_RDONLY)
 os.set_inheritable(fd, True)
 p = subprocess.Popen(
@@ -121,6 +121,6 @@ if cc.get("disagreements"):
     print(json.dumps(cc["disagreements"], indent=1)[:1200], file=sys.stderr)
     sys.exit(1)
 
-gate = subprocess.run(["cargo", "run", "-q", "-p", "fury-detect", "--", "gate", str(out)],
+gate = subprocess.run(["cargo", "run", "-q", "-p", "xchange-detect", "--", "gate", str(out)],
                       cwd=ROOT)
 sys.exit(gate.returncode)

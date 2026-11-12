@@ -11,7 +11,7 @@
 --
 -- The text is a persona and nothing else. It describes a machine -- screen,
 -- GPU, fonts, voices -- and no network or account fields, which is what the
--- capture's own conversion guarantees (fury-detect persona, personas-check).
+-- capture's own conversion guarantees (xchange-detect persona, personas-check).
 
 CREATE TABLE org_personas (
     org_id      UUID        NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,

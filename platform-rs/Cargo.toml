@@ -1,12 +1,12 @@
 [package]
-name = "fury-platform"
+name = "xchange-platform"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "The parts of Fury that differ per operating system, kept apart so they can be checked"
+description = "The parts of XChange that differ per operating system, kept apart so they can be checked"
 
 [dependencies]
-# Deliberately thin. This crate exists so that `cargo check -p fury-platform
+# Deliberately thin. This crate exists so that `cargo check -p xchange-platform
 # --target x86_64-pc-windows-msvc` runs on a developer's Mac, and that is only
 # true while nothing here pulls a dependency with a build script that needs a
 # Windows C toolchain. `ring` is the one that bites: the agent depends on it
@@ -14,7 +14,7 @@ description = "The parts of Fury that differ per operating system, kept apart so
 # on this machine and checking this crate does not.
 #
 # Before adding a dependency here, run:
-#     cargo check -p fury-platform --target x86_64-pc-windows-msvc
+#     cargo check -p xchange-platform --target x86_64-pc-windows-msvc
 # If it stops working, the dependency does not belong in this crate.
 tokio = { workspace = true }
 # Pure Rust, no build script — checked against the rule above and it holds.

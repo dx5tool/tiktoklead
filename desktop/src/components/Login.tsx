@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright 2026 Bogdan Shapovalov and the Fury authors
+// Copyright 2026 Bogdan Shapovalov and the XChange authors
 
+import { Brand } from "./Brand";
 import { useEffect, useState } from "react";
 import { useI18n } from "../i18n";
 import { api, type Shell } from "../api";
@@ -13,7 +14,10 @@ export function Login({
   unlockFor,
   awaitingKey,
   lastEmail,
+  version,
 }: {
+  /** This build's version, shown under the name (Brand). */
+  version?: string;
   onSuccess: () => void;
   /** There is no registration form, so the only way to a first account is an
    *  invitation — and this screen is where someone holding one arrives. */
@@ -51,6 +55,13 @@ export function Login({
   // challenge to answer it against.
   const [challenge, setChallenge] = useState<string | null>(null);
   const [code, setCode] = useState("");
+  // The verification code the person letting us in will ask for, computed
+  // from the key this machine made (crypto::verify_code).
+  const [ownCode, setOwnCode] = useState<string | null | undefined>(undefined);
+  useEffect(() => {
+    if (!awaitingKey) return;
+    void api.ownVerifyCode().then(setOwnCode, () => setOwnCode(null));
+  }, [awaitingKey]);
   const { t } = useI18n();
 
   const submit = async (e: React.FormEvent) => {
@@ -70,7 +81,7 @@ export function Login({
         // Told, not blocked: the sign-in stands, and Settings has the
         // enrolment. Locking people out the day a policy changes is how
         // policies get turned off.
-        sessionStorage.setItem("fury.mustEnrolTotp", "1");
+        sessionStorage.setItem("xchange.mustEnrolTotp", "1");
       }
       // Unlocking is not the same as signing in, and it is only the second one
       // that this call finishing means. A member whose key has not been handed
@@ -194,8 +205,20 @@ export function Login({
   if (awaitingKey) {
     return (
       <div className="login">
-        <h1>Fury</h1>
+        <Brand version={version} />
         {unlockFor && <p className="center">{unlockFor}</p>}
+        {/* First, because it is the one thing on this screen the person can
+            do something with: say it to whoever invited them. */}
+        {ownCode && (
+          <div className="center" style={{ margin: "var(--s-2) 0" }}>
+            <div className="small">{t("auth.verifyCodeIs")}</div>
+            <div className="mono" style={{ fontSize: 26, letterSpacing: 2, margin: "var(--s-1) 0", userSelect: "all" }}>
+              {ownCode}
+            </div>
+            <div className="hint small">{t("auth.verifyCodeWhy")}</div>
+          </div>
+        )}
+        {ownCode === null && <p className="hint small center">{t("auth.verifyCodeAfterSignIn")}</p>}
         <p className="warn small center">{t("auth.awaitingKey")}</p>
         {error && <p className="error center">{error}</p>}
         {waited && <p className="hint">{t("auth.stillWaiting")}</p>}
@@ -215,7 +238,7 @@ export function Login({
 
   return (
     <form className="login" onSubmit={submit}>
-      <h1>Fury</h1>
+      <Brand version={version} />
       {unlockFor && <p className="muted center">{t("auth.unlockWhy")}</p>}
       <input
         type="email"

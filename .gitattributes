@@ -30,5 +30,8 @@
 *.gn  text eol=lf
 *.gni text eol=lf
 
+# Hooks run under sh; a CRLF shebang fails the same way a CRLF .sh does.
+/.githooks/* text eol=lf
+
 # PowerShell is the one place CRLF is the native convention.
 *.ps1 text eol=crlf

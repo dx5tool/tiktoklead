@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: AGPL-3.0-or-later
-# Copyright 2026 Bogdan Shapovalov and the Fury authors
+# Copyright 2026 Bogdan Shapovalov and the XChange authors
 
 #
-# Install a Fury server on a fresh Ubuntu box. Run as root, on the server.
+# Install an XChange server on a fresh Ubuntu box. Run as root, on the server.
 #
 # Native rather than Docker, deliberately: this runs on the smallest VPS anyone
 # will rent, and a daemon plus an image layer to hold one 12 MB binary and one
@@ -12,9 +12,9 @@
 # which matters the day something is wrong at an hour nobody wants to debug
 # container networking.
 #
-# Idempotent: safe to re-run to upgrade. Everything it creates is named `fury`.
+# Idempotent: safe to re-run to upgrade. Everything it creates is named `xchange`.
 #
-#   HOSTNAME=fury.example.com ./server-install.sh
+#   HOSTNAME=xchange.example.com ./server-install.sh
 #
 # HOSTNAME is what the certificate is issued for and what operators type into
 # the app. With no domain, pass the sslip.io form of the address — it resolves
@@ -27,12 +27,12 @@
 # saved its old address -- Caddy issues a certificate for each, and nobody has
 # to retype anything:
 #
-#   HOSTNAME=fury.example.com ALIASES=203-0-113-7.sslip.io ./server-install.sh
+#   HOSTNAME=xchange.example.com ALIASES=203-0-113-7.sslip.io ./server-install.sh
 set -euo pipefail
 
 HOSTNAME="${HOSTNAME:?set HOSTNAME to the name this server answers to}"
 ALIASES="${ALIASES:-}"
-SRC="${SRC:-/opt/fury/src}"
+SRC="${SRC:-/opt/xchange/src}"
 say() { printf '\n\033[1m==> %s\033[0m\n' "$*"; }
 
 # Swap, on a box that has none.
@@ -75,31 +75,31 @@ if ! command -v caddy >/dev/null; then
 fi
 
 say "User and directories"
-id fury >/dev/null 2>&1 || useradd --system --home /var/lib/fury --shell /usr/sbin/nologin fury
+id xchange >/dev/null 2>&1 || useradd --system --home /var/lib/xchange --shell /usr/sbin/nologin xchange
 # The bundles are the profiles: cookie jars for live accounts, encrypted, but
 # still the thing a competitor would most like. Nothing else on the box reads
 # this directory.
-install -d -o fury -g fury -m 0700 /var/lib/fury /var/lib/fury/bundles
-install -d -o root -g fury -m 0750 /etc/fury
+install -d -o xchange -g xchange -m 0700 /var/lib/xchange /var/lib/xchange/bundles
+install -d -o root -g xchange -m 0750 /etc/xchange
 
 say "Database"
-DB_PASS_FILE=/etc/fury/db-password
+DB_PASS_FILE=/etc/xchange/db-password
 if [ ! -f "$DB_PASS_FILE" ]; then
     # Generated here and never printed. A password in the installer's output is
     # a password in somebody's terminal scrollback and then in a screenshot.
     head -c 24 /dev/urandom | base64 | tr -d '/+=' > "$DB_PASS_FILE"
-    chmod 0640 "$DB_PASS_FILE"; chown root:fury "$DB_PASS_FILE"
+    chmod 0640 "$DB_PASS_FILE"; chown root:xchange "$DB_PASS_FILE"
 fi
 DB_PASS="$(cat "$DB_PASS_FILE")"
 
-sudo -u postgres psql -tAc "SELECT 1 FROM pg_roles WHERE rolname='fury'" | grep -q 1 \
-    || sudo -u postgres psql -qc "CREATE ROLE fury LOGIN PASSWORD '${DB_PASS}'"
-sudo -u postgres psql -qc "ALTER ROLE fury PASSWORD '${DB_PASS}'"
-sudo -u postgres psql -tAc "SELECT 1 FROM pg_database WHERE datname='fury'" | grep -q 1 \
-    || sudo -u postgres createdb -O fury fury
+sudo -u postgres psql -tAc "SELECT 1 FROM pg_roles WHERE rolname='xchange'" | grep -q 1 \
+    || sudo -u postgres psql -qc "CREATE ROLE xchange LOGIN PASSWORD '${DB_PASS}'"
+sudo -u postgres psql -qc "ALTER ROLE xchange PASSWORD '${DB_PASS}'"
+sudo -u postgres psql -tAc "SELECT 1 FROM pg_database WHERE datname='xchange'" | grep -q 1 \
+    || sudo -u postgres createdb -O xchange xchange
 # citext is used for email addresses, so that Bogdan@ and bogdan@ are one
 # account rather than two people who cannot see each other's work.
-sudo -u postgres psql -q -d fury -c "CREATE EXTENSION IF NOT EXISTS citext"
+sudo -u postgres psql -q -d xchange -c "CREATE EXTENSION IF NOT EXISTS citext"
 
 say "Server binary"
 # The release's own binary when there is one, and a build only when there is
@@ -119,15 +119,15 @@ case "$(uname -m)" in
 esac
 PREBUILT=""
 if [ "${FURY_BUILD_FROM_SOURCE:-0}" != "1" ] && [ -n "$FURY_VER" ] && [ -n "$FURY_ARCH" ]; then
-    URL="https://github.com/furyteamtop/fury-antidetect-browser/releases/download/v$FURY_VER/fury-server-$FURY_VER-linux-$FURY_ARCH.tar.gz"
+    URL="https://github.com/dx5tool/fury-nomaster/releases/download/v$FURY_VER/xchange-server-$FURY_VER-linux-$FURY_ARCH.tar.gz"
     DL="$(mktemp -d)"
     if curl -fsSL "$URL" -o "$DL/server.tar.gz" && curl -fsSL "$URL.sha256" -o "$DL/server.sha256" \
         && echo "$(cut -d' ' -f1 "$DL/server.sha256")  $DL/server.tar.gz" | sha256sum -c --quiet \
         && tar -xzf "$DL/server.tar.gz" -C "$DL" \
-        && [ "$("$DL/fury-server" --version)" = "fury-server $FURY_VER" ]; then
-        install -o root -g root -m 0755 "$DL/fury-server" /usr/local/bin/fury-server
+        && [ "$("$DL/xchange-server" --version)" = "xchange-server $FURY_VER" ]; then
+        install -o root -g root -m 0755 "$DL/xchange-server" /usr/local/bin/xchange-server
         PREBUILT=1
-        echo "   fury-server $FURY_VER for $FURY_ARCH, from the release, checksum verified"
+        echo "   xchange-server $FURY_VER for $FURY_ARCH, from the release, checksum verified"
     else
         echo "   no ready binary for $FURY_VER on $FURY_ARCH; building it here instead"
     fi
@@ -165,8 +165,8 @@ else
 fi
 
 cd "$SRC"
-cargo build --release -p fury-server
-install -o root -g root -m 0755 target/release/fury-server /usr/local/bin/fury-server
+cargo build --release -p xchange-server
+install -o root -g root -m 0755 target/release/xchange-server /usr/local/bin/xchange-server
 fi
 
 say "Configuration"
@@ -183,14 +183,14 @@ say "Configuration"
 # install gets; new settings added later are appended by the block after it,
 # which only ever adds keys that are missing and never changes one that is
 # there.
-if [ -f /etc/fury/fury.env ]; then
-    say "Keeping the existing /etc/fury/fury.env"
+if [ -f /etc/xchange/xchange.env ]; then
+    say "Keeping the existing /etc/xchange/xchange.env"
     # Anything this version knows about and the file does not. Appended with
     # its default, so an old installation gains a new knob without losing an
     # old choice.
     add_setting() {
-        grep -qE "^${1}=" /etc/fury/fury.env || {
-            printf '\n# %s\n%s=%s\n' "$3" "$1" "$2" >> /etc/fury/fury.env
+        grep -qE "^${1}=" /etc/xchange/xchange.env || {
+            printf '\n# %s\n%s=%s\n' "$3" "$1" "$2" >> /etc/xchange/xchange.env
             echo "   added ${1}=${2}"
         }
     }
@@ -198,20 +198,22 @@ if [ -f /etc/fury/fury.env ]; then
     add_setting FURY_MAX_PROFILES_PER_ORG "" "Profiles one organisation may hold. Empty means no limit."
     add_setting FURY_MAX_STORAGE_PER_ORG "" "Bundle bytes per organisation. Empty means no limit."
     add_setting FURY_KEEP_BUNDLE_VERSIONS "10" "Bundle versions kept per profile. 0 keeps everything."
+    add_setting FURY_SMTP_URL "" "Mail for confirming invited addresses, e.g. smtps://user:pass@smtp.example.com:465. Empty: invitation codes are not confirmed by email."
+    add_setting FURY_MAIL_FROM "" "Sender of those letters, e.g. XChange <noreply@example.com>. Needed when FURY_SMTP_URL is set."
 else
-cat > /etc/fury/fury.env <<ENV
-DATABASE_URL=postgres://fury:${DB_PASS}@127.0.0.1:5432/fury
+cat > /etc/xchange/xchange.env <<ENV
+DATABASE_URL=postgres://xchange:${DB_PASS}@127.0.0.1:5432/xchange
 # Loopback only. Caddy terminates TLS and forwards; nothing reaches the
 # application except through it, so a misconfigured firewall cannot expose
 # plain HTTP carrying session tokens.
 BIND=127.0.0.1:8901
-FURY_BUNDLE_DIR=/var/lib/fury/bundles
-RUST_LOG=fury_server=info,tower_http=warn
+FURY_BUNDLE_DIR=/var/lib/xchange/bundles
+RUST_LOG=xchange_server=info,tower_http=warn
 # Whether a stranger who finds this address may make themselves an account.
 #
 # Off. A self-hosted server is somebody's own machine, and "yes" is not a
 # default anyone should inherit by installing something. Set it to 1 to run a
-# server other people can join, then restart: systemctl restart fury-server.
+# server other people can join, then restart: systemctl restart xchange-server.
 #
 # It is less alarming than it sounds — every sign-up creates its OWN
 # organisation, and an organisation is the boundary every query already filters
@@ -258,23 +260,36 @@ FURY_MAX_STORAGE_PER_ORG=
 # a profile opened ten times a day grows by ten bundles a day, for ever, and a
 # storage quota fills up from ordinary use. 0 keeps everything.
 FURY_KEEP_BUNDLE_VERSIONS=10
+
+# Mail, for one thing: confirming that whoever redeems an invitation reads the
+# inbox it was issued for. Without it an invitation code works for whoever
+# types it first, so it has to travel privately. With it, redeeming a code also
+# takes six digits the server emails to the invited address. Any SMTP service
+# works; check the log after a restart for "mail: on".
+#
+#   FURY_SMTP_URL=smtps://user:password@smtp.example.com:465
+#   FURY_SMTP_URL=smtp://user:password@smtp.example.com:587?tls=required
+#   FURY_MAIL_FROM=XChange <noreply@example.com>
+#
+FURY_SMTP_URL=
+FURY_MAIL_FROM=
 ENV
 fi
-chmod 0640 /etc/fury/fury.env; chown root:fury /etc/fury/fury.env
+chmod 0640 /etc/xchange/xchange.env; chown root:xchange /etc/xchange/xchange.env
 
-cat > /etc/systemd/system/fury-server.service <<'UNIT'
+cat > /etc/systemd/system/xchange-server.service <<'UNIT'
 [Unit]
-Description=Fury server
+Description=XChange server
 After=network-online.target postgresql.service
 Wants=network-online.target
 Requires=postgresql.service
 
 [Service]
 Type=simple
-User=fury
-Group=fury
-EnvironmentFile=/etc/fury/fury.env
-ExecStart=/usr/local/bin/fury-server
+User=xchange
+Group=xchange
+EnvironmentFile=/etc/xchange/xchange.env
+ExecStart=/usr/local/bin/xchange-server
 Restart=on-failure
 RestartSec=5
 
@@ -292,7 +307,7 @@ RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
 RestrictNamespaces=true
 LockPersonality=true
 MemoryDenyWriteExecute=true
-ReadWritePaths=/var/lib/fury
+ReadWritePaths=/var/lib/xchange
 
 [Install]
 WantedBy=multi-user.target
@@ -330,18 +345,18 @@ ufw --force enable >/dev/null
 
 say "Start"
 systemctl daemon-reload
-systemctl enable --now postgresql fury-server caddy
-systemctl restart fury-server caddy
+systemctl enable --now postgresql xchange-server caddy
+systemctl restart xchange-server caddy
 
 sleep 3
 say "Check"
-systemctl is-active --quiet fury-server && echo "  fury-server: running" || { echo "  fury-server FAILED"; journalctl -u fury-server -n 30 --no-pager; exit 1; }
+systemctl is-active --quiet xchange-server && echo "  xchange-server: running" || { echo "  xchange-server FAILED"; journalctl -u xchange-server -n 30 --no-pager; exit 1; }
 systemctl is-active --quiet caddy && echo "  caddy: running" || echo "  caddy: NOT running"
 
 # The app checks for exactly this pair before it will save an address, so the
 # install is not finished until it answers the way the app expects.
-code=$(curl -s -o /tmp/fury-probe -w '%{http_code}' "https://${HOSTNAME}/v1/me" || echo 000)
-body=$(cat /tmp/fury-probe 2>/dev/null || true)
+code=$(curl -s -o /tmp/xchange-probe -w '%{http_code}' "https://${HOSTNAME}/v1/me" || echo 000)
+body=$(cat /tmp/xchange-probe 2>/dev/null || true)
 echo "  https://${HOSTNAME}/v1/me -> ${code} ${body}"
 if [ "$code" = "401" ] && [ "$body" = '{"error":"unauthenticated"}' ]; then
     echo

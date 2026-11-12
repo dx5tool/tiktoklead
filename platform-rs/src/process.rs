@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright 2026 Bogdan Shapovalov and the Fury authors
+// Copyright 2026 Bogdan Shapovalov and the XChange authors
 
 //! Asking a browser to close, rather than making it stop.
 //!
@@ -123,7 +123,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_child_gets_a_chance_to_clean_up() {
-        let marker = std::env::temp_dir().join(format!("fury-term-{}", std::process::id()));
+        let marker = std::env::temp_dir().join(format!("xchange-term-{}", std::process::id()));
         let _ = std::fs::remove_file(&marker);
 
         let mut child = std::process::Command::new("sh")

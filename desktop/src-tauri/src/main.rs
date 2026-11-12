@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright 2026 Bogdan Shapovalov and the Fury authors
+// Copyright 2026 Bogdan Shapovalov and the XChange authors
 
-//! Fury desktop — the native shell.
+//! XChange desktop — the native shell.
 //!
 //! Thin by design. The shell owns the window, the connection to the server and
 //! the session token; everything an operator sees is the React app under
@@ -19,6 +19,7 @@ mod commands;
 mod crypto;
 mod session;
 mod settings;
+mod spreadsheet;
 mod update;
 
 use std::sync::Mutex;
@@ -79,7 +80,7 @@ fn main() {
                 // Long enough for a loaded self-hosted box, short enough that a
                 // black-holed address reports itself rather than hanging the UI.
                 .timeout(Duration::from_secs(20))
-                .user_agent(concat!("fury-desktop/", env!("CARGO_PKG_VERSION")))
+                .user_agent(concat!("xchange-desktop/", env!("CARGO_PKG_VERSION")))
                 .build()?;
 
             // Touch the credential store once, here, where a failure is
@@ -90,7 +91,7 @@ fn main() {
             // installed. Probing at startup turns that into one line in the log
             // at the moment it happens, instead of a session that silently
             // stops being remembered.
-            if let Err(e) = keyring::Entry::new("dev.fury.desktop", "startup-probe") {
+            if let Err(e) = keyring::Entry::new("dev.xchange.desktop", "startup-probe") {
                 eprintln!("keychain unavailable — sessions will not be remembered: {e}");
             }
 
@@ -110,6 +111,11 @@ fn main() {
             commands::download_core,
             commands::set_server,
             commands::invitation,
+            commands::verify_code,
+            commands::own_verify_code,
+            commands::invitation_email,
+            commands::invitation_email_verify,
+            commands::server_info,
             commands::enrol,
             commands::signup,
             commands::server_allows_signup,
@@ -129,6 +135,9 @@ fn main() {
             commands::revoke_session,
             commands::revoke_member_sessions,
             commands::org_domain_lists,
+            commands::access_roles,
+            commands::save_access_role,
+            commands::delete_access_role,
             commands::save_org_domain_list,
             commands::delete_org_domain_list,
             commands::logout,
@@ -160,11 +169,13 @@ fn main() {
             commands::revoke_access,
             commands::remove_member,
             commands::launch,
+            commands::login_profile,
             commands::stop,
             commands::personas,
             commands::preview,
             commands::proxies,
             commands::credentials,
+            commands::credential_index,
             commands::save_credential,
             commands::delete_credential,
             commands::totp_code,
@@ -174,6 +185,7 @@ fn main() {
             commands::rotate_proxy,
             commands::delete_proxy,
             commands::save_profile,
+            commands::save_notes,
             commands::create_profiles,
             commands::templates,
             commands::save_template,
@@ -182,10 +194,14 @@ fn main() {
             commands::import_proxies,
             commands::parse_proxy_line,
             commands::sniff_proxy_kind,
+            commands::fetch_kiot_proxy,
+            commands::fetch_nest_proxy,
             commands::export_cookies,
+            commands::export_profiles,
             commands::extensions,
             commands::install_extension,
             commands::remove_extension,
+            commands::copy_extension_with_state,
             commands::all_extensions,
             commands::install_extension_many,
             commands::extension_catalogue,
@@ -194,6 +210,11 @@ fn main() {
             commands::all_extensions_with,
             commands::profile_usage,
             commands::trim_profile,
+            commands::open_profile_folder,
+            commands::open_data_folder,
+            commands::storage_info,
+            commands::set_profile_root,
+            commands::reset_profile_root,
             commands::reseed_profile,
             commands::capture_persona,
             commands::mirror_start,
@@ -201,10 +222,19 @@ fn main() {
             commands::mirror_status,
             commands::mirror_typing,
             commands::warm_start,
+            commands::vault_status,
             commands::warm_status,
             commands::warm_stop,
             commands::warm_clear,
             commands::warm_defaults,
+            commands::farm_list,
+            commands::farm_create,
+            commands::farm_delete,
+            commands::farm_pause,
+            commands::farm_due,
+            commands::farm_claim,
+            commands::farm_fail,
+            commands::farm_stage_applied,
             commands::save_persona_file,
             commands::use_persona_here,
             commands::share_persona_with_team,
@@ -214,9 +244,15 @@ fn main() {
             commands::save_blocklist,
             commands::delete_blocklist,
             commands::import_cookies,
+            commands::pick_folder,
+            commands::pick_zip,
+            commands::pick_account_file,
+            commands::import_profiles,
+            commands::write_cookies_file,
             commands::vendor_list,
             commands::vendor_profile,
             commands::delete_profile,
+            commands::reset_profile,
             commands::export_project,
             commands::import_project,
             commands::trash,
@@ -227,28 +263,42 @@ fn main() {
             commands::create_project,
         ])
         .build(tauri::generate_context!())
-        .expect("error while running Fury")
+        .expect("error while running XChange")
         .run(|_app, event| {
             // The agent this shell started outlives it on purpose: open
             // profiles keep their locks and relays. With nothing open it had
-            // no reason to, and on macOS a live child kept Fury in the Dock
+            // no reason to, and on macOS a live child kept XChange in the Dock
             // as "running in background" after the person had quit
             // (lsappinfo: exited-with-subordinates; reported 10.10.2026).
             // So on the way out the agent is told to go once it is idle:
             // now if nothing is open, after the last profile otherwise.
             // An agent older than 0.3.3 does not know the parameter and
             // refuses while profiles are open, which is the old behaviour.
+            //
+            // On a thread of its own with a runtime of its own, and waited for
+            // with a deadline the main thread keeps itself. block_on on the
+            // shared runtime needs a worker to drive its socket and its timer,
+            // and a worker stuck in a task means none may: the 0.4.17 update
+            // hung here for good (see update.rs, request_restart). Whatever
+            // happens to the call, the exit goes on after 1.5 s.
             if let tauri::RunEvent::Exit = event {
-                tauri::async_runtime::block_on(async {
-                    let _ = tokio::time::timeout(
-                        Duration::from_millis(1500),
-                        agent::call::<serde_json::Value>(
-                            "agent.shutdown",
-                            serde_json::json!({ "when_idle": true }),
-                        ),
-                    )
-                    .await;
+                let (done, wait) = std::sync::mpsc::channel();
+                std::thread::spawn(move || {
+                    if let Ok(rt) = tokio::runtime::Builder::new_current_thread().enable_all().build() {
+                        rt.block_on(async {
+                            let _ = tokio::time::timeout(
+                                Duration::from_millis(1500),
+                                agent::call::<serde_json::Value>(
+                                    "agent.shutdown",
+                                    serde_json::json!({ "when_idle": true }),
+                                ),
+                            )
+                            .await;
+                        });
+                    }
+                    let _ = done.send(());
                 });
+                let _ = wait.recv_timeout(Duration::from_millis(1600));
             }
         });
 }

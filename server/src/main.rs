@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright 2026 Bogdan Shapovalov and the Fury authors
+// Copyright 2026 Bogdan Shapovalov and the XChange authors
 
-//! Fury server — the self-hosted coordination backend.
+//! XChange server — the self-hosted coordination backend.
 //!
 //! Deliberately dumb. It does not generate fingerprints, does not check proxies,
 //! and cannot decrypt a bundle: it stores ciphertext plus metadata, resolves
@@ -13,6 +13,7 @@ mod api;
 mod auth;
 mod enroll;
 mod error;
+mod mail;
 mod rbac_guard;
 mod security;
 #[cfg(test)]
@@ -42,6 +43,9 @@ pub struct AppState {
     pub open_signup: bool,
     /// What one organisation may take from a shared server.
     pub limits: Limits,
+    /// Letters, when `FURY_SMTP_URL` is set: the six digits that confirm an
+    /// invited address (mail.rs). `None` keeps invitations as they were.
+    pub mailer: Option<Arc<mail::Mailer>>,
 }
 
 /// Ceilings, per organisation and per server.
@@ -107,7 +111,7 @@ async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "fury_server=info,tower_http=info".into()),
+                .unwrap_or_else(|_| "xchange_server=info,tower_http=info".into()),
         )
         .init();
 
@@ -120,10 +124,10 @@ async fn main() -> anyhow::Result<()> {
         // What a prebuilt binary is checked with before it is published, and
         // what an operator runs to see which one they have.
         Some("--version") | Some("version") => {
-            println!("fury-server {}", env!("CARGO_PKG_VERSION"));
+            println!("xchange-server {}", env!("CARGO_PKG_VERSION"));
             return Ok(());
         }
-        Some(other) => anyhow::bail!("unknown command: {other}\n\nusage:\n  fury-server\n  fury-server --version\n  fury-server invite --email you@example.com --org \"My team\""),
+        Some(other) => anyhow::bail!("unknown command: {other}\n\nusage:\n  xchange-server\n  xchange-server --version\n  xchange-server invite --email you@example.com --org \"My team\""),
         None => {}
     }
 
@@ -134,6 +138,12 @@ async fn main() -> anyhow::Result<()> {
     // Before the socket, not at the first upload.
     let bundles = api::check_bundle_root()?;
     tracing::info!(dir = %bundles.display(), "bundles");
+    // An hour unwritten: no live upload goes that long between chunks, and a
+    // second server on the same directory would still be safe.
+    let swept = api::sweep_abandoned_uploads(&bundles, std::time::Duration::from_secs(3600));
+    if swept > 0 {
+        tracing::info!(swept, "removed uploads abandoned before this start");
+    }
 
     let db = connect().await?;
     sqlx::migrate!("./migrations").run(&db).await?;
@@ -161,14 +171,22 @@ async fn main() -> anyhow::Result<()> {
     } else {
         tracing::info!(limits = %limits.describe(), "sign-ups are by invitation only");
     }
-    let state = Arc::new(AppState { db, open_signup, limits });
+    let mailer = mail::Mailer::from_env()?.map(Arc::new);
+    match &mailer {
+        Some(m) => match m.check().await {
+            Ok(()) => tracing::info!("mail: on, invited addresses are confirmed with a code by email"),
+            Err(e) => tracing::warn!(error = %e, "mail: FURY_SMTP_URL is set but the SMTP server refused; invitations will fail until it answers"),
+        },
+        None => tracing::info!("mail: off (no FURY_SMTP_URL), invited addresses are not confirmed"),
+    }
+    let state = Arc::new(AppState { db, open_signup, limits, mailer });
     let app = Router::new()
         .route("/healthz", get(healthz))
         .merge(api::routes())
         .layer(tower_http::trace::TraceLayer::new_for_http())
         .with_state(state);
 
-    tracing::info!(%bind, "fury-server listening");
+    tracing::info!(%bind, "xchange-server listening");
     let listener = tokio::net::TcpListener::bind(bind).await?;
     axum::serve(listener, app).await?;
     Ok(())
@@ -182,7 +200,7 @@ async fn healthz() -> Json<serde_json::Value> {
 /// `invite` command so a self-hoster configures one thing, not two.
 pub async fn connect() -> anyhow::Result<PgPool> {
     let database_url = std::env::var("DATABASE_URL")
-        .unwrap_or_else(|_| "postgres://fury:fury@localhost/fury".to_string());
+        .unwrap_or_else(|_| "postgres://xchange:xchange@localhost/xchange".to_string());
     Ok(PgPoolOptions::new()
         .max_connections(16)
         // Clear the per-request identity before a connection goes back in the

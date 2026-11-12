@@ -18,8 +18,8 @@
 #
 # WHAT WAS WRONG, measured 15.08.2026 on the bundle in target/release:
 #
-#   Contents/MacOS/fury-desktop   flags=0x20002(adhoc,linker-signed)  TeamIdentifier=not set
-#   Contents/MacOS/fury-agent     flags=0x20002(adhoc,linker-signed)  TeamIdentifier=not set
+#   Contents/MacOS/xchange-desktop   flags=0x20002(adhoc,linker-signed)  TeamIdentifier=not set
+#   Contents/MacOS/xchange-agent     flags=0x20002(adhoc,linker-signed)  TeamIdentifier=not set
 #
 # Both binaries carried the signature the linker leaves behind, which is not a
 # Developer ID and has no team. That bundle cannot be notarised and would trip
@@ -35,12 +35,12 @@
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-app="$here/target/release/bundle/macos/Fury.app"
+app="$here/target/release/bundle/macos/XChange.app"
 identity="${APPLE_SIGNING_IDENTITY:-}"
 notarize=0
 build=1
 dmg=0
-keychain_profile="${FURY_NOTARY_PROFILE:-fury-notary}"
+keychain_profile="${FURY_NOTARY_PROFILE:-xchange-notary}"
 # Or an App Store Connect API key, used directly. The stored profile vanished
 # from the keychain after a reboot on 09.10.2026 while a release was half
 # signed; the key it was made from still worked. Set all three to use it:
@@ -63,7 +63,7 @@ usage: sign-shell.sh [--identity NAME] [--notarize] [--dmg] [--skip-build]
                    notarytool profile (see sign-core.sh --help for how).
   --dmg            After the bundle: make the disk image from it, sign the
                    image, and (with --notarize) notarise and staple that too.
-                   Lands in target/release/bundle/dmg/Fury_<version>_aarch64.dmg,
+                   Lands in target/release/bundle/dmg/XChange_<version>_aarch64.dmg,
                    which is what package.sh --shell takes.
   --skip-build     Verify and notarise the bundle that is already there.
                    Use it to re-check, never to produce a release: the
@@ -160,7 +160,7 @@ if [ "$fail" = 1 ]; then
   echo >&2
   echo "!! a binary in the bundle is not signed by team $team." >&2
   echo "   Notarisation rejects this at upload, minutes in, naming a path and" >&2
-  echo "   not a cause. If it is fury-agent, the sidecar was built without" >&2
+  echo "   not a cause. If it is xchange-agent, the sidecar was built without" >&2
   echo "   APPLE_SIGNING_IDENTITY — rebuild without --skip-build." >&2
   exit 1
 fi
@@ -199,7 +199,7 @@ if [ "$notarize" = 1 ]; then
   # notarytool does not take a bare .app. ditto is what Apple documents for
   # this; `zip -r` mangles symlinks and extended attributes inside a bundle,
   # and the resulting submission fails in a way that reads as a signing fault.
-  zip="$here/target/release/bundle/macos/Fury.zip"
+  zip="$here/target/release/bundle/macos/XChange.zip"
   rm -f "$zip"
   ditto -c -k --keepParent "$app" "$zip"
 
@@ -234,13 +234,13 @@ if [ "$dmg" = 1 ]; then
   # have produced, so package.sh finds it where it always looked.
   version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist")"
   case "$(uname -m)" in arm64) dmg_arch="aarch64" ;; *) dmg_arch="$(uname -m)" ;; esac
-  dmg_path="$here/target/release/bundle/dmg/Fury_${version}_${dmg_arch}.dmg"
+  dmg_path="$here/target/release/bundle/dmg/XChange_${version}_${dmg_arch}.dmg"
   stage="$(mktemp -d)"
-  ditto "$app" "$stage/Fury.app"
+  ditto "$app" "$stage/XChange.app"
   ln -s /Applications "$stage/Applications"
   mkdir -p "$(dirname "$dmg_path")"
   rm -f "$dmg_path"
-  hdiutil create -volname Fury -srcfolder "$stage" -ov -format UDZO "$dmg_path" >/dev/null
+  hdiutil create -volname XChange -srcfolder "$stage" -ov -format UDZO "$dmg_path" >/dev/null
   rm -rf "$stage"
   codesign --force --sign "$identity" --timestamp "$dmg_path"
   if [ "$notarize" = 1 ]; then

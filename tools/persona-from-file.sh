@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: AGPL-3.0-or-later
-# Copyright 2026 Bogdan Shapovalov and the Fury authors
+# Copyright 2026 Bogdan Shapovalov and the XChange authors
 #
 # A probe dump somebody sent you becomes a contributed persona, here, with no
 # GitHub account on their side.
@@ -11,7 +11,7 @@
 #         "Lenovo Legion 5, Windows 11, RTX 4060, built-in 1920x1080" "@vasya (TG)" 0.02
 #
 # The same steps .github/workflows/persona-issue.yml runs for an issue: convert
-# with `fury-detect persona`, name it after the machine, write who sent it and
+# with `xchange-detect persona`, name it after the machine, write who sent it and
 # what they said it was, refuse a reused id, run personas-check. The file lands
 # in shared/personas/contributed/ ready to commit. Not everybody who owns a
 # machine owns a GitHub account, and the catalogue should not depend on that.
@@ -29,11 +29,11 @@ weight="${4:-0.01}"
 # WebRTC section (the hosted page redacts before download). The converter never
 # reads it, but a file on your disk should not either: redact in place first.
 tmp="$(mktemp -t capture).json"
-cargo run -q -p fury-detect -- redact "$capture" > "$tmp" 2>/dev/null || cp "$capture" "$tmp"
+cargo run -q -p xchange-detect -- redact "$capture" "$tmp" >/dev/null 2>&1 || cp "$capture" "$tmp"
 
 persona="$(mktemp -t persona).json"
-if ! cargo run -q -p fury-detect -- persona "$tmp" --weight "$weight" > "$persona"; then
-  echo "!! the converter refused this dump — usually it came from Fury or another modified browser rather than ordinary Chrome" >&2
+if ! cargo run -q -p xchange-detect -- persona "$tmp" --weight "$weight" > "$persona"; then
+  echo "!! the converter refused this dump — usually it came from XChange or another modified browser rather than ordinary Chrome" >&2
   exit 1
 fi
 
@@ -61,6 +61,6 @@ PY
 rm -f "$tmp" "$persona"
 
 echo "== personas-check"
-cargo run -q -p fury-detect -- personas-check
+cargo run -q -p xchange-detect -- personas-check
 echo
 echo "Next: git add shared/personas/contributed/$id.json && git commit"

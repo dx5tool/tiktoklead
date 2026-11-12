@@ -82,7 +82,7 @@ core/
     ├── apply.sh          # наложить серию; падает, если патч из series нет на диске
     ├── refresh.sh        # снять изменения из дерева обратно в патч
     ├── rebase.sh         # переехать на новый upstream-тег
-    ├── link-icons.sh     # положить иконки Fury в дерево — обязательный шаг, см. ниже
+    ├── link-icons.sh     # положить иконки XChange в дерево — обязательный шаг, см. ниже
     ├── link-icons-windows.ps1  # то же для Windows (.ico, плитки, логотипы); build.sh зовёт сам
     ├── link-widevine.sh  # положить CDM из установленного Chrome рядом со сборкой
     └── build.sh          # gn gen + autoninja
@@ -402,19 +402,19 @@ git ls-remote --tags https://chromium.googlesource.com/chromium/src.git | grep -
 ./core/build/link-icons.sh
 #    Иконки — это PNG и .icns, а серия патчей в стиле quilt с бинарями внутри
 #    нечитаема и неребейзима, поэтому они кладутся скриптом, а не патчем 0900.
-#    Пропустить — получить браузер по имени Fury в иконках Chromium, что хуже
+#    Пропустить — получить браузер по имени XChange в иконках Chromium, что хуже
 #    любого из двух. Требует Pillow: python3 -m pip install --user Pillow
 
 # 6. Собрать и снять отпечаток
 ./core/build/build.sh macos-arm64
 #    Бинарь: core/src/out/<target>/Fury.app — переименование делает 0900.
 #    Детект-сюит сравнивает ДАМПЫ, а не бинари, поэтому сначала снять:
-tools/detect-suite/capture-chrome.sh fury-151 \
+tools/detect-suite/capture-chrome.sh xchange-151 \
   core/src/out/macos-arm64.noindex/Fury.app/Contents/MacOS/Fury
-cargo run -p fury-detect -- gate tools/detect-suite/baselines/fury-151.json
-cargo run -p fury-detect -- diff --mode spoof \
+cargo run -p xchange-detect -- gate tools/detect-suite/baselines/xchange-151.json
+cargo run -p xchange-detect -- diff --mode spoof \
   tools/detect-suite/baselines/chrome-151-macos-arm64.json \
-  tools/detect-suite/baselines/fury-151.json
+  tools/detect-suite/baselines/xchange-151.json
 #    capture-chrome.sh запускает ядро БЕЗ конфига отпечатка. Полный прогон гейта — на
 #    настроенном профиле: поднять collector.py и открыть его auto-URL внутри профиля.
 ```
@@ -427,8 +427,8 @@ Google переименовал метод, и ваш вызов теперь в
 Chromium — BSD-3, форкать можно. Но **нельзя** использовать название Chrome, Chromium,
 логотип Google и связанные знаки в вашем продукте. Патч `0900-branding.patch`
 это и делает: он написан, активен в серии и меняет ровно один файл —
-`chrome/app/theme/chromium/BRANDING`. Сборка называется Fury и ставит bundle id
-`dev.fury.Fury`.
+`chrome/app/theme/chromium/BRANDING`. Сборка называется XChange и ставит bundle id
+`dev.xchange.XChange`.
 
 Менять надо данные, а не исходники: `chrome/app/theme/chromium/BRANDING`
 читается `build/util/branding.gni` в `chrome_product_full_name` и mac bundle id, а от них

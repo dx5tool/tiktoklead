@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright 2026 Bogdan Shapovalov and the Fury authors
+// Copyright 2026 Bogdan Shapovalov and the XChange authors
 
 //! Fetching a `.crx` from the Chrome Web Store by id, the way the browser
 //! itself would — and from where the browser would.
@@ -35,7 +35,7 @@ pub fn crx_url(id: &str) -> String {
 
 /// Download the package for `id`, through `proxy_url` when there is one.
 pub async fn fetch(id: &str, proxy_url: Option<&str>) -> Result<Vec<u8>> {
-    if !fury_shared::extensions::is_id(id) {
+    if !xchange_shared::extensions::is_id(id) {
         bail!("{id:?} is not an extension id");
     }
     let mut b = reqwest::Client::builder()
@@ -44,8 +44,18 @@ pub async fn fetch(id: &str, proxy_url: Option<&str>) -> Result<Vec<u8>> {
             "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{} Safari/537.36",
             crate::CHROME_FULL_VERSION
         ));
+    // Held until the download is done: a WireGuard profile's route is a relay
+    // of our own, and it stops when this goes.
+    let mut _relay = None;
     if let Some(p) = proxy_url {
-        b = b.proxy(reqwest::Proxy::all(p).context("the profile's proxy address")?);
+        let p = if p.starts_with("wireguard://") {
+            let (addr, guard) = crate::relay::loopback(crate::parse_upstream(p)?).await?;
+            _relay = Some(guard);
+            addr
+        } else {
+            p.to_string()
+        };
+        b = b.proxy(reqwest::Proxy::all(&p).context("the profile's proxy address")?);
     }
     let res = b.build()?.get(crx_url(id)).send().await.context("reaching the Web Store")?;
     if !res.status().is_success() {

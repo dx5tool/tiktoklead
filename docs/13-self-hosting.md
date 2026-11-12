@@ -25,16 +25,16 @@
 ## Что понадобится
 
 - VPS: 1 vCPU и 1 ГБ RAM. С 0.2.21 сервер ставится готовым: к каждому релизу
-  приложены статические `fury-server-<версия>-linux-x86_64.tar.gz` и
+  приложены статические `xchange-server-<версия>-linux-x86_64.tar.gz` и
   `…-linux-aarch64.tar.gz` с контрольными суммами, а образ лежит в
-  `ghcr.io/furyteamtop/fury-server`. И [`deploy/server-install.sh`](../deploy/server-install.sh),
+  `ghcr.io/xchange/xchange-server`. И [`deploy/server-install.sh`](../deploy/server-install.sh),
   и `docker compose` берут готовое; собирать из исходников нужно только свой
   код (`FURY_BUILD_FROM_SOURCE=1` или `docker-compose.build.yml`). Для сборки
   на самом VPS нужно 2 vCPU и 4 ГБ: скрипт заводит 2 ГБ свопа, потому что на
   четырёх гигабайтах линковка временами падает OOM-киллом.
 - Диск считается по бандлам, а не по базе. Бандл — это цельный профиль
   браузера, Caddy принимает до 512 МБ на загрузку (:198-202), и всё это лежит
-  на самом сервере в `/var/lib/fury/bundles` (:70, :143). 10 ГБ — это десяток
+  на самом сервере в `/var/lib/xchange/bundles` (:70, :143). 10 ГБ — это десяток
   профилей, а не команда.
 - Сервер при этом остаётся намеренно «тупым»: не генерирует отпечатки, не
   расшифровывает бандлы, не проксирует трафик профилей. Этого хватает на
@@ -43,7 +43,7 @@
 - Доменное имя и TLS. Без него сессионные токены пойдут открытым текстом.
 
 S3-совместимое хранилище не нужно и не используется. Сервер кладёт бандлы прямо
-в файловую систему: `FURY_BUNDLE_DIR`, по умолчанию `/var/lib/fury/bundles`, — и
+в файловую систему: `FURY_BUNDLE_DIR`, по умолчанию `/var/lib/xchange/bundles`, — и
 проверяет каталог на запись при старте, до открытия сокета, а не при первой
 загрузке ([server/src/api.rs:2640-2675](../server/src/api.rs)). Узнать, что
 каталога нет, в момент, когда оператор закрывает браузер после рабочего дня, —
@@ -55,7 +55,7 @@ S3-совместимое хранилище не нужно и не испол�
 ## Быстрый путь: docker compose
 
 ```bash
-git clone https://github.com/furyteamtop/fury-antidetect-browser && cd fury-antidetect-browser
+git clone https://github.com/dx5tool/fury-nomaster && cd xchange-antidetect-browser
 cp .env.example .env          # задайте FURY_DB_PASSWORD
 docker compose up -d
 ```
@@ -65,7 +65,7 @@ docker compose up -d
 `.env` закрепляет версию; без неё берётся последняя. Собрать из исходников:
 `docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build`.
 Сервер слушает `127.0.0.1:8901` — наружу его выводит обратный прокси, см. TLS
-ниже. База лежит в томе `fury-db`, профили — в томе `fury-bundles`; копировать
+ниже. База лежит в томе `xchange-db`, профили — в томе `xchange-bundles`; копировать
 нужно оба. До 02.10.2026 тома для профилей не было, и сервер из этого файла не
 стартовал. Обновление, резервные копии и настройки nginx для профилей — в
 [docs/14](14-team-server.md#если-на-машине-уже-есть-другие-сайты--docker-вместо-pushsh).
@@ -77,11 +77,11 @@ curl -s http://127.0.0.1:8901/v1/me
 ```
 
 Ответ должен быть ровно `{"error":"unauthenticated"}` с кодом 401 — приложение
-использует это как признак «здесь Fury».
+использует это как признак «здесь XChange».
 
 Дальше — [первый пользователь](#первый-пользователь-если-регистрация-закрыта):
 на пустом сервере некому вас пригласить, и первый код печатает сам сервер. В
-compose это одна команда, `docker compose exec server fury-server invite …`, там
+compose это одна команда, `docker compose exec server xchange-server invite …`, там
 она и описана.
 
 ## Установка без docker
@@ -90,27 +90,27 @@ compose это одна команда, `docker compose exec server fury-server 
 
 ```bash
 V=0.2.21; A=x86_64
-curl -fLO https://github.com/furyteamtop/fury-antidetect-browser/releases/download/v$V/fury-server-$V-linux-$A.tar.gz
-curl -fL https://github.com/furyteamtop/fury-antidetect-browser/releases/download/v$V/fury-server-$V-linux-$A.tar.gz.sha256 | sha256sum -c
-tar -xzf fury-server-$V-linux-$A.tar.gz && ./fury-server --version
+curl -fLO https://github.com/dx5tool/fury-nomaster/releases/download/v$V/xchange-server-$V-linux-$A.tar.gz
+curl -fL https://github.com/dx5tool/fury-nomaster/releases/download/v$V/xchange-server-$V-linux-$A.tar.gz.sha256 | sha256sum -c
+tar -xzf xchange-server-$V-linux-$A.tar.gz && ./xchange-server --version
 ```
 
 Или из исходников:
 
 ```bash
-cargo build --release -p fury-server
+cargo build --release -p xchange-server
 ```
 
 Создайте базу:
 
 ```bash
-sudo -u postgres createuser fury --pwprompt && sudo -u postgres createdb -O fury fury
+sudo -u postgres createuser xchange --pwprompt && sudo -u postgres createdb -O xchange xchange
 ```
 
 Запустите. Миграции применяются сами при старте — отдельного шага нет:
 
 ```bash
-DATABASE_URL=postgres://fury:ПАРОЛЬ@127.0.0.1:5432/fury BIND=127.0.0.1:8901 ./target/release/fury-server
+DATABASE_URL=postgres://xchange:ПАРОЛЬ@127.0.0.1:5432/xchange BIND=127.0.0.1:8901 ./target/release/xchange-server
 ```
 
 Проверьте, что сервер отвечает так, как ожидает клиент:
@@ -120,7 +120,7 @@ curl -s http://127.0.0.1:8901/v1/me
 ```
 
 Ответ должен быть ровно `{"error":"unauthenticated"}` с кодом 401. Приложение
-использует это как признак «здесь Fury» — если ответ другой, оно откажется
+использует это как признак «здесь XChange» — если ответ другой, оно откажется
 подключаться, и это правильно: адрес с опечаткой иначе всплыл бы позже, при входе,
 и выглядел бы как неверный пароль.
 
@@ -130,7 +130,7 @@ curl -s http://127.0.0.1:8901/v1/me
 отказом, пока сервер не запущен с `FURY_OPEN_SIGNUP=1`
 ([server/src/main.rs:73-78](../server/src/main.rs),
 [server/src/api.rs:237-247](../server/src/api.rs)); установщик пишет в
-`/etc/fury/fury.env` явный `FURY_OPEN_SIGNUP=0`
+`/etc/xchange/xchange.env` явный `FURY_OPEN_SIGNUP=0`
 ([deploy/server-install.sh:145-154](../deploy/server-install.sh)). Выключена —
 потому что self-hosted сервер это чья-то личная машина, и «пусть заходит любой,
 кто нашёл адрес» не та политика, которую наследуют вместе с установкой.
@@ -168,7 +168,7 @@ curl -s http://127.0.0.1:8901/v1/me
 Изоляция полная, **справедливость — нет**. Прочитать чужое нельзя никому, а вот
 занять весь диск может один человек со скриптом, и первое, что вы об этом
 узнаете, — база отказывает в записи всем. Поэтому перед тем как открывать
-регистрацию, поставьте три потолка в `/etc/fury/fury.env`:
+регистрацию, поставьте три потолка в `/etc/xchange/xchange.env`:
 
 ```
 FURY_MAX_ORGS=50                    # организаций на сервере всего
@@ -221,8 +221,8 @@ FURY_MAX_STORAGE_PER_ORG=5368709120 # байт бандлов на органи�
 делают из приложения. Делается из шелла машины, где стоит база:
 
 ```bash
-sudo -u postgres psql -c "DELETE FROM organizations WHERE name = 'Кого убираем';" fury
-sudo -u postgres psql -c "DELETE FROM users WHERE email = 'кого@убираем';" fury
+sudo -u postgres psql -c "DELETE FROM organizations WHERE name = 'Кого убираем';" xchange
+sudo -u postgres psql -c "DELETE FROM users WHERE email = 'кого@убираем';" xchange
 ```
 
 Аудит при этом **остаётся**. Записи теряют ссылку на организацию (`org_id`
@@ -240,12 +240,45 @@ sudo -u postgres psql -c "DELETE FROM users WHERE email = 'кого@убирае
 всё, что описывает событие:
 
 ```
-как роль fury:  UPDATE audit_events SET action='подделка'  →  permission denied
+как роль xchange:  UPDATE audit_events SET action='подделка'  →  permission denied
                 DELETE FROM audit_events                    →  permission denied
 ```
 
 Суперпользователь обходит любые права — это неустранимо и не является рубежом:
 у кого есть shell на машине, у того есть и файлы базы.
+
+## Подтверждение почты
+
+Код приглашения сам по себе работает у того, кто введёт его первым: аккаунт
+создаётся на адрес из приглашения, а владеет ли человек этим адресом, сервер не
+знает. Код, брошенный в общий чат, мог зарегистрировать кого угодно под чужой
+почтой, и в «Пользователях» он выглядел бы как тот, кого пригласили.
+
+С настроенной почтой регистрация по коду требует ещё шесть цифр, которые сервер
+шлёт на адрес из приглашения ([server/src/mail.rs](../server/src/mail.rs)).
+Без них аккаунт не создаётся. Цифры живут 15 минут, неверных попыток пять,
+писем на одно приглашение пять, не чаще раза в минуту. Код владельца для первого
+входа (`xchange-server invite` из шелла) письма не требует: его печатает сам
+сервер тому, кто на нём сидит.
+
+Подойдёт любой SMTP: Resend, Postmark, Mailgun, Яндекс, свой. В
+`/etc/xchange/xchange.env` (или в `.env` для docker compose):
+
+```bash
+FURY_SMTP_URL=smtps://user:password@smtp.example.com:465
+# или: smtp://user:password@smtp.example.com:587?tls=required
+FURY_MAIL_FROM=XChange <noreply@example.com>
+```
+
+Перезапустите сервер и проверьте лог: `mail: on` значит, что SMTP ответил и
+принял логин. Если там предупреждение, письма уходить не будут, а регистрация
+по коду остановится на шаге с письмом, пока почта не заработает. Чтобы письма не
+попадали в спам, добавьте домену отправителя записи SPF и DKIM, которые выдаст
+почтовый сервис.
+
+Без почты всё работает как раньше, а приложение при создании приглашения
+предупреждает, что код надо передавать лично. Приложениям ниже 0.3.12 сервер с
+почтой регистрироваться по коду не даст и скажет обновиться.
 
 ## Первый пользователь, если регистрация закрыта
 
@@ -257,17 +290,17 @@ sudo -u postgres psql -c "DELETE FROM users WHERE email = 'кого@убирае
 контейнера, и команда одна:
 
 ```bash
-docker compose exec server fury-server invite --email you@example.com --org "Моя команда"
+docker compose exec server xchange-server invite --email you@example.com --org "Моя команда"
 ```
 
 Если сервер собран и запущен руками:
 
 ```bash
-DATABASE_URL=postgres://fury:ПАРОЛЬ@127.0.0.1:5432/fury \
-  ./target/release/fury-server invite --email you@example.com --org "Моя команда"
+DATABASE_URL=postgres://xchange:ПАРОЛЬ@127.0.0.1:5432/xchange \
+  ./target/release/xchange-server invite --email you@example.com --org "Моя команда"
 ```
 
-Если ставили `deploy/server-install.sh`, переменная лежит в `/etc/fury/fury.env`,
+Если ставили `deploy/server-install.sh`, переменная лежит в `/etc/xchange/xchange.env`,
 и путь описан в [14](14-team-server.md#3-завести-себя--владельца).
 
 Команда напечатает код вида `5rrk-qgfr-gtyd-mw0f-sp12-axzy-0jsz-sx19`. Он живёт
@@ -291,7 +324,7 @@ DATABASE_URL=postgres://fury:ПАРОЛЬ@127.0.0.1:5432/fury \
 `docker compose exec server`):
 
 ```bash
-./target/release/fury-server invite --email colleague@example.com \
+./target/release/xchange-server invite --email colleague@example.com \
   --org-id <UUID организации> --role member
 ```
 
@@ -309,7 +342,7 @@ DATABASE_URL=postgres://fury:ПАРОЛЬ@127.0.0.1:5432/fury \
 Поставьте перед ним обратный прокси. Caddy делает сертификат сам:
 
 ```
-fury.example.com {
+xchange.example.com {
     reverse_proxy 127.0.0.1:8901
 }
 ```
@@ -340,8 +373,8 @@ fury.example.com {
 ## Резервные копии
 
 ```bash
-sudo -u postgres pg_dump -Fc fury > fury-$(date +%F).dump
-tar czf fury-bundles-$(date +%F).tar.gz -C /var/lib/fury bundles
+sudo -u postgres pg_dump -Fc xchange > xchange-$(date +%F).dump
+tar czf xchange-bundles-$(date +%F).tar.gz -C /var/lib/xchange bundles
 ```
 
 Обе, и обе обязательны. База без бандлов — список профилей, которые нельзя
@@ -353,16 +386,16 @@ tar czf fury-bundles-$(date +%F).tar.gz -C /var/lib/fury bundles
 `FURY_BUNDLE_DIR` ([deploy/server-install.sh:143](../deploy/server-install.sh)).
 
 Локальные данные каждый бэкапит у себя. Агент держит всё в одном каталоге —
-`~/Library/Application Support/Fury` на macOS, `%APPDATA%\Fury` на Windows,
-`$XDG_DATA_HOME/fury` на Linux, либо `FURY_HOME`, если он задан
-([agent/src/paths.rs:17-39](../agent/src/paths.rs)). Команды `fury-agent status`
+`~/Library/Application Support/XChange` на macOS, `%APPDATA%\XChange` на Windows,
+`$XDG_DATA_HOME/xchange` на Linux, либо `FURY_HOME`, если он задан
+([agent/src/paths.rs:17-39](../agent/src/paths.rs)). Команды `xchange-agent status`
 не существует: у агента есть `serve`, `relay`, `launch`, `check-fingerprint` и
 `install-core` ([agent/src/main.rs](../agent/src/main.rs)).
 
 ## Обновление
 
 ```bash
-git pull && cargo build --release -p fury-server
+git pull && cargo build --release -p xchange-server
 ```
 
 Перед этим снимите копию базы (`pg_dump`). Перезапустите — миграции
@@ -380,7 +413,7 @@ git pull && cargo build --release -p fury-server
 - **Синхронизация бандлов написана.** `POST` и `GET`
   `/v1/profiles/{id}/bundle` ([server/src/api.rs:2684-2850](../server/src/api.rs)):
   загрузку авторизует не только право, но и удерживаемый лок, а расхождение
-  `x-fury-base-version` — это 409, а не молчаливая перезапись чужой сессии.
+  `x-xchange-base-version` — это 409, а не молчаливая перезапись чужой сессии.
   Агент тянет бандл перед стартом и толкает после
   ([agent/src/sync.rs](../agent/src/sync.rs)).
 - **Шифрование на клиенте написано.** Бандл пакуется и шифруется на машине

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright 2026 Bogdan Shapovalov and the Fury authors
+// Copyright 2026 Bogdan Shapovalov and the XChange authors
 
 //! A profile bundle through a real server, and what the server ends up holding.
 //!
@@ -18,7 +18,7 @@
 //! FURY_TEST_TOKEN=<session token> \
 //! FURY_TEST_PROFILE=<profile id> \
 //! FURY_TEST_BUNDLE_DIR=<the server's FURY_BUNDLE_DIR> \
-//!   cargo test -p fury-agent sync_tests -- --nocapture
+//!   cargo test -p xchange-agent sync_tests -- --nocapture
 //! ```
 //!
 //! Skipped, loudly, when those are absent.
@@ -116,7 +116,7 @@ async fn round_trip(env: &Env, lock: &str) -> anyhow::Result<()> {
     // A profile directory with something worth protecting in it. The canary
     // sits in a file named the way a real cookie jar is, so a server storing
     // the archive unsealed would show both the name and the value.
-    let dir = crate::tmp::TempDir::new("fury-sync-e2e");
+    let dir = crate::tmp::TempDir::new("xchange-sync-e2e");
     let default = dir.join("Default");
     std::fs::create_dir_all(&default)?;
     std::fs::write(default.join("Cookies"), CANARY)?;
@@ -131,7 +131,7 @@ async fn round_trip(env: &Env, lock: &str) -> anyhow::Result<()> {
     let base = env.current_version().await;
     let version = env
         .server
-        .push_bundle(&env.profile, &sealed.bytes, &sealed.wrapped_key, &sealed.sha256, base, lock)
+        .push_bundle(&env.profile, &sealed.bytes, &sealed.wrapped_key, &sealed.sha256, base, lock, None)
         .await?;
     anyhow::ensure!(
         version > base,
@@ -186,7 +186,7 @@ async fn round_trip(env: &Env, lock: &str) -> anyhow::Result<()> {
     );
     anyhow::ensure!(got == version, "fetched version {got}, uploaded {version}");
 
-    let restored = crate::tmp::TempDir::new("fury-sync-e2e-restore");
+    let restored = crate::tmp::TempDir::new("xchange-sync-e2e-restore");
     bundle::unpack(&fetched, &wrapped, &Sealer::Shared { key: ORG_KEY, vault: None }, &restored)?;
     let back = std::fs::read_to_string(restored.join("Default/Cookies"))?;
     anyhow::ensure!(back == CANARY, "the round trip changed the data");
@@ -197,7 +197,7 @@ async fn round_trip(env: &Env, lock: &str) -> anyhow::Result<()> {
     // server but to whoever takes a copy of its disk. Checked here rather than
     // in a test of its own, which would need this one to have run first and so
     // would pass or fail on cargo's scheduling.
-    let wrong = crate::tmp::TempDir::new("fury-sync-e2e-wrongkey");
+    let wrong = crate::tmp::TempDir::new("xchange-sync-e2e-wrongkey");
     let err = bundle::unpack(
         &fetched,
         &wrapped,

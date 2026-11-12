@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright 2026 Bogdan Shapovalov and the Fury authors
+// Copyright 2026 Bogdan Shapovalov and the XChange authors
 
 //! Putting a downloaded core where the agent will find it.
 //!
@@ -39,7 +39,7 @@ pub fn migrate_legacy_dir() {
     match std::fs::rename(&old, &new) {
         Ok(()) => tracing::info!(
             from = %old.display(), to = %new.display(),
-            "moved the installed core into a package so search shows one Fury"
+            "moved the installed core into a package so search shows one XChange"
         ),
         // Not fatal. The next install-core writes the new location anyway, and
         // failing to start over a directory name would be a poor trade.
@@ -68,7 +68,7 @@ pub fn install(src: &Path) -> Result<PathBuf> {
     // earlier runs:
     //
     //     Fury/dxcompiler.dll: Can't unlink already-existing object: Permission denied
-    //     Error: tar could not unpack C:\...\fury-core-...tar.xz
+    //     Error: tar could not unpack C:\...\xchange-core-...tar.xz
     //
     // The cleanup had failed silently, tar met the leftovers, and the message
     // blamed the archive. Somebody reading that goes and re-downloads a file
@@ -78,7 +78,7 @@ pub fn install(src: &Path) -> Result<PathBuf> {
             format!(
                 "clearing {}. On Windows this usually means a browser from an \
                  earlier install is still running and holding its own files -- \
-                 close every Fury window and try again",
+                 close every XChange window and try again",
                 staging.display()
             )
         })?;
@@ -88,8 +88,8 @@ pub fn install(src: &Path) -> Result<PathBuf> {
 
     if src.is_dir() {
         // `cp -R` on macOS, a recursive walk on Windows — and the reason
-        // they differ is symlinks. See fury_platform::tree.
-        fury_platform::copy_tree(src, &staging)?;
+        // they differ is symlinks. See xchange_platform::tree.
+        xchange_platform::copy_tree(src, &staging)?;
     } else {
         unpack(src, &staging)?;
     }
@@ -130,14 +130,14 @@ pub fn install(src: &Path) -> Result<PathBuf> {
     let _ = std::fs::remove_dir_all(&previous);
 
     // Which release this is, for core_stale. Read from the archive's own name,
-    // fury-core-<release>-<platform>.tar.xz, which is what the download and
+    // xchange-core-<release>-<platform>.tar.xz, which is what the download and
     // the releases page both use. Anything else -- an unpacked directory, a
     // renamed file -- was put here by hand, and is recorded as such rather
     // than guessed at.
     let release = src
         .file_name()
         .and_then(|n| n.to_str())
-        .and_then(|n| n.strip_prefix("fury-core-"))
+        .and_then(|n| n.strip_prefix("xchange-core-"))
         .and_then(|n| n.split('-').next())
         .filter(|r| crate::parse_release(r).is_some())
         .unwrap_or("manual")
@@ -192,7 +192,7 @@ pub fn status() -> Result<()> {
                         "  looked beside the agent, and in {}",
                         crate::paths::core_dir().display()
                     );
-                    println!("  install one with: fury-agent install-core <file>");
+                    println!("  install one with: xchange-agent install-core <file>");
                 }
             }
             Ok(())
@@ -210,11 +210,11 @@ fn probe_version(exe: &Path) -> Result<String> {
     // Windows does not get to be asked this way. `chrome.exe --version` there
     // is not a fast path: it starts a browser, takes the process singleton, and
     // never exits, so `output()` below would wait forever and the install would
-    // hang on its last step. fury_platform::version explains what reading the
+    // hang on its last step. xchange_platform::version explains what reading the
     // resource proves and what it does not.
     #[cfg(windows)]
     {
-        return fury_platform::version::file_version(exe)
+        return xchange_platform::version::file_version(exe)
             .with_context(|| format!("reading the version of {}", exe.display()));
     }
 
@@ -422,8 +422,8 @@ fn find_core(root: &Path) -> Option<PathBuf> {
 
 fn ensure_executable(exe: &Path) -> Result<()> {
     // A no-op on Windows, where the extension decides. See
-    // fury_platform::perms::make_executable.
-    fury_platform::perms::make_executable(exe)?;
+    // xchange_platform::perms::make_executable.
+    xchange_platform::perms::make_executable(exe)?;
     Ok(())
 }
 
@@ -445,7 +445,7 @@ mod tests {
 
     #[test]
     fn an_archive_shape_it_cannot_read_is_named_rather_than_attempted() {
-        let dir = std::env::temp_dir().join("fury-install-core-test");
+        let dir = std::env::temp_dir().join("xchange-install-core-test");
         std::fs::create_dir_all(&dir).unwrap();
         let dmg = dir.join("core.dmg");
         std::fs::write(&dmg, b"not really a dmg").unwrap();
@@ -464,7 +464,7 @@ mod tests {
         // This test would pass on the build box either way -- its tar reads xz
         // -- so what it actually pins is that we hand tar a PLAIN .tar: PATH is
         // emptied below, so nothing on this machine could decode xz for us.
-        let dir = std::env::temp_dir().join("fury-xz-test");
+        let dir = std::env::temp_dir().join("xchange-xz-test");
         std::fs::remove_dir_all(&dir).ok();
         let staging = dir.join("staging");
         std::fs::create_dir_all(&staging).unwrap();
@@ -475,12 +475,12 @@ mod tests {
         header.set_size(body.len() as u64);
         header.set_mode(0o755);
         header.set_cksum();
-        builder.append_data(&mut header, "fury-core/hello", &body[..]).unwrap();
+        builder.append_data(&mut header, "xchange-core/hello", &body[..]).unwrap();
         let plain = builder.into_inner().unwrap();
 
         let mut xz = Vec::new();
         lzma_rs::xz_compress(&mut plain.as_slice(), &mut xz).unwrap();
-        let archive = dir.join("fury-core-test.tar.xz");
+        let archive = dir.join("xchange-core-test.tar.xz");
         std::fs::write(&archive, &xz).unwrap();
 
         // tar itself is still needed, by full path on Windows and from the
@@ -501,7 +501,7 @@ mod tests {
         let _ = &path;
 
         result.unwrap();
-        assert!(staging.join("fury-core").join("hello").exists());
+        assert!(staging.join("xchange-core").join("hello").exists());
         // And the half-gigabyte intermediate is not left behind, nor inside
         // the tree find_core() is about to walk.
         assert!(!dir.join("staging.tar").exists());
@@ -510,7 +510,7 @@ mod tests {
 
     #[test]
     fn a_missing_source_is_refused_before_anything_is_moved() {
-        let err = install(Path::new("/nonexistent/fury-core.tar.xz"))
+        let err = install(Path::new("/nonexistent/xchange-core.tar.xz"))
             .unwrap_err()
             .to_string();
         assert!(err.contains("does not exist"), "{err}");
@@ -518,11 +518,11 @@ mod tests {
 
     #[test]
     fn the_core_is_found_flat_or_one_level_down() {
-        let root = std::env::temp_dir().join("fury-find-core-test");
+        let root = std::env::temp_dir().join("xchange-find-core-test");
         std::fs::remove_dir_all(&root).ok();
 
         // An archive with a wrapping directory, which is the commoner shape.
-        let nested = root.join("fury-core-155.0.8059.12");
+        let nested = root.join("xchange-core-155.0.8059.12");
         let leaf = nested.join(super::super::core_leaf());
         std::fs::create_dir_all(leaf.parent().unwrap()).unwrap();
         std::fs::write(&leaf, b"#!/bin/sh\n").unwrap();
@@ -542,7 +542,7 @@ mod tests {
     fn a_binary_that_will_not_run_is_not_an_installed_core() {
         // The whole reason the version probe exists. This file unpacks
         // perfectly and is not a browser.
-        let dir = std::env::temp_dir().join("fury-probe-test");
+        let dir = std::env::temp_dir().join("xchange-probe-test");
         std::fs::create_dir_all(&dir).unwrap();
         let fake = dir.join("not-a-browser");
         std::fs::write(&fake, b"#!/bin/sh\nexit 1\n").unwrap();

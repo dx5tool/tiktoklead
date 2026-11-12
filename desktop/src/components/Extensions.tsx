@@ -1,23 +1,21 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright 2026 Bogdan Shapovalov and the Fury authors
+// Copyright 2026 Bogdan Shapovalov and the XChange authors
 
 import { useEffect, useRef, useState } from "react";
-import { api, type Extension, type Profile, type Usage } from "../api";
+import { api, type Extension, type Profile } from "../api";
 import { useI18n } from "../i18n";
 
-/** Extensions in one profile, and how much disk the profile takes.
+/** Extensions in one profile.
  *
- *  Both halves of this dialog are interfaces to code that has existed since
- *  07.08.2026 and was reachable from nothing: ext.rs parses CRX3 and pins the
- *  extension's id so a clone keeps its logins, usage.rs measures and trims a
- *  profile — and the desktop had no button for either. To an operator that is
- *  indistinguishable from the feature not existing, and the market review of
- *  12.09.2026 (docs/12) listed "extensions" as a gap in a product that had
- *  them.
+ *  A dialog of its own, beside "Storage & cache": what is installed inside a
+ *  profile and how much room that profile takes are two questions, and the one
+ *  this file answers is the extension list.
  *
- *  Why the two share a dialog: they are the two things one does to a profile
- *  that are neither its identity (the editor) nor its account (cookies,
- *  logins). Both concern what is on disk beside the browser data.
+ *  The code behind it has existed since 07.08.2026: ext.rs parses CRX3 and pins
+ *  the extension's id so a clone keeps its logins. To an operator an agent
+ *  feature with no button is indistinguishable from one that does not exist,
+ *  and the market review of 12.09.2026 (docs/12) listed "extensions" as a gap
+ *  in a product that had them.
  *
  *  The file is read here, in the webview. The shell has no native file dialog,
  *  so what a chosen .crx is to this side is bytes, and bytes are what the
@@ -28,14 +26,13 @@ export function Extensions({
   onClose,
 }: {
   profile: Profile;
-  /** Trimming is refused while the browser holds its caches open; saying so
-   *  before the click beats saying so after it. */
+  /** Installing or removing takes effect on the next launch, so say so while
+   *  the profile is open. */
   running: boolean;
   onClose: () => void;
 }) {
   const { t, say } = useI18n();
   const [list, setList] = useState<Extension[] | null>(null);
-  const [usage, setUsage] = useState<Usage | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
@@ -43,9 +40,7 @@ export function Extensions({
 
   const reload = async () => {
     try {
-      const [l, u] = await Promise.all([api.extensions(profile.id), api.profileUsage(profile.id)]);
-      setList(l);
-      setUsage(u);
+      setList(await api.extensions(profile.id));
     } catch (e) {
       setError(say(e));
     }
@@ -143,46 +138,6 @@ export function Extensions({
             </div>
           </div>
 
-          <div className="field">
-            <label>{t("ext.diskHeading")}</label>
-            <div>
-              {usage === null ? (
-                <p className="hint">{t("ext.loading")}</p>
-              ) : (
-                <>
-                  <p>
-                    {t("ext.disk", {
-                      total: mb(usage.total),
-                      cache: mb(usage.cache),
-                      keep: mb(usage.keep),
-                    })}
-                  </p>
-                  <p className="hint">{t("ext.diskHint")}</p>
-                  <button
-                    disabled={busy || running || usage.cache === 0}
-                    title={running ? t("ext.trimWhileOpen") : undefined}
-                    onClick={async () => {
-                      setBusy(true);
-                      setError(null);
-                      setNote(null);
-                      try {
-                        const r = await api.trimProfile(profile.id);
-                        setNote(t("ext.trimmed", { mb: mb(r.bytes), n: r.removed.length }));
-                        await reload();
-                      } catch (e) {
-                        setError(say(e));
-                      } finally {
-                        setBusy(false);
-                      }
-                    }}
-                  >
-                    {running ? t("ext.trimWhileOpen") : t("ext.trim")}
-                  </button>
-                </>
-              )}
-            </div>
-          </div>
-
           {note && <p>{note}</p>}
           {error && <p className="error">{error}</p>}
         </div>
@@ -194,12 +149,6 @@ export function Extensions({
       </div>
     </div>
   );
-}
-
-/** One decimal above 10 MB is noise; below it, the decimal is the number. */
-function mb(bytes: number): string {
-  const m = bytes / (1024 * 1024);
-  return m >= 10 ? Math.round(m).toString() : m.toFixed(1);
 }
 
 function toBase64(f: File): Promise<string> {

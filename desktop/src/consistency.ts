@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright 2026 Bogdan Shapovalov and the Fury authors
+// Copyright 2026 Bogdan Shapovalov and the XChange authors
 
 import type { LocalProxy, Profile } from "./api";
 
@@ -44,8 +44,16 @@ const FIRST_LANGUAGES: Record<string, string[]> = {
 };
 
 /** Judge one row. `personas` is the catalogue's ids, or null while unknown;
- *  `sharing` is how many profiles come out of the same exit as this one. */
-export function assess(p: Profile, personas: Set<string> | null, sharing: number): Verdict {
+ *  `sharing` is how many profiles come out of the same exit as this one;
+ *  `providerBacked` marks a proxy that belongs to a provider, whose exit is
+ *  shared with strangers by design — the heuristics below are about accounts
+ *  the operator placed behind one address, so they do not apply there. */
+export function assess(
+  p: Profile,
+  personas: Set<string> | null,
+  sharing: number,
+  providerBacked = false,
+): Verdict {
   const notes: Verdict["notes"] = [];
   let level: Level = "ok";
   const raise = (to: Level) => {
@@ -68,19 +76,25 @@ export function assess(p: Profile, personas: Set<string> | null, sharing: number
     raise("block");
   }
 
-  // First language against the exit country. Heuristic, so a warning.
-  const country = p.proxy?.country?.toUpperCase() ?? null;
-  const first = p.languages?.[0]?.split("-")[0]?.toLowerCase() ?? null;
-  if (country && first && first !== "en" && country in FIRST_LANGUAGES && !FIRST_LANGUAGES[country].includes(first)) {
-    notes.push({ key: "cons.langCountry", vars: { lang: p.languages![0], country } });
-    raise("warn");
-  }
+  // The two warnings below read the operator's own choices: which language the
+  // account claims and how many of their accounts sit behind the exit. A
+  // provider chooses both the exit and its country, so neither is evidence of
+  // anything there and the row keeps a clean name.
+  if (!providerBacked) {
+    // First language against the exit country. Heuristic, so a warning.
+    const country = p.proxy?.country?.toUpperCase() ?? null;
+    const first = p.languages?.[0]?.split("-")[0]?.toLowerCase() ?? null;
+    if (country && first && first !== "en" && country in FIRST_LANGUAGES && !FIRST_LANGUAGES[country].includes(first)) {
+      notes.push({ key: "cons.langCountry", vars: { lang: p.languages![0], country } });
+      raise("warn");
+    }
 
-  // Several accounts behind one exit is the oldest farm signature there is
-  // (docs/12 C). Two is a household; from three on it is said.
-  if (sharing >= 3) {
-    notes.push({ key: "cons.sharedExit", vars: { n: sharing } });
-    raise("warn");
+    // Several accounts behind one exit is the oldest farm signature there is
+    // (docs/12 C). Two is a household; from three on it is said.
+    if (sharing >= 3) {
+      notes.push({ key: "cons.sharedExit", vars: { n: sharing } });
+      raise("warn");
+    }
   }
 
   return { level, notes };

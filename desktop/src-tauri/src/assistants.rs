@@ -1,16 +1,16 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright 2026 Bogdan Shapovalov and the Fury authors
+// Copyright 2026 Bogdan Shapovalov and the XChange authors
 
-//! Connecting AI assistants to Fury: the Settings screen behind "AI assistants".
+//! Connecting AI assistants to XChange: the Settings screen behind "AI assistants".
 //!
-//! The MCP server is `fury-agent mcp` (agent/src/mcp.rs), and every installed
+//! The MCP server is `xchange-agent mcp` (agent/src/mcp.rs), and every installed
 //! copy already has the binary. What was missing was the step between: a person
 //! had to find the paragraph in the README, find the binary inside the app, and
 //! edit a JSON file by hand. A tester went looking for MCP "like AdsPower has",
 //! did not find it, and said that is where people get lost and leave
 //! (08.10.2026). So this writes the entry itself.
 //!
-//! What it touches: the `mcpServers.fury` entry of each client's config, and
+//! What it touches: the `mcpServers.xchange` entry of each client's config, and
 //! nothing else in that file. A file that does not parse is left alone and the
 //! person is told, rather than "repaired" into something they did not write.
 //! The first time a file is changed, the original is kept beside it.
@@ -24,7 +24,7 @@ use crate::commands::ApiErr;
 
 /// The skill, the same text the MCP server sends in its handshake.
 const SKILL: &str = include_str!("../../../shared/mcp/SKILL.md");
-const ENTRY: &str = "fury";
+const ENTRY: &str = "xchange";
 
 #[derive(Serialize)]
 pub struct Client {
@@ -96,7 +96,7 @@ fn configs(id: &str) -> Vec<PathBuf> {
 }
 
 fn skill_path() -> PathBuf {
-    home().join(".claude").join("skills").join("fury").join("SKILL.md")
+    home().join(".claude").join("skills").join("xchange").join("SKILL.md")
 }
 
 fn agent() -> (Option<PathBuf>, Option<&'static str>) {
@@ -136,7 +136,7 @@ fn write(path: &Path, value: &Value) -> Result<(), ApiErr> {
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).map_err(fail)?;
     }
-    let backup = path.with_extension("json.before-fury");
+    let backup = path.with_extension("json.before-xchange");
     if path.exists() && !backup.exists() {
         std::fs::copy(path, &backup).map_err(fail)?;
     }
@@ -144,7 +144,7 @@ fn write(path: &Path, value: &Value) -> Result<(), ApiErr> {
     text.push('\n');
     // Beside it, then over it: a crash half way leaves the old file, not half
     // of a new one.
-    let tmp = path.with_extension("json.fury-tmp");
+    let tmp = path.with_extension("json.xchange-tmp");
     std::fs::write(&tmp, text).map_err(fail)?;
     std::fs::rename(&tmp, path).map_err(fail)
 }
@@ -204,7 +204,7 @@ fn client(id: &'static str, agent: Option<&Path>) -> Client {
 /// Quoted for the shell the person will paste it into.
 fn claude_code_command(agent: &Path) -> String {
     let p = agent.to_string_lossy();
-    format!("claude mcp add --scope user fury -- \"{p}\" mcp")
+    format!("claude mcp add --scope user xchange -- \"{p}\" mcp")
 }
 
 fn state() -> State {
@@ -236,10 +236,10 @@ pub async fn assistants_connect(client: String) -> Result<State, ApiErr> {
         (_, Some("not_installed")) => {
             return Err(ApiErr::coded(
                 "err.aiNotInstalled",
-                "Fury is running from the disk image or Downloads. Move it to Applications, open it from there, and connect again.",
+                "XChange is running from the disk image or Downloads. Move it to Applications, open it from there, and connect again.",
             ))
         }
-        _ => return Err(ApiErr::local("the fury-agent binary was not found beside the application")),
+        _ => return Err(ApiErr::local("the xchange-agent binary was not found beside the application")),
     };
     let paths = configs(&client);
     if paths.is_empty() {
@@ -291,38 +291,38 @@ mod tests {
             "preferences": { "x": 1 },
             "mcpServers": { "other": { "command": "node", "args": ["a.js"] } },
         });
-        let after = with_entry(before.clone(), Path::new("/Applications/Fury.app/Contents/MacOS/fury-agent"));
+        let after = with_entry(before.clone(), Path::new("/Applications/XChange.app/Contents/MacOS/xchange-agent"));
         assert_eq!(after["preferences"], before["preferences"]);
         assert_eq!(after["mcpServers"]["other"], before["mcpServers"]["other"]);
-        assert_eq!(after["mcpServers"]["fury"]["args"], json!(["mcp"]));
+        assert_eq!(after["mcpServers"]["xchange"]["args"], json!(["mcp"]));
         let removed = without_entry(after);
         assert_eq!(removed, before);
     }
 
     #[test]
     fn a_config_with_no_servers_gets_the_section() {
-        let after = with_entry(json!({ "preferences": {} }), Path::new("/x/fury-agent"));
-        assert_eq!(after["mcpServers"]["fury"]["command"], "/x/fury-agent");
+        let after = with_entry(json!({ "preferences": {} }), Path::new("/x/xchange-agent"));
+        assert_eq!(after["mcpServers"]["xchange"]["command"], "/x/xchange-agent");
     }
 
     #[test]
     fn a_broken_file_is_refused_and_left_alone() {
-        let dir = std::env::temp_dir().join(format!("fury-assist-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("xchange-assist-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let f = dir.join("c.json");
         std::fs::write(&f, "{ not json").unwrap();
         assert!(read(&f).is_err());
         assert_eq!(std::fs::read_to_string(&f).unwrap(), "{ not json");
         std::fs::write(&f, "{\"a\":1}").unwrap();
-        write(&f, &with_entry(read(&f).unwrap(), Path::new("/x/fury-agent"))).unwrap();
-        assert!(dir.join("c.json.before-fury").exists(), "the original is kept");
+        write(&f, &with_entry(read(&f).unwrap(), Path::new("/x/xchange-agent"))).unwrap();
+        assert!(dir.join("c.json.before-xchange").exists(), "the original is kept");
         assert_eq!(read(&f).unwrap()["a"], 1);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
     fn the_skill_is_the_one_the_server_sends() {
-        assert!(SKILL.starts_with("---\nname: fury"));
-        assert!(SKILL.contains("fury_read_page"));
+        assert!(SKILL.starts_with("---\nname: xchange"));
+        assert!(SKILL.contains("xchange_read_page"));
     }
 }

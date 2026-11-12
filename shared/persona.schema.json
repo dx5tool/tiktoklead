@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://furybrowser.dev/schemas/persona.schema.json",
+  "$id": "https://xchange.dev/schemas/persona.schema.json",
   "title": "Device persona",
   "description": "A real-world machine configuration. Personas are the source of truth for fingerprint generation: a profile picks one, and every spoofed value is derived from it plus the profile seed. Making values up independently produces combinations that do not exist in nature, which is a stronger signal than not spoofing at all.",
   "type": "object",

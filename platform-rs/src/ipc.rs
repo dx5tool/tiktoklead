@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright 2026 Bogdan Shapovalov and the Fury authors
+// Copyright 2026 Bogdan Shapovalov and the XChange authors
 
 //! The channel the desktop shell talks to the agent over.
 //!
@@ -25,7 +25,7 @@
 //!      explicitly here, to this user's own SID and SYSTEM, so that what is
 //!      granted is a decision rather than a default.
 //!
-//!   2. Pipe names live in ONE machine-wide namespace. `\\.\pipe\fury-…` is a
+//!   2. Pipe names live in ONE machine-wide namespace. `\\.\pipe\xchange-…` is a
 //!      name another account can create first, and then the shell connects to
 //!      the squatter and believes its answers. Two halves to that: the server
 //!      passes `first_pipe_instance(true)` so it refuses to be the second
@@ -108,7 +108,7 @@ pub fn endpoint(tag: &str) -> Endpoint {
 
     #[cfg(unix)]
     {
-        Endpoint(std::env::temp_dir().join(format!("fury-{tag}.sock")))
+        Endpoint(std::env::temp_dir().join(format!("xchange-{tag}.sock")))
     }
 
     #[cfg(windows)]
@@ -116,7 +116,7 @@ pub fn endpoint(tag: &str) -> Endpoint {
         // The tag is in the name for the same reason as on Unix, and it is NOT
         // a security boundary: pipe names are guessable and the DACL is what
         // keeps other accounts out.
-        Endpoint(format!(r"\\.\pipe\fury-{tag}"))
+        Endpoint(format!(r"\\.\pipe\xchange-{tag}"))
     }
 }
 
@@ -322,7 +322,7 @@ impl Listener {
                     io::Error::new(
                         io::ErrorKind::AddrInUse,
                         format!(
-                            "another fury-agent is already running on this machine ({endpoint})"
+                            "another xchange-agent is already running on this machine ({endpoint})"
                         ),
                     )
                 } else {

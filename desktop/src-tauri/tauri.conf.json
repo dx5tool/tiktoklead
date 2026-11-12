@@ -1,9 +1,9 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
-  "productName": "Fury",
-  "identifier": "dev.fury.desktop",
+  "productName": "XChange",
+  "identifier": "dev.xchange.desktop",
   "build": {
-    "devUrl": "http://localhost:5273",
+    "devUrl": "http://127.0.0.1:5273",
     "frontendDist": "../dist",
     "beforeDevCommand": "npm run dev",
     "beforeBuildCommand": "node scripts/sidecar.mjs && npm run build"
@@ -12,17 +12,19 @@
     "windows": [
       {
         "label": "main",
-        "title": "Fury",
+        "title": "XChange",
         "width": 1280,
         "height": 800,
         "minWidth": 900,
         "minHeight": 560,
         "resizable": true,
+        "decorations": false,
         "theme": "Dark"
       }
     ],
     "security": {
       "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src ipc: http://ipc.localhost; object-src 'none'; base-uri 'none'; form-action 'none'",
+      "devCsp": "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src ipc: http://ipc.localhost http://127.0.0.1:5273 ws://127.0.0.1:5273 http://localhost:5273 ws://localhost:5273; object-src 'none'; base-uri 'none'; form-action 'none'",
       "freezePrototype": true
     }
   },
@@ -40,7 +42,7 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "copyright": "Fury Browser contributors",
+    "copyright": "XChange Browser contributors",
     "category": "Utility",
     "shortDescription": "Anti-detect browser for teams",
     "longDescription": "Self-hosted anti-detect browser with projects, per-project access grants and a shared profile lock.",
@@ -48,7 +50,7 @@
       "minimumSystemVersion": "10.15"
     },
     "externalBin": [
-      "binaries/fury-agent"
+      "binaries/xchange-agent"
     ],
     "windows": {
       "nsis": {
@@ -68,9 +70,9 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDk2NTlERjA2QzE0MEU3NUYKUldSZjUwREJCdDlabGpYQ2s5VzJsVXgrcEFGYkh1aHpiVjNlM05ZNE9JQzFuZHFvb0o3Q1NydDgK",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDQ5Nzk4OUJEODlFMDdDOEQKUldSSmVZbTlpZUI4alRZUWovb3ppS2tQa0toZHNSbHV3a0VyOTNESHBKbWdnS2RQTDNXbWNFMVkK",
       "endpoints": [
-        "https://github.com/furyteamtop/fury-antidetect-browser/releases/latest/download/latest.json"
+        "https://updates.simprint.invalid/latest.json"
       ],
       "windows": {
         "installMode": "passive"

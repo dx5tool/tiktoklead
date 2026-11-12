@@ -1,12 +1,20 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright 2026 Bogdan Shapovalov and the Fury authors
+// Copyright 2026 Bogdan Shapovalov and the XChange authors
 
 /** A CSV reader that copes with what spreadsheets export: quoted fields with
- *  commas and newlines inside, doubled quotes, a comma or semicolon or tab as
- *  the separator (chosen by counting in the first line), CRLF. */
-export function parseCsv(text: string): string[][] {
+ *  newlines inside, doubled quotes, a comma or semicolon or tab as the
+ *  separator (chosen by counting in the first line), CRLF.
+ *
+ *  `separators` is the set it chooses between. The default is the CSV set;
+ *  account lists pass `|` first, which is the delimiter those are pasted in. */
+export function parseCsv(
+  text: string,
+  separators: readonly string[] = [",", ";", "\t"],
+): string[][] {
   const first = text.split(/\r?\n/, 1)[0] ?? "";
-  const sep = [",", ";", "\t"].map((s) => [s, first.split(s).length] as const).sort((a, b) => b[1] - a[1])[0][0];
+  const sep = separators
+    .map((s) => [s, first.split(s).length] as const)
+    .sort((a, b) => b[1] - a[1])[0][0];
   const rows: string[][] = [];
   let row: string[] = [];
   let cell = "";

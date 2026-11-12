@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright 2026 Bogdan Shapovalov and the Fury authors
+// Copyright 2026 Bogdan Shapovalov and the XChange authors
 
 // The server is the only authority on what a user may do. Nothing here decides
 // permissions; it reads the set the server resolved and renders accordingly.
@@ -31,6 +31,10 @@ export interface Project {
   origin: Origin;
   id: string;
   name: string;
+  /** Lower sorts first; equal weights are ordered by name. */
+  sort_weight: number;
+  /** Who made it: the device name locally, the user's email on a team server. */
+  creator: string;
   profile_count: number;
 }
 
@@ -66,11 +70,37 @@ export interface Credential {
    *  Present here because the operator has to be able to see and correct what
    *  they typed — there is nobody on this machine to hide it from. */
   totp: string | null;
+  /** Session cookies for this login, as a Cookie header: `SPC_F=…; SPC_EC=…`.
+   *  Stored sealed with the rest of the login. The Login button on a profile
+   *  writes it into that profile's browser jar only when the profile is not
+   *  already signed in. */
+  cookie: string | null;
   notes: string;
   /** Team mode only: the server had this login and this machine's organisation
    *  key did not open it — almost always a key rotated after this copy was
    *  handed over. Shown, not hidden: an empty row reads as a deleted password. */
   unreadable?: boolean;
+}
+
+/** A login as the account import recognises it. No password, no 2FA seed: the
+ *  import only has to know that the account is here and where. A login with
+ *  no username carries its session instead, which is the only thing that can
+ *  recognise a cookie-only paste. */
+export interface CredentialIdentity {
+  id: string;
+  profile_id: string;
+  profile_name: string;
+  site: string;
+  username: string | null;
+  cookie: string | null;
+}
+
+/** One account list chosen in the shell. A text file arrives as its text; a
+ *  spreadsheet arrives as rows. Exactly one of the two is present. */
+export interface AccountFile {
+  name: string;
+  text?: string;
+  rows?: string[][];
 }
 
 export interface TotpCode {
@@ -137,12 +167,32 @@ export interface Profile {
   last_opened_at: string | null;
 }
 
+export type ProfilesExportFormat = "directory" | "zip";
+
+/** Where a profiles export landed, and what it carried. */
+export interface ProfilesExportResult {
+  path: string;
+  profiles: number;
+  /** Open profiles and profiles with no browser data on this machine. */
+  skipped: number;
+  bytes: number;
+}
+
+/** What an import created, for the notice and the refresh that follows. */
+export interface ProfilesImportResult {
+  imported: number;
+  logins: number;
+  names: string[];
+}
+
 /** A named list of domains the relay refuses — or, with `@allow-only` on its
- *  first line, the only domains it permits. */
+ *  first line, the only domains it permits; or, with `@local`, hosts on this
+ *  machine's own network that every profile here reaches directly. */
 export interface DomainList {
   name: string;
   domains: number;
   allow_only: boolean;
+  local: boolean;
 }
 
 export interface LoginOutcome {
@@ -186,6 +236,67 @@ export interface WarmPlan {
   dwell_seconds: [number, number];
   follow_link: boolean;
   close_after: boolean;
+  /** Set on a farming session: the run reports back to its plan. */
+  farm_id?: string;
+}
+
+/** A warm-up on a schedule, over days. See agent/src/farm.rs. */
+export interface FarmSpec {
+  name: string;
+  urls: string[];
+  days: number;
+  sites_per_day: [number, number];
+  /** Local hours, [from, to), in each profile's own timezone. */
+  hours: [number, number];
+  dwell_seconds: [number, number];
+  follow_link: boolean;
+  at_once: number;
+  set_stage: boolean;
+}
+
+export interface FarmTarget {
+  id: string;
+  name: string;
+  origin: Origin;
+  timezone: string | null;
+}
+
+export type FarmOutcome =
+  | { kind: "done"; sites: number; cookies: number }
+  | { kind: "failed"; error: string }
+  | { kind: "skipped"; why: string };
+
+export interface FarmSession {
+  at_ms: number;
+  urls: string[];
+  started_ms?: number | null;
+  ended?: FarmOutcome | null;
+}
+
+export interface FarmTrack {
+  days_done: number;
+  day?: string | null;
+  sessions: FarmSession[];
+  sites: number;
+  cookies?: number | null;
+  last_error?: string | null;
+  stage_pending?: string | null;
+}
+
+export interface Farm {
+  id: string;
+  created_ms: number;
+  spec: FarmSpec;
+  targets: FarmTarget[];
+  tracks: Record<string, FarmTrack>;
+  paused: boolean;
+}
+
+export interface FarmDue {
+  farm_id: string;
+  profile_id: string;
+  name: string;
+  origin: Origin;
 }
 
 export interface WarmProgress {
@@ -202,6 +313,17 @@ export interface WarmProgress {
   started_at_ms: number;
 }
 
+/** A role the organisation named itself: a set of project rights given to
+ *  people project by project. Changing it changes everyone on it. */
+export interface AccessRole {
+  id: string;
+  name: string;
+  permissions: Perm[];
+  updated_at: string;
+  /** How many project grants follow it. */
+  grants: number;
+}
+
 export interface OrgDomainList {
   id: string;
   name: string;
@@ -209,6 +331,7 @@ export interface OrgDomainList {
   updated_at: string;
   domains: number;
   allow_only: boolean;
+  local: boolean;
 }
 
 export interface MirrorStatus {
@@ -283,7 +406,7 @@ export interface Usage {
   files: number;
 }
 
-/** Mirrors fury_shared::overrides::MachineOverrides. Every key optional. */
+/** Mirrors xchange_shared::overrides::MachineOverrides. Every key optional. */
 export interface MachineOverrides {
   ui_locale?: string;
   screen?: { width: number; height: number; device_pixel_ratio: number };
@@ -294,6 +417,12 @@ export interface MachineOverrides {
   geolocation?: { latitude: number; longitude: number };
   /** Canvas and WebGL readback: noised (absent, the default) or this machine's own. */
   canvas?: "noise" | "real";
+  /** What a page reads from RTCPeerConnection. Absent is off: no candidates. */
+  webrtc?: {
+    mode: "off" | "base_on_ip" | "fixed";
+    public_ip?: string;
+    local_ip?: string;
+  };
 }
 
 /** What the pickers may offer for one machine, filtered by its OS. */
@@ -337,6 +466,8 @@ export interface Persona {
   screen: string;
   weight: number;
   source: string | null;
+  /** Not built in: captured here, fetched from the team, or FURY_PERSONAS. */
+  own?: boolean;
 }
 
 /** A machine in this computer's personas folder: captured here, or an
@@ -354,14 +485,15 @@ export interface Preview {
   timezone: string;
   hardware_concurrency: number;
   device_memory: number;
-  screen: string;
+  /** null when the profile reports the monitor it runs on (no screen pinned). */
+  screen: string | null;
   gpu_vendor: string;
   gpu_renderer: string;
   client_hints_platform: string;
   chrome_version: string;
   client_hints: string;
-  avail: string;
-  device_pixel_ratio: number;
+  avail: string | null;
+  device_pixel_ratio: number | null;
   color_depth: number;
   max_touch_points: number;
   /** null when the persona has no WebGPU adapter data. */
@@ -373,6 +505,8 @@ export interface Preview {
   media_devices: string | null;
   ui_locale: string;
   webrtc: string;
+  webrtc_public_ip: string | null;
+  webrtc_local_ip: string | null;
   js_heap_gb: number | null;
   persona_source: string | null;
   persona_weight: number;
@@ -412,6 +546,14 @@ export interface LocalProxy {
   port: number;
   username: string | null;
   password: string | null;
+  /** A team proxy: its login and password are on the server, sealed, and
+   *  never sent here. Blank fields in the form keep them. */
+  sealed?: boolean;
+  /** A team proxy: who added it, by email; null when nobody is recorded. */
+  added_by?: string | null;
+  /** A team proxy: whether this account may change or delete it. `false` only
+   *  when the server said so; absent from an older server, which does not. */
+  may_change?: boolean | null;
   last_country: string | null;
   last_ip: string | null;
   /** The exit's zone from the last check; absent from a server-side proxy. */
@@ -427,6 +569,8 @@ export interface Me {
   email: string;
   org_id: string;
   role: "owner" | "admin" | "manager" | "member";
+  /** The team server's own version. Missing on servers before 0.4.2. */
+  server_version?: string;
 }
 
 /** What the shell knows before anyone signs in. */
@@ -448,7 +592,7 @@ export interface Shell {
   /** Installed, but a different Chrome from the one this version claims to
    *  be. core_ready is false with it, so the download bar shows. */
   core_outdated?: { have: string; need: number } | null;
-  /** The right Chrome, but an older Fury build of it than this version
+  /** The right Chrome, but an older XChange build of it than this version
    *  expects. Not blocking: core_ready stays true and profiles launch; the
    *  shell offers the new build. `have` is null for a core installed before
    *  releases were recorded. */
@@ -485,6 +629,10 @@ export interface Shell {
    *  fixes one of those and cannot fix the other. False against a server too
    *  old to answer the question. */
   awaiting_key: boolean;
+  /** Where profiles, `xchange.db` and the browser are kept. Read-only: the value
+   *  comes from `dirs::data_dir()`, which reads `FURY_HOME` once at startup,
+   *  so it can be shown and opened but not changed from here. */
+  data_dir: string;
 }
 
 /** Note what is absent: the lock token. It authorises overwriting a bundle,
@@ -501,7 +649,26 @@ export interface LaunchResult {
   renewed?: boolean;
 }
 
-const TOKEN_KEY = "fury.token";
+/** What a Login press did.
+ *
+ *  `logged_in` is the state of the site after the attempt, not merely whether
+ *  the form was submitted. `cookie_written` says whether the stored session was
+ *  injected — false when the profile was already signed in and the cookie was
+ *  left alone. `needs_action` means the browser is open and a person has to
+ *  finish (a verification code, a captcha, or a changed login form). */
+export interface LoginResult {
+  launched: boolean;
+  logged_in: boolean;
+  cookie_written: boolean;
+  /** True when the saved username and password were typed in and accepted,
+   *  rather than the stored cookie being enough on its own. */
+  signed_in_now: boolean;
+  needs_action: boolean;
+  url?: string;
+  reason?: "otp" | "captcha" | "no_credentials" | "login_failed" | "no_form";
+}
+
+const TOKEN_KEY = "xchange.token";
 
 // A build that once ran in the browser leaves a token behind in the webview's
 // data store, where it survives every later launch of the packaged app. The
@@ -510,7 +677,7 @@ const TOKEN_KEY = "fury.token";
 // copy nothing will ever expire. Drop it on sight.
 if (isDesktop && typeof localStorage !== "undefined") {
   localStorage.removeItem(TOKEN_KEY);
-  localStorage.removeItem("fury.machine_id");
+  localStorage.removeItem("xchange.machine_id");
 }
 
 /** A profile a bulk action (warming, mirroring) could not take. `code` is
@@ -527,6 +694,20 @@ export type Assistants = {
 };
 
 export type Refusal = { id: string; reason: string; code?: string | null };
+
+/** Where profiles live. `profile_root` is null while nobody has chosen one, in
+ *  which case new profiles follow `default_root` — and `FURY_HOME`, which is
+ *  what makes a relocated installation keep working. */
+export interface StorageInfo {
+  profile_root: string | null;
+  default_root: string;
+  /** Profiles whose data is under `default_root`. */
+  profiles_here: number;
+  /** Profiles filed under some other root, usually one chosen earlier. They
+   *  keep working; they are reported so "the ones you have stay put" is a
+   *  number rather than a promise. */
+  profiles_elsewhere: number;
+}
 
 export class ApiError extends Error {
   constructor(
@@ -575,6 +756,9 @@ export type Invitation = {
   organization: string;
   role: string;
   creates_org_key: boolean;
+  /** The server sends six digits to `email` and wants them back before the
+   *  account is made (server 0018). Absent on an older server. */
+  email_check?: boolean;
 };
 
 export type UpdateProgress = {
@@ -585,9 +769,21 @@ export type UpdateProgress = {
 };
 
 async function cmd<T>(name: string, args: Record<string, unknown> = {}): Promise<T> {
+  if (!isDesktop) {
+    throw new ApiError(0, `Tauri IPC command "${name}" is only available in Desktop App mode.`);
+  }
   try {
     return await invoke<T>(name, args);
   } catch (raw: any) {
+    // Anything that is not a serialised ApiErr was rejected by Tauri itself:
+    // the command is not in this build's `invoke_handler`, or its arguments do
+    // not match the signature. Those arrive as a bare string, and treating one
+    // as an ApiErr renamed every such error "Could not reach the server" —
+    // which is how a stale `xchange-desktop.exe` made a missing command look like
+    // a network problem. The string is the only thing that says what happened.
+    if (typeof raw === "string") {
+      throw new ApiError(0, `Tauri IPC command "${name}" failed: ${raw}`);
+    }
     const status = typeof raw?.status === "number" ? raw.status : 0;
     const body = raw?.body ?? null;
     // Prefer the message the transport wrote (it names the actual host and
@@ -633,7 +829,7 @@ async function http<T>(path: string, init: RequestInit = {}): Promise<T> {
 
 /** Stable per installation, so the lock list names the same browser each time. */
 function devMachineId(): string {
-  const key = "fury.machine_id";
+  const key = "xchange.machine_id";
   let id = localStorage.getItem(key);
   if (!id) {
     id = crypto.randomUUID();
@@ -641,12 +837,122 @@ function devMachineId(): string {
   }
   return id;
 }
+const DEV_PROFILES_KEY = "xchange.dev_profiles";
+const DEV_PROJECTS_KEY = "xchange.dev_projects";
+
+function devProjects(): Project[] {
+  try {
+    const raw = localStorage.getItem(DEV_PROJECTS_KEY);
+    if (raw) {
+      // Rows written before sort_weight/creator existed must still render, and
+      // an old object must not leave two columns blank forever.
+      return (JSON.parse(raw) as Partial<Project>[]).map((p) => ({
+        id: String(p.id ?? ""),
+        name: String(p.name ?? ""),
+        sort_weight: Number.isFinite(p.sort_weight) ? Number(p.sort_weight) : 0,
+        creator: typeof p.creator === "string" && p.creator !== "" ? p.creator : "DEV",
+        profile_count: Number.isFinite(p.profile_count) ? Number(p.profile_count) : 0,
+        origin: p.origin ?? "local",
+      }));
+    }
+  } catch {}
+  return [
+    { id: "p1", name: "Dự án 2", sort_weight: 0, creator: "LAPTOP-DELL", profile_count: 1, origin: "local" },
+    { id: "p2", name: "My profiles", sort_weight: 1, creator: "LAPTOP-DELL", profile_count: 0, origin: "local" },
+  ];
+}
+
+function saveDevProjects(list: Project[]): void {
+  try {
+    localStorage.setItem(DEV_PROJECTS_KEY, JSON.stringify(list));
+  } catch {}
+}
+
+function devProfiles(): Profile[] {
+  try {
+    const raw = localStorage.getItem(DEV_PROFILES_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch {}
+  return [
+    {
+      id: "shopee1",
+      name: "Shopee1",
+      origin: "local",
+      project_id: "p1",
+      project_name: "Dự án 2",
+      tags: [],
+      notes: "Ghi chú 1 Render thử bảng trong k...",
+      status: "Idle",
+      persona_id: "win-rtx4060",
+      proxy: null,
+      allow_no_proxy: true,
+      last_opened_at: "2026-11-05T12:46:01.000Z",
+      permissions: ["launch", "manage_access", "edit_profile", "delete_profile"],
+      shared_with: 0,
+      fp_seed: 1234,
+      timezone: null,
+      languages: null,
+      running: false,
+      lock: null,
+    },
+    {
+      id: "shopee3",
+      name: "Shopee3",
+      origin: "local",
+      project_id: null,
+      project_name: null,
+      tags: ["hot", "vip", "cần lưu ý", "kiểm tra"],
+      notes: "",
+      status: "Idle",
+      persona_id: "mac-m2",
+      proxy: null,
+      allow_no_proxy: true,
+      last_opened_at: "2026-11-04T19:55:17.000Z",
+      permissions: ["launch", "manage_access", "edit_profile", "delete_profile"],
+      shared_with: 0,
+      fp_seed: 5678,
+      timezone: null,
+      languages: null,
+      running: false,
+      lock: null,
+    },
+  ];
+}
+
+function saveDevProfiles(list: Profile[]): void {
+  try {
+    localStorage.setItem(DEV_PROFILES_KEY, JSON.stringify(list));
+  } catch {}
+}
+
 
 // ---------------------------------------------------------------------------
 
 export const api = {
   shell(): Promise<Shell> {
     if (isDesktop) return cmd<Shell>("shell_state");
+    const devMode = typeof localStorage !== "undefined" ? localStorage.getItem("xchange.dev_mode") : null;
+    const isLocal = devMode !== "team" && storedToken() === null;
+    if (isLocal) {
+      return Promise.resolve({
+        mode: "local" as const,
+        agent_ready: true,
+        core_ready: true,
+        core_problem: null,
+        core_download: null,
+        remember_org_key: true,
+        version: "dev",
+        org_key_ready: true,
+        last_email: null,
+        last_server: null,
+        awaiting_key: false,
+        data_dir: "(browser development build — no data directory)",
+        server_url: null,
+        machine_name: navigator.platform || "this browser",
+        signed_in: true,
+        native: false,
+      });
+    }
     return Promise.resolve({
       mode: "team" as const,
       agent_ready: false,
@@ -659,8 +965,7 @@ export const api = {
       last_email: null,
       last_server: null,
       awaiting_key: false,
-      // Vite proxies /v1, so in this mode the address is fixed by the dev
-      // config rather than chosen by the operator.
+      data_dir: "(browser development build — no data directory)",
       server_url: "http://127.0.0.1:8901 (vite proxy)",
       machine_name: navigator.platform || "this browser",
       signed_in: storedToken() !== null,
@@ -701,14 +1006,31 @@ export const api = {
   signup: (url: string, email: string, password: string, orgName: string): Promise<Me> =>
     cmd<Me>("signup", { url, email, password, orgName }),
 
-  async enrol(url: string, code: string, password: string, createsOrg: boolean): Promise<Me> {
+  async enrol(url: string, code: string, password: string, createsOrg: boolean, emailProof?: string | null): Promise<Me> {
     if (!isDesktop) {
       return Promise.reject(
         new ApiError(0, "Enrolment generates keys in Rust and is desktop-only."),
       );
     }
-    return cmd<Me>("enrol", { url, code, password, createsOrg });
+    return cmd<Me>("enrol", { url, code, password, createsOrg, emailProof: emailProof ?? null });
   },
+
+  /** Ask for the letter with six digits. `sent` false means the last one went
+   *  out under a minute ago: wait `retry_after` seconds. */
+  invitationEmail: (url: string, code: string, lang: string): Promise<{ sent: boolean; retry_after: number }> =>
+    cmd("invitation_email", { url, code, lang }),
+  /** The six digits in, the proof that `enrol` carries out. */
+  invitationEmailVerify: (url: string, code: string, emailCode: string): Promise<{ email_proof: string }> =>
+    cmd("invitation_email_verify", { url, code, emailCode }),
+  /** Eight digits from a member's public key as the server lists it, to
+   *  compare with what that person's own XChange shows (crypto::verify_code). */
+  verifyCode: (publicKey: string): Promise<string> => cmd<string>("verify_code", { publicKey }),
+  /** This installation's own code, from the key it made or opened itself.
+   *  Null when it has not seen that key (see own_verify_code). */
+  ownVerifyCode: (): Promise<string | null> => cmd<string | null>("own_verify_code"),
+  /** What a server says before anyone signs in. Empty from an old one. */
+  serverInfo: (url: string): Promise<{ open_signup?: boolean; email_check?: boolean }> =>
+    cmd("server_info", { url }),
 
   /** A sign-in comes back as an identity, or as a challenge when the
    *  organisation wants a code first — then `loginTotp` finishes it. */
@@ -764,21 +1086,47 @@ export const api = {
 
   me: (): Promise<Me> => (isDesktop ? cmd<Me>("me") : http<Me>("/v1/me")),
 
-  projects: (): Promise<Project[]> =>
-    isDesktop ? cmd<Project[]>("projects") : http<Project[]>("/v1/projects"),
+  projects: (): Promise<Project[]> => {
+    if (isDesktop) return cmd<Project[]>("projects");
+    const devMode = typeof localStorage !== "undefined" ? localStorage.getItem("xchange.dev_mode") : null;
+    if (devMode !== "team" && storedToken() === null) {
+      return Promise.resolve(devProjects());
+    }
+    return http<Project[]>("/v1/projects");
+  },
 
-  createProjectIn: (name: string, origin: Origin): Promise<{ id: string }> =>
-    cmd<{ id: string }>("create_project", { name, origin }),
+  createProjectIn: (name: string, origin: Origin, sortWeight = 0): Promise<{ id: string }> => {
+    if (isDesktop) {
+      return cmd<{ id: string }>("create_project", { name, origin, sortWeight });
+    }
+    const all = devProjects();
+    const id = `p_${crypto.randomUUID()}`;
+    all.push({
+      id,
+      name,
+      sort_weight: sortWeight,
+      creator: "DEV",
+      profile_count: 0,
+      origin: "local",
+    });
+    saveDevProjects(all);
+    return Promise.resolve({ id });
+  },
 
-  /** Every profile when `projectId` is omitted — which is the Profiles view,
-   *  and the ordinary case. Passing one narrows it. */
-  profiles: (projectId?: string, origin?: Origin): Promise<Profile[]> =>
-    isDesktop
-      ? cmd<Profile[]>("profiles", { projectId: projectId ?? null, origin: origin ?? null })
-      : projectId
-        ? http<Profile[]>(`/v1/projects/${projectId}/profiles`)
-        : Promise.resolve([]),
-
+  profiles: (projectId?: string, origin?: Origin): Promise<Profile[]> => {
+    if (isDesktop) {
+      return cmd<Profile[]>("profiles", { projectId: projectId ?? null, origin: origin ?? null });
+    }
+    const devMode = typeof localStorage !== "undefined" ? localStorage.getItem("xchange.dev_mode") : null;
+    if (devMode !== "team" && storedToken() === null) {
+      const all = devProfiles();
+      if (!projectId) return Promise.resolve(all);
+      return Promise.resolve(all.filter((p) => p.project_id === projectId));
+    }
+    return projectId
+      ? http<Profile[]>(`/v1/projects/${projectId}/profiles`)
+      : Promise.resolve([]);
+  },
   // ---- the team (server only) ------------------------------------------
 
   /** Who did what, newest first. Owners and admins only; the server refuses
@@ -828,13 +1176,43 @@ export const api = {
     cmd("hand_over_key", { userId, publicKey }),
 
   grants: (projectId: string): Promise<{
-    granted: { user_id: string; email: string; role: string; permissions: Perm[]; domain_lists?: string[] }[];
+    granted: {
+      user_id: string;
+      email: string;
+      role: string;
+      permissions: Perm[];
+      domain_lists?: string[];
+      access_role?: string | null;
+    }[];
     implicit: { user_id: string; email: string; role: string }[];
   }> => cmd("grants", { projectId }),
 
-  /** `domainLists` undefined keeps what the grant already carries. */
-  grantAccess: (projectId: string, userId: string, permissions: Perm[], domainLists?: string[]): Promise<unknown> =>
-    cmd("grant_access", { projectId, userId, permissions, domainLists: domainLists ?? null }),
+  /** `domainLists` undefined keeps what the grant already carries. So does
+   *  `accessRole` undefined; `null` unlinks the grant from its role, so the
+   *  `permissions` sent stand on their own; an id links it, and the server
+   *  takes the role's boxes instead of `permissions`. */
+  grantAccess: (
+    projectId: string,
+    userId: string,
+    permissions: Perm[],
+    domainLists?: string[],
+    accessRole?: string | null,
+  ): Promise<unknown> =>
+    cmd("grant_access", {
+      projectId,
+      userId,
+      permissions,
+      domainLists: domainLists ?? null,
+      accessRole: accessRole ?? null,
+      link: accessRole !== undefined,
+    }),
+
+  /** The organisation's own roles (server 0017) — readable by every member,
+   *  written by owners and admins. */
+  accessRoles: (): Promise<AccessRole[]> => cmd<AccessRole[]>("access_roles"),
+  saveAccessRole: (id: string | null, name: string, permissions: Perm[]): Promise<{ id: string; grants_rewritten: number }> =>
+    cmd("save_access_role", { id, name, permissions }),
+  deleteAccessRole: (id: string): Promise<unknown> => cmd("delete_access_role", { id }),
 
   /** The organisation's domain lists — readable by every member, written by
    *  owners and admins, attached to grants. */
@@ -848,7 +1226,7 @@ export const api = {
 
   /** Remove a member and replace the organisation key. Pass null to rotate
    *  without removing anyone — after a lost laptop, say. */
-  removeMember: (userId: string | null): Promise<{ generation: number }> =>
+  removeMember: (userId: string | null): Promise<{ generation: number; unreadable?: number }> =>
     cmd("remove_member", { userId }),
 
   /** AI assistants over MCP: which are connected, and connecting them. See
@@ -910,10 +1288,23 @@ export const api = {
 
   // Local mode only: with a server, profiles and proxies are edited where the
   // permissions live, and that screen does not exist yet.
-  disconnectServer: (): Promise<Shell> => cmd<Shell>("disconnect_server"),
-  saveServerKit: (dir: string): Promise<{ path: string; files: number }> =>
-    cmd<{ path: string; files: number }>("save_server_kit", { dir }),
-  personas: (): Promise<Persona[]> => cmd<Persona[]>("personas"),
+  disconnectServer: (): Promise<Shell> => {
+    if (!isDesktop) {
+      if (typeof localStorage !== "undefined") {
+        localStorage.setItem("xchange.dev_mode", "local");
+        localStorage.removeItem(TOKEN_KEY);
+      }
+      return api.shell();
+    }
+    return cmd<Shell>("disconnect_server");
+  },
+  personas: (): Promise<Persona[]> => {
+    if (isDesktop) return cmd<Persona[]>("personas");
+    return Promise.resolve([
+      { id: "win-rtx4060", os: "windows", gpu: "NVIDIA GeForce RTX 4060" },
+      { id: "mac-m2", os: "macos", gpu: "Apple M2" },
+    ] as unknown as Persona[]);
+  },
   preview: (spec: {
     persona_id: string;
     fp_seed: number;
@@ -922,18 +1313,64 @@ export const api = {
     timezone: string | null;
     languages: string[] | null;
     overrides?: MachineOverrides;
-  }): Promise<Preview> => cmd<Preview>("preview", { spec }),
+  }): Promise<Preview> => {
+    if (isDesktop) return cmd<Preview>("preview", { spec });
+    return Promise.resolve({} as Preview);
+  },
   /** `origin` picks this machine's list or the team's; absent, the shell's mode. */
-  proxies: (origin?: Origin): Promise<LocalProxy[]> =>
-    cmd<LocalProxy[]>("proxies", { origin: origin ?? null }),
+  proxies: (origin?: Origin): Promise<LocalProxy[]> => {
+    if (isDesktop) return cmd<LocalProxy[]>("proxies", { origin: origin ?? null });
+    return Promise.resolve([]);
+  },
+  saveServerKit: (dir: string): Promise<{ path: string; files: number }> =>
+    cmd<{ path: string; files: number }>("save_server_kit", { dir }),
+  /** Logins stored beside a profile. `origin` matters when a local profile is
+   *  open in a shell connected to a server: the row says where its logins are. */
+  credentials: (profileId: string, origin?: Origin): Promise<Credential[]> =>
+    cmd<Credential[]>("credentials", { profileId, origin: origin ?? null }),
+  /** Every login's identity on this machine: what the account import checks a
+   *  pasted row against. Local only, in one call rather than one per profile.
+   *  Empty in browser dev, where profiles are a fixture and nothing is at
+   *  stake in a second import. */
+  credentialIndex: (): Promise<CredentialIdentity[]> =>
+    isDesktop ? cmd<CredentialIdentity[]>("credential_index") : Promise.resolve([]),
+  /** Writes a login; `origin` picks this machine's agent or the team server. */
+  saveCredential: (credential: Credential, origin?: Origin): Promise<{ id: string }> =>
+    cmd<{ id: string }>("save_credential", { credential, origin: origin ?? null }),
+  deleteCredential: (id: string, profileId: string, origin?: Origin): Promise<unknown> =>
+    cmd("delete_credential", { id, profileId, origin: origin ?? null }),
 
-  /** Logins stored beside a profile. Local mode only for now — see commands.rs. */
-  credentials: (profileId: string): Promise<Credential[]> =>
-    cmd<Credential[]>("credentials", { profileId }),
-  saveCredential: (credential: Credential): Promise<{ id: string }> =>
-    cmd<{ id: string }>("save_credential", { credential }),
-  deleteCredential: (id: string, profileId: string): Promise<unknown> =>
-    cmd("delete_credential", { id, profileId }),
+  /** Sign one local profile into its platform.
+   *
+   *  The profile is opened through its own proxy and persona. Cookies are
+   *  written only when the stored session is not already signed in; the agent
+   *  then fills the login form with human key events if credentials are saved.
+   *  The browser is left open, so a verification code or captcha can be
+   *  finished by hand. */
+  loginProfile: (
+    profileId: string,
+    args: {
+      cookies: unknown[];
+      username: string | null;
+      password: string | null;
+      platform: string;
+      url: string;
+      checkUrl: string;
+      origin?: Origin;
+    },
+  ): Promise<LoginResult> =>
+    isDesktop
+      ? cmd<LoginResult>("login_profile", {
+          profileId,
+          cookies: args.cookies,
+          username: args.username,
+          password: args.password,
+          platform: args.platform,
+          url: args.url,
+          checkUrl: args.checkUrl,
+          origin: args.origin ?? null,
+        })
+      : Promise.reject(new ApiError(0, "Login is only available in Desktop App mode.")),
   /** Six digits and how long they last. The seed stays in the agent. */
   /** Ask the agent to fetch and install the browser. Returns once the download
    *  has started; watch shell.core_download for the rest. */
@@ -1010,10 +1447,80 @@ export const api = {
   /** What other people have given to this account. */
   sharedWithMe: (): Promise<Profile[]> => cmd<Profile[]>("shared_with_me"),
 
-  saveProfile: (profile: unknown, origin?: Origin): Promise<{ id: string }> =>
-    cmd<{ id: string }>("save_profile", { profile, origin: origin ?? null }),
-  deleteProfile: (id: string, origin?: Origin): Promise<unknown> =>
-    cmd("delete_profile", { id, origin: origin ?? null }),
+  saveProfile: (profile: unknown, origin?: Origin): Promise<{ id: string }> => {
+    if (isDesktop) {
+      return cmd<{ id: string }>("save_profile", { profile, origin: origin ?? null });
+    }
+    const devMode = typeof localStorage !== "undefined" ? localStorage.getItem("xchange.dev_mode") : null;
+    if (devMode !== "team" && storedToken() === null) {
+      const p = profile as Partial<Profile> & { id?: string };
+      const all = devProfiles();
+      const id = p.id || crypto.randomUUID();
+      const existingIdx = all.findIndex((x) => x.id === id);
+      const updated = {
+        id,
+        name: p.name || "Profile",
+        origin: "local" as const,
+        project_id: p.project_id ?? null,
+        project_name: p.project_name ?? null,
+        tags: p.tags ?? [],
+        notes: p.notes ?? "",
+        status: p.status ?? "Idle",
+        persona_id: p.persona_id ?? "win-rtx4060",
+        proxy: p.proxy ?? null,
+        allow_no_proxy: true,
+        last_opened_at: new Date().toISOString(),
+        permissions: ["launch", "manage_access", "edit_profile", "delete_profile"],
+        shared_with: 0,
+        fp_seed: 1234,
+        timezone: null,
+        languages: null,
+        running: false,
+        lock: null,
+        ...(existingIdx >= 0 ? all[existingIdx] : {}),
+        ...p,
+      } as Profile;
+      if (existingIdx >= 0) {
+        all[existingIdx] = updated;
+      } else {
+        all.push(updated);
+      }
+      saveDevProfiles(all);
+      return Promise.resolve({ id });
+    }
+    return Promise.resolve({ id: "dev" });
+  },
+  /** The note alone. See `save_notes` in commands.rs for why it is not
+   *  `saveProfile` with one field changed.
+   *
+   *  Both transports, like every other call: under `npm run dev` there is no
+   *  Rust side, and a command-only definition failed with "Could not reach the
+   *  server." while the list itself came through the Vite proxy. */
+  setNotes: (profileId: string, notes: string, origin?: Origin): Promise<unknown> =>
+    isDesktop
+      ? cmd("save_notes", { profileId, notes, origin: origin ?? null })
+      : http(`/v1/profiles/${profileId}/notes`, {
+          method: "PATCH",
+          body: JSON.stringify({ notes }),
+        }),
+  deleteProfile: (id: string, origin?: Origin): Promise<unknown> => {
+    if (isDesktop) {
+      return cmd("delete_profile", { id, origin: origin ?? null });
+    }
+    const devMode = typeof localStorage !== "undefined" ? localStorage.getItem("xchange.dev_mode") : null;
+    if (devMode !== "team" && storedToken() === null) {
+      const all = devProfiles().filter((x) => x.id !== id);
+      saveDevProfiles(all);
+      return Promise.resolve();
+    }
+    return Promise.resolve();
+  },
+  /** Deletes this profile's browser folder and creates a fresh one in the
+   *  storage folder chosen in Settings. The profile, its tags and the logins
+   *  kept in XChange stay; the cookies and site data in that folder do not.
+   *  Desktop only: the folder lives on this machine and the agent owns it. */
+  resetProfile: (id: string): Promise<{ dir: string; previous: string; removed: boolean }> =>
+    cmd("reset_profile", { id }),
 
   /** Many profiles from one template. Each gets its own seed and its own
    *  persona — see the agent for why that is the whole safety property. */
@@ -1050,6 +1557,17 @@ export const api = {
   sniffProxyKind: (host: string, port: number): Promise<{ kind: "http" | "socks5" | null }> =>
     cmd("sniff_proxy_kind", { host, port }),
 
+  /** One new KiotProxy exit. Through Rust because the window's CSP allows no
+   *  third-party `connect-src`: a fetch to the provider from here never leaves
+   *  the webview. The provider's own body comes back for the caller to read. */
+  fetchKiotProxy: (key: string): Promise<{ status: number; body: unknown }> =>
+    cmd("fetch_kiot_proxy", { key }),
+
+  /** One new NestProxy exit for a Proxy Key, for the same CSP reason as
+   *  `fetchKiotProxy`. The provider's own body comes back for the caller. */
+  fetchNestProxy: (key: string): Promise<{ status: number; body: unknown }> =>
+    cmd("fetch_nest_proxy", { key }),
+
   /** A pasted supplier block. Every line is reported back with its number. */
   importProxies: (
     text: string,
@@ -1068,6 +1586,66 @@ export const api = {
   ): Promise<{ imported: number; session_only: number; skipped: number }> =>
     cmd("import_cookies", { id, cookies }),
 
+  /** The OS folder chooser, for exporting a cookie file.
+   *
+   *  Null is the chooser dismissed, not a failure — the caller does nothing.
+   *  Only the desktop has one: under `npm run dev` there is no Rust side, so a
+   *  cookie export there has nowhere to write. */
+  pickFolder: (title: string): Promise<string | null> =>
+    isDesktop
+      ? cmd<string | null>("pick_folder", { title })
+      : Promise.reject(new ApiError(0, "Choosing a folder is only available in Desktop App mode.")),
+
+  /** The OS file chooser for an exported `.zip`. The folder chooser cannot
+   *  pick a file, so the import dialog has one button for each. */
+  pickZip: (title: string): Promise<string | null> =>
+    isDesktop
+      ? cmd<string | null>("pick_zip", { title })
+      : Promise.reject(new ApiError(0, "Choosing a file is only available in Desktop App mode.")),
+
+  /** The OS file chooser for Import Account: a CSV/TXT file or a spreadsheet.
+   *
+   *  Null is the chooser dismissed, not a failure. Only the desktop has one:
+   *  under `npm run dev` the dialog's own hidden input is used instead, and a
+   *  spreadsheet cannot be read there. */
+  pickAccountFile: (title: string): Promise<AccountFile | null> =>
+    isDesktop
+      ? cmd<AccountFile | null>("pick_account_file", { title })
+      : Promise.reject(new ApiError(0, "Choosing a file is only available in Desktop App mode.")),
+
+  /** Writes an exported cookie file into that folder and returns where it went. */
+  writeCookiesFile: (dir: string, fileName: string, text: string): Promise<{ path: string }> =>
+    isDesktop
+      ? cmd<{ path: string }>("write_cookies_file", { dir, fileName, text })
+      : Promise.reject(new ApiError(0, "Writing a file is only available in Desktop App mode.")),
+
+  /** Whole profiles — browser data plus every saved login — as a folder or a
+   *  zip, so another machine can import them.
+   *
+   *  `origin` matters: a team profile's logins live on the server and are read
+   *  with the organisation key, while a local profile's are read by the agent
+   *  from its own vault. */
+  exportProfiles: (
+    dir: string,
+    name: string,
+    format: ProfilesExportFormat,
+    profiles: { id: string; name: string; origin: Origin }[],
+  ): Promise<ProfilesExportResult> =>
+    isDesktop
+      ? cmd<ProfilesExportResult>("export_profiles", { dir, name, format, profiles })
+      : Promise.reject(new ApiError(0, "Exporting profiles is only available in Desktop App mode.")),
+
+  /** Profiles in from an exported folder, a single profile folder, or the
+   *  exported `.zip`. Detection of which one was chosen happens in the agent;
+   *  a selection holding no profile is refused there with a message. */
+  importProfiles: (
+    path: string,
+    projectId: string | null,
+  ): Promise<ProfilesImportResult> =>
+    isDesktop
+      ? cmd<ProfilesImportResult>("import_profiles", { path, projectId })
+      : Promise.reject(new ApiError(0, "Importing profiles is only available in Desktop App mode.")),
+
   /** Another anti-detect browser, through its API. The token is passed per
    *  call and kept nowhere; `base` overrides where a local API answers. */
   vendorList: (vendor: Vendor, token: string, base: string | null): Promise<VendorProfile[]> =>
@@ -1085,14 +1663,33 @@ export const api = {
   mirrorStatus: (): Promise<MirrorStatus> => cmd<MirrorStatus>("mirror_status"),
   mirrorTyping: (on: boolean): Promise<unknown> => cmd("mirror_typing", { on }),
 
+  /** Saved local proxies whose password the keychain will not open now
+   *  (they read back blank); `retry` asks the keychain again. */
+  vaultStatus: (retry = false): Promise<{ available: boolean; unreadable: string[] }> =>
+    cmd("vault_status", { retry }),
+
   // ---- warming ------------------------------------------------------------
 
-  warmStart: (profileIds: string[], plan: WarmPlan): Promise<{ started: string[]; refused: Refusal[] }> =>
-    cmd("warm_start", { profileIds, plan }),
+  /** A team profile is opened by the shell first, lock and all, with the
+   *  debugging port; a local one by the agent. */
+  warmStart: (profiles: { id: string; origin: Origin }[], plan: WarmPlan): Promise<{ started: string[]; refused: Refusal[] }> =>
+    cmd("warm_start", { profiles, plan }),
   warmStatus: (): Promise<WarmProgress[]> => cmd<WarmProgress[]>("warm_status"),
   warmStop: (id: string): Promise<unknown> => cmd("warm_stop", { id }),
   warmClear: (): Promise<unknown> => cmd("warm_clear"),
   warmDefaults: (): Promise<{ urls: string[] }> => cmd("warm_defaults"),
+
+  // ---- farming: warm-ups on a schedule -----------------------------------
+
+  farmList: (): Promise<{ now_ms: number; farms: Farm[] }> => cmd("farm_list"),
+  farmCreate: (spec: FarmSpec, targets: FarmTarget[]): Promise<{ id: string }> => cmd("farm_create", { spec, targets }),
+  farmDelete: (id: string): Promise<unknown> => cmd("farm_delete", { id }),
+  farmPause: (id: string, paused: boolean): Promise<unknown> => cmd("farm_pause", { id, paused }),
+  farmDue: (): Promise<FarmDue[]> => cmd<FarmDue[]>("farm_due"),
+  /** Marks the session started and returns the warm-up plan to run it with. */
+  farmClaim: (farmId: string, profileId: string): Promise<WarmPlan> => cmd<WarmPlan>("farm_claim", { farmId, profileId }),
+  farmFail: (farmId: string, profileId: string, error: string): Promise<unknown> => cmd("farm_fail", { farmId, profileId, error }),
+  farmStageApplied: (farmId: string, profileId: string): Promise<unknown> => cmd("farm_stage_applied", { farmId, profileId }),
 
   // ---- this machine as a persona ----------------------------------------
 
@@ -1100,7 +1697,7 @@ export const api = {
    *  a Chrome window opens and closes. Nothing is sent anywhere. */
   capturePersona: (): Promise<{ persona: Record<string, unknown> & { id: string }; problems: string[]; browser: string }> =>
     cmd("capture_persona"),
-  /** Writes it to ~/Downloads/fury-persona-<id>.json; returns the path. */
+  /** Writes it to ~/Downloads/xchange-persona-<id>.json; returns the path. */
   savePersonaFile: (persona: unknown): Promise<string> => cmd<string>("save_persona_file", { persona }),
   /** Keep a capture on this machine as a persona; returns its id. */
   usePersonaHere: (persona: unknown): Promise<string> => cmd<string>("use_persona_here", { persona }),
@@ -1142,6 +1739,11 @@ export const api = {
   installExtensionMany: (profileIds: string[], crxB64: string): Promise<{
     extension: Extension | null; installed: string[]; skipped: { id: string; reason: string }[];
   }> => cmd("install_extension_many", { profileIds, crxB64 }),
+  /** One profile's extension with its storage -- so signed in -- into others.
+   *  Every browser involved must be closed; see ext::copy_with_state. */
+  copyExtensionWithState: (fromProfileId: string, extId: string, profileIds: string[]): Promise<{
+    extension: Extension | null; installed: string[]; skipped: { id: string; reason: string }[];
+  }> => cmd("copy_extension_with_state", { fromProfileId, extId, profileIds }),
   removeExtension: (profileId: string, id: string): Promise<unknown> =>
     cmd("remove_extension", { profileId, id }),
   extensionCatalogue: (): Promise<CatalogueEntry[]> => cmd("extension_catalogue"),
@@ -1160,6 +1762,21 @@ export const api = {
   /** Removes caches only. The agent refuses while the profile is open. */
   trimProfile: (id: string): Promise<{ bytes: number; removed: string[] }> =>
     cmd("trim_profile", { id }),
+  /** Opens the profile's folder in the file manager. `opened` is false when
+   *  the profile has never run here, and `path` is where it would be. */
+  openProfileFolder: (id: string): Promise<{ path: string; opened: boolean }> =>
+    cmd("open_profile_folder", { id }),
+  /** Opens the folder `FURY_HOME` names, from Settings → Data. */
+  openDataFolder: (): Promise<{ path: string }> => cmd("open_data_folder"),
+  /** Where new profiles are made, and how many already live elsewhere. */
+  storageInfo: (): Promise<StorageInfo> => cmd("storage_info"),
+  /** Chooses the folder new profiles are created under. `create` allows the
+   *  folder to be made when it does not exist yet; every other check — is it a
+   *  directory, writable, on a filesystem that can be locked to this account —
+   *  is answered by the agent, which is the process that will write there. */
+  setProfileRoot: (path: string, create = false): Promise<{ profile_root: string }> =>
+    cmd("set_profile_root", { path, create }),
+  resetProfileRoot: (): Promise<{ profile_root: null }> => cmd("reset_profile_root"),
 
   exportProject: (id: string, path: string, passphrase: string, withData = true):
     Promise<{ path: string; bytes: number }> =>
@@ -1174,10 +1791,10 @@ export const api = {
     cmd("restore_profile", { id, origin: origin ?? null }),
   purgeProfile: (id: string, origin?: Origin): Promise<unknown> =>
     cmd("purge_profile", { id, origin: origin ?? null }),
-  renameProject: (id: string, name: string, origin?: Origin): Promise<unknown> =>
-    cmd("rename_project", { id, name, origin: origin ?? null }),
+  renameProject: (id: string, name: string, origin?: Origin, sortWeight?: number): Promise<unknown> =>
+    cmd("rename_project", { id, name, origin: origin ?? null, sortWeight: sortWeight ?? null }),
   deleteProject: (id: string, origin?: Origin): Promise<unknown> =>
     cmd("delete_project", { id, origin: origin ?? null }),
-  createProject: (name: string): Promise<{ id: string }> =>
-    cmd<{ id: string }>("create_project", { name }),
+  createProject: (name: string, sortWeight = 0): Promise<{ id: string }> =>
+    cmd<{ id: string }>("create_project", { name, sortWeight }),
 };

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: AGPL-3.0-or-later
-# Copyright 2026 Bogdan Shapovalov and the Fury authors
+# Copyright 2026 Bogdan Shapovalov and the XChange authors
 """Regenerate sw-probe.js from probe.js, and fail if it has drifted.
 
 The ServiceWorker runs the same payload as the dedicated Worker. If the two ever
@@ -17,7 +17,7 @@ import sys
 
 HERE = pathlib.Path(__file__).resolve().parent
 HEADER = """// SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright 2026 Bogdan Shapovalov and the Fury authors
+// Copyright 2026 Bogdan Shapovalov and the XChange authors
 //
 // GENERATED from WORKER_PROBE_SRC in probe.js by tools/detect-suite/sync-sw.py.
 // Do not edit: a ServiceWorker that answers differently from the dedicated

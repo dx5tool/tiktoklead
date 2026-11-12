@@ -1,14 +1,22 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright 2026 Bogdan Shapovalov and the Fury authors
+// Copyright 2026 Bogdan Shapovalov and the XChange authors
 
 import { useEffect, useState } from "react";
-import { api, type DomainList, type KeptPersona, type Shell } from "../api";
+import { api, type DomainList, type KeptPersona, type Shell, type StorageInfo } from "../api";
 import { SecondFactor } from "./SecondFactor";
+import { useAsk } from "./Ask";
 import { languages, useI18n, type Language } from "../i18n";
 import { type Theme, themes, useTheme } from "../theme";
+import { Select } from "./Select";
+import { DEFAULT_SERVER } from "../defaults";
 
 const TABS = ["general", "team", "data", "about"] as const;
 type Tab = (typeof TABS)[number];
+
+// Team server is temporarily out of the bar: bundle sync is not finished, so
+// the tab only offers a connection nothing on this machine can use yet. The
+// panel below stays intact; delete this list to bring the tab back.
+const HIDDEN_TABS: readonly Tab[] = ["team"];
 
 /** Everything that is a preference rather than a property of a profile.
  *
@@ -22,7 +30,7 @@ type Tab = (typeof TABS)[number];
  *  fit. */
 /** The issue form that turns a saved capture into a pull request
  *  (.github/workflows/persona-issue.yml). Drop the file in; a robot does the rest. */
-const PERSONA_FORM = "https://github.com/furyteamtop/fury-antidetect-browser/issues/new?template=persona.yml";
+const PERSONA_FORM = "https://github.com/dx5tool/fury-nomaster/issues/new?template=persona.yml";
 
 export function Settings({
   shell,
@@ -33,6 +41,7 @@ export function Settings({
   onEnrol,
   onSignup,
   onClose,
+  initialTab,
 }: {
   shell: Shell;
   hasProject: boolean;
@@ -45,18 +54,76 @@ export function Settings({
   onEnrol: () => void;
   onSignup: () => void;
   onClose: () => void;
+  initialTab?: Tab;
 }) {
   const [theme, setTheme] = useTheme();
-  const { t, language, setLanguage } = useI18n();
-  const [tab, setTab] = useState<Tab>("general");
+  const { t, say, language, setLanguage } = useI18n();
+  const [tab, setTab] = useState<Tab>(
+    initialTab && !HIDDEN_TABS.includes(initialTab) ? initialTab : "general",
+  );
   // Prefilled with the server this machine used last. The first screen already
   // does this, and somebody working locally never reaches the first screen --
   // the window opens straight into the profile list, so THIS is where the way
   // back has to be. Reported exactly that way: "открываю лаунчер и он сразу
   // входит, кнопки войти в свой аккаунт нет".
-  const [url, setUrl] = useState(shell.last_server ?? "");
+  // Our server when this machine has used none, as the sign-up and invitation
+  // screens already do: an empty field next to "Connect" left a tester asking
+  // what to type.
+  const [url, setUrl] = useState(shell.last_server ?? DEFAULT_SERVER);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const { ask, dialog: askDialog } = useAsk();
+  const [storage, setStorage] = useState<StorageInfo | null>(null);
+
+  // Asked once when the Data tab is first opened, not on mount: the agent call
+  // is cheap but the answer is only drawn there, and this dialog is opened for
+  // the theme as often as for storage.
+  useEffect(() => {
+    if (tab !== "data" || storage !== null) return;
+    let alive = true;
+    api.storageInfo().then(
+      (s) => alive && setStorage(s),
+      () => {},
+    );
+    return () => {
+      alive = false;
+    };
+  }, [tab, storage]);
+
+  /** Sets the root, and turns each refusal into what it actually means.
+   *
+   *  The agent answers with a code rather than a sentence, because these are
+   *  failures this application produces itself and Rust does not know which
+   *  language the window is in. The codes are translated by `say`; anything
+   *  without one is shown as it came. */
+  const applyRoot = async (path: string, create = false) => {
+    setBusy(true);
+    setError(null);
+    try {
+      await api.setProfileRoot(path, create);
+      setStorage(await api.storageInfo());
+    } catch (e) {
+      const code = (e as { code?: string | null })?.code ?? null;
+      // The folder does not exist yet: offer to make it rather than making the
+      // operator leave and create it by hand.
+      if (code === "err.rootNotDir") {
+        const go = await ask({
+          title: t("set.storageCreateTitle"),
+          detail: t("set.storageCreateDetail", { path }),
+          confirmLabel: t("set.storageCreate"),
+        });
+        if (go !== null) {
+          setBusy(false);
+          await applyRoot(path, true);
+          return;
+        }
+        return;
+      }
+      setError(say(e));
+    } finally {
+      setBusy(false);
+    }
+  };
 
   return (
     <div className="scrim" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
@@ -66,7 +133,7 @@ export function Settings({
         </div>
 
         <div className="tabs" role="tablist">
-          {TABS.map((x) => (
+          {TABS.filter((x) => !HIDDEN_TABS.includes(x)).map((x) => (
             <button key={x} role="tab" aria-selected={tab === x} onClick={() => setTab(x)}>
               {t(`set.tab.${x}` as never)}
             </button>
@@ -106,7 +173,7 @@ export function Settings({
                       aria-pressed={language === l}
                       onClick={() => setLanguage(l as Language)}
                     >
-                      {l === "system" ? t("set.langSystem") : l === "ru" ? "Русский" : "English"}
+                      {l === "system" ? t("set.langSystem") : l === "ru" ? "Русский" : l === "zh" ? "简体中文" : "English"}
                     </button>
                   ))}
                 </div>
@@ -271,6 +338,72 @@ export function Settings({
                 </dl>
                 <p className="hint">{t("set.machineHint")}</p>
               </div>
+
+              {/* Where everything lives, and a way into it. The data directory
+                  is fixed — it comes from FURY_HOME and also seeds the agent's
+                  pipe name — but where *new* profiles are filed is a choice,
+                  and the only place it can be made. */}
+              <div className="settingsGroup">
+                <h2>{t("set.storage")}</h2>
+                <dl className="kv">
+                  <dt>{t("set.storageWhere")}</dt>
+                  <dd className="mono" style={{ wordBreak: "break-all" }}>{shell.data_dir}</dd>
+                  <dt>{t("set.storageProfiles")}</dt>
+                  <dd className="mono" style={{ wordBreak: "break-all" }}>
+                    {storage === null
+                      ? t("set.storageLoading")
+                      : (storage.profile_root ?? storage.default_root)}
+                  </dd>
+                </dl>
+                <div className="row">
+                  <button onClick={() => void api.openDataFolder()}>
+                    {t("set.storageOpen")}
+                  </button>
+                  <button
+                    disabled={busy || storage === null}
+                    onClick={async () => {
+                      const path = await ask({
+                        title: t("set.storageChangeTitle"),
+                        detail: t("set.storageChangeDetail", {
+                          n: String((storage?.profiles_here ?? 0) + (storage?.profiles_elsewhere ?? 0)),
+                        }),
+                        placeholder: t("set.storagePlaceholder"),
+                        initial: storage?.profile_root ?? storage?.default_root ?? "",
+                        confirmLabel: t("set.storageChange"),
+                      });
+                      if (!path) return;
+                      await applyRoot(path);
+                    }}
+                  >
+                    {t("set.storageChange")}
+                  </button>
+                  {storage?.profile_root != null && (
+                    <button
+                      disabled={busy}
+                      onClick={async () => {
+                        const go = await ask({
+                          title: t("set.storageReset"),
+                          detail: t("set.storageResetDetail", { path: storage.default_root }),
+                          confirmLabel: t("set.storageReset"),
+                        });
+                        if (go === null) return;
+                        try {
+                          await api.resetProfileRoot();
+                          setStorage(await api.storageInfo());
+                        } catch (e) {
+                          setError(say(e));
+                        }
+                      }}
+                    >
+                      {t("set.storageReset")}
+                    </button>
+                  )}
+                </div>
+                {storage && storage.profiles_elsewhere > 0 && (
+                  <p className="hint">{t("set.storageSplit", { n: String(storage.profiles_elsewhere) })}</p>
+                )}
+                <p className="hint">{t("set.storageHint")}</p>
+              </div>
             </>
           )}
 
@@ -284,6 +417,9 @@ export function Settings({
           </button>
         </div>
       </div>
+      {/* Inside the dialog, not beside it: `ask` draws a scrim of its own, and
+          one left outside would sit under this modal rather than over it. */}
+      {askDialog}
     </div>
   );
 }
@@ -296,7 +432,7 @@ export function Settings({
 function SelfHosting() {
   const { t, say } = useI18n();
   const [open, setOpen] = useState(false);
-  const [dir, setDir] = useState("~/fury-server");
+  const [dir, setDir] = useState("~/xchange-server");
   const [saved, setSaved] = useState<{ path: string; files: number } | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -351,7 +487,7 @@ function SelfHosting() {
             </li>
             <li>
               {t("host.step3")}
-              <pre className="mono snippet">fury-server invite --email you@example.com --org "My team"</pre>
+              <pre className="mono snippet">xchange-server invite --email you@example.com --org "My team"</pre>
             </li>
             <li>{t("host.step4")}</li>
           </ol>
@@ -369,7 +505,7 @@ function About({ shell }: { shell: Shell }) {
   const [check, setCheck] = useState<Check | null>(null);
   const [autoCheck, setAutoCheck] = useState(() => {
     try {
-      return localStorage.getItem("fury.update.auto") !== "off";
+      return localStorage.getItem("xchange.update.auto") !== "off";
     } catch {
       return true;
     }
@@ -379,8 +515,7 @@ function About({ shell }: { shell: Shell }) {
   return (
     <>
       <div className="settingsGroup">
-        <h2>Fury</h2>
-        <p>{t("about.what")}</p>
+        <h2>XChange</h2>
         <dl className="kv">
           <dt>{t("about.version")}</dt>
           <dd className="mono">{shell.version}</dd>
@@ -450,7 +585,7 @@ function About({ shell }: { shell: Shell }) {
             onChange={(e) => {
               setAutoCheck(e.target.checked);
               try {
-                localStorage.setItem("fury.update.auto", e.target.checked ? "on" : "off");
+                localStorage.setItem("xchange.update.auto", e.target.checked ? "on" : "off");
               } catch {
                 /* a private window: the choice lasts this session */
               }
@@ -463,53 +598,6 @@ function About({ shell }: { shell: Shell }) {
             that could silently replace itself is exactly what this one must not
             be, and people running accounts deserve to know which it is. */}
         <p className="hint">{t("about.noAutoInstall")}</p>
-      </div>
-
-      <div className="settingsGroup">
-        <h2>{t("about.licence")}</h2>
-        <p>{t("about.licenceBody")}</p>
-        <p className="hint">{t("about.licenceWhy")}</p>
-      </div>
-
-      <div className="settingsGroup">
-        <h2>{t("about.author")}</h2>
-        <dl className="kv">
-          <dt>{t("about.madeBy")}</dt>
-          <dd>Bogdan Shapovalov</dd>
-          <dt>{t("about.contact")}</dt>
-          <dd>
-            <a
-              href="https://t.me/shapovalovbogdan"
-              target="_blank"
-              rel="noreferrer"
-              onClick={(e) => {
-                e.preventDefault();
-                void api.openUrl("https://t.me/shapovalovbogdan");
-              }}
-            >
-              @shapovalovbogdan
-            </a>
-          </dd>
-          <dt>{t("about.source")}</dt>
-          <dd>
-            {/* target="_blank" alone does nothing here, and this link was proof
-                of it: a Tauri window has no tab to open and no browser behind
-                it, so the click was silence. Same handler as the release link
-                above -- the href stays for the address on hover and for a
-                right-click copy, and the click is handed to the system. */}
-            <a
-              href="https://github.com/furyteamtop/fury-antidetect-browser"
-              target="_blank"
-              rel="noreferrer"
-              onClick={(e) => {
-                e.preventDefault();
-                void api.openUrl("https://github.com/furyteamtop/fury-antidetect-browser");
-              }}
-            >
-              github.com/furyteamtop/fury-antidetect-browser
-            </a>
-          </dd>
-        </dl>
       </div>
     </>
   );
@@ -571,14 +659,14 @@ function DomainLists() {
       <div className="field">
         <label htmlFor="dl-pick">{t("set.listName")}</label>
         <div>
-          <select id="dl-pick" value={isNew ? "" : name} onChange={(e) => void pick(e.target.value)}>
+          <Select id="dl-pick" value={isNew ? "" : name} onChange={(e) => void pick(e.target.value)}>
             <option value="">{t("set.listNew")}</option>
             {lists.map((l) => (
               <option key={l.name} value={l.name}>
-                {l.name} — {l.allow_only ? t("pd.listAllowOnly", { n: l.domains }) : t("pd.listBlocks", { n: l.domains })}
+                {l.name} — {l.local ? t("pd.listLocal", { n: l.domains }) : l.allow_only ? t("pd.listAllowOnly", { n: l.domains }) : t("pd.listBlocks", { n: l.domains })}
               </option>
             ))}
-          </select>
+          </Select>
           {isNew && (
             <>
               <input
@@ -617,7 +705,7 @@ function DomainLists() {
                   setNote(
                     t("set.listSaved", {
                       n: saved.domains,
-                      mode: saved.allow_only ? t("set.listModeAllow") : "",
+                      mode: saved.local ? t("set.listModeLocal") : saved.allow_only ? t("set.listModeAllow") : "",
                     }),
                   );
                   setIsNew(false);
@@ -871,10 +959,22 @@ function describeMachine(p: Record<string, unknown>): string {
   const gpu = o(p.gpu);
   const screen = o(p.screen);
   return [
-    [os.name, os.version].filter(Boolean).join(" "),
+    [os.name, os.name === "Windows" ? windowsRelease(String(os.version ?? "")) : os.version].filter(Boolean).join(" "),
     gpu.webgl_renderer,
     screen.width && screen.height ? `${screen.width}×${screen.height}` : null,
   ]
     .filter(Boolean)
     .join(" · ");
+}
+
+/** A capture kept before 0.3.10 stores Client Hints' platformVersion as the
+ *  version, and on Windows that is not the release: Windows 10 1809 says
+ *  7.0.0. Same table as shared-rs persona.rs `windows_release`. */
+function windowsRelease(v: string): string {
+  if (!v.includes(".")) return v;
+  const [major, minor] = v.split(".").map((x) => parseInt(x, 10));
+  if (major === 0) return ({ 1: "7", 2: "8", 3: "8.1" } as Record<number, string>)[minor] ?? v;
+  if (major >= 1 && major <= 10) return "10";
+  if (major >= 13) return "11";
+  return v;
 }

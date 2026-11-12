@@ -5,10 +5,10 @@
 -- off the schema:
 --
 --   1. The app connects as the OWNER of every table. deploy/server-install.sh
---      creates role `fury` and runs `createdb -O fury`, so the migrations and
+--      creates role `xchange` and runs `createdb -O xchange`, so the migrations and
 --      the server share one role, and PostgreSQL exempts a table's owner from
 --      its own policies unless the table says FORCE. Measured: a connection as
---      `fury`, with app.user_id set to a user belonging to organisation A,
+--      `xchange`, with app.user_id set to a user belonging to organisation A,
 --      returned BOTH organisations' projects — and returned them with
 --      app.user_id unset entirely.
 --
@@ -126,11 +126,11 @@ CREATE POLICY org_isolation ON autofill_tokens
 --
 -- FROM CURRENT_USER, not FROM PUBLIC, and the difference is the whole thing.
 -- The app owns this table, and an owner's privileges live in the ACL as an
--- explicit grant to itself — `{fury=arwdDxt/fury}` — which a revoke aimed at
+-- explicit grant to itself — `{xchange=arwdDxt/xchange}` — which a revoke aimed at
 -- PUBLIC does not touch. Measured: with the PUBLIC form in place, an UPDATE
 -- from the application rewrote an audit row and reported success.
 --
--- An owner revoking from itself is allowed, and leaves `{fury=arDxt/fury}`:
+-- An owner revoking from itself is allowed, and leaves `{xchange=arDxt/xchange}`:
 -- insert and select stay, update and delete are gone. It can be granted back,
 -- which is as it should be — the point is that undoing this is a deliberate
 -- statement somebody has to write, not the default.

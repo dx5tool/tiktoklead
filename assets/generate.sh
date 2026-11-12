@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: AGPL-3.0-or-later
-# Copyright 2026 Bogdan Shapovalov and the Fury authors
+# Copyright 2026 Bogdan Shapovalov and the XChange authors
 
 # Generate every derived icon size from assets/icon.png.
 #
@@ -47,7 +47,7 @@ sips -z 142 142 "$SRC" --out "$TAURI/Square142x142Logo.png" >/dev/null
 cp "$SRC" "$TAURI/icon.png"
 
 echo "==> macOS .icns"
-ICONSET="$(mktemp -d)/Fury.iconset"
+ICONSET="$(mktemp -d)/XChange.iconset"
 mkdir -p "$ICONSET"
 for s in 16 32 128 256 512; do
   sips -z $s $s "$SRC" --out "$ICONSET/icon_${s}x${s}.png" >/dev/null

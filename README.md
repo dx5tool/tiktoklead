@@ -1,17 +1,17 @@
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/logo-dark.png">
-  <img src="assets/logo.png" alt="Fury" width="420">
+  <img src="assets/logo.png" alt="XChange" width="420">
 </picture>
 
 A free, open-source anti-detect browser with real team collaboration. Own
 Chromium fork, works standalone with no server, self-hostable when you need a
 team. No seats, no per-profile pricing, no telemetry.
 
-**[furybrowser.dev](https://furybrowser.dev)** · *[Русская версия](README.ru.md)*
+**[xchange.dev](https://xchange.dev)** · *[Русская версия](README.ru.md)*
 
 > **Status: in development, and now on both macOS and Windows.** The core builds
 > and spoofs; the agent launches profiles; the server and desktop shell work.
-> Builds are on the [Releases](https://github.com/furyteamtop/fury-antidetect-browser/releases)
+> Builds are on the [Releases](https://github.com/dx5tool/fury-nomaster/releases)
 > page, marked pre-release. **macOS builds are signed and notarised since
 > 21.09.2026; Windows is not** — see below.
 >
@@ -53,7 +53,7 @@ team. No seats, no per-profile pricing, no telemetry.
 > **Windows is not signed.** That is a separate certificate, not started, so
 > the installer shows SmartScreen: **More info → Run anyway**. A macOS download
 > of 0.1.3 or earlier is ad-hoc signed and needs `xattr -dr
-> com.apple.quarantine /Applications/Fury.app` once; [docs/15](docs/15-install.md)
+> com.apple.quarantine /Applications/XChange.app` once; [docs/15](docs/15-install.md)
 > walks through both.
 >
 > **Linux** is not a target. See the table at the bottom.
@@ -98,7 +98,7 @@ access grants, a distributed lock. One binary and Postgres on any VPS —
 **Hosted** exists, and it opened only once the condition it was gated behind
 was met: bundles are encrypted on the operator's machine, so the server holds
 data it cannot itself read. The address is prefilled on the sign-up screen
-(`srv.furybrowser.dev`, [desktop/src/defaults.ts](desktop/src/defaults.ts))
+(`srv.xchange.dev`, [desktop/src/defaults.ts](desktop/src/defaults.ts))
 and is editable — a team with its own server clears it and types theirs. It
 runs with open sign-up, every registration is its own organisation, and it is
 still somebody else's machine: [docs/13](docs/13-self-hosting.md) is one
@@ -172,7 +172,7 @@ minutes depending on what changed; `ccache` and `sccache` do not help, because
 the build uses `-fmodules` and they miss on everything.
 
 ```bash
-git clone https://github.com/furyteamtop/fury-antidetect-browser && cd fury-antidetect-browser
+git clone https://github.com/dx5tool/fury-nomaster && cd xchange-antidetect-browser
 cargo build --release
 ```
 
@@ -187,19 +187,19 @@ Building the core: [docs/03](docs/03-chromium-fork.md).
 Start the local daemon — this is the whole solo product:
 
 ```bash
-cargo run -p fury-agent -- serve
+cargo run -p xchange-agent -- serve
 ```
 
 Point it at a core binary if it is not beside the agent:
 
 ```bash
-FURY_CORE=/path/to/Chromium cargo run -p fury-agent -- serve
+FURY_CORE=/path/to/Chromium cargo run -p xchange-agent -- serve
 ```
 
 Launch a persona directly, without any store, to see the spoofing work:
 
 ```bash
-cargo run -p fury-agent -- launch shared/personas/windows-11-rtx4060-1920x1080.json --proxy socks5://user:pass@exit.example:1080 --timezone Europe/Berlin
+cargo run -p xchange-agent -- launch shared/personas/windows-11-rtx4060-1920x1080.json --proxy socks5://user:pass@exit.example:1080 --timezone Europe/Berlin
 ```
 
 ## Automation
@@ -213,8 +213,8 @@ never leaving a browser open on a failure.
 Connect: Claude Desktop, Cursor, Claude Code or any MCP client can then create
 profiles and proxies, open profiles, go to sites, read pages, click, type, take screenshots and
 warm profiles up, by asking in plain words: "open every profile tagged warm,
-check the inbox, close them". The server is `fury-agent mcp`, shipped in every
-install, and it carries its own skill, so the assistant knows how Fury works
+check the inbox, close them". The server is `xchange-agent mcp`, shipped in every
+install, and it carries its own skill, so the assistant knows how XChange works
 from the first message. Competitors sell this as an "AI agent", for credits, on
 their model, on their server, with access to your profiles. Here the assistant
 is yours, the key is yours, and proxy passwords never reach it.
@@ -253,11 +253,11 @@ cd tools/detect-suite && python3 -m http.server 8791
 
 [`tools/detect-suite/status.html`](tools/detect-suite/status.html) is the last
 measurement rendered as a page — the gate's thirteen checks, the nine contexts,
-and Fury beside real Chrome on the same machine. It is generated from the
+and XChange beside real Chrome on the same machine. It is generated from the
 captures in the repository, so it cannot say anything they do not.
 
-Open `http://127.0.0.1:8791/probe.html` in ordinary Chrome and in Fury, and
-compare the dumps. `fury-detect diff` shows what moved, `fury-detect gate` runs
+Open `http://127.0.0.1:8791/probe.html` in ordinary Chrome and in XChange, and
+compare the dumps. `xchange-detect diff` shows what moved, `xchange-detect gate` runs
 the release criteria and exits non-zero on failure, so it drops into CI
 ([tools/detect-suite](tools/detect-suite/README.md)).
 
@@ -299,8 +299,8 @@ handle X" deserves the answer and not the archaeology.
 |---|---|
 | Code signing, Windows | not started. A separate certificate (EV or OV) and a separate process; until then the installer shows SmartScreen and the way through is **More info → Run anyway** |
 | Widevine on a machine with no Chrome | the agent stages the CDM out of the Chrome already installed on that machine, so nothing proprietary is redistributed and `com.widevine.alpha` is answered the way real Chrome answers it. A machine with no Chrome at all gets a working browser with no DRM, which is detectable |
-| Persona catalogue | 27 machines — the 27th arrived through the issue form on 13.09.2026, a Windows 10 desktop with a GTX 950. More personas means better crowds to hide in, and it is the most useful thing an outside contributor can add — `fury-detect persona <capture.json>` turns a probe capture from your own computer into one |
-| Speech synthesis voices | a leak, found 24.09.2026. A persona of another OS reports the host's voices: a Windows persona on a Mac answers `speechSynthesis.getVoices()` with 180 macOS voices ("Milena", "Eddy (…)"), which no Windows machine has. The built-in personas carry `voices: []`, so the filter never engages; the contributed Windows 10 one lists only Google voices, which Fury does not have, and patch 0041 discards a filter that matches nothing, because an empty list gives the spoofing away even more surely. The patch can only narrow the list. A voice the system does not have cannot be added: `speak()` on it would fail in a way no real machine fails. So on a Mac a Windows persona cannot get Windows voices at all; until this changes, the rule is a persona of the host's OS. CreepJS and the Castle checks do not catch it, they only look for an empty list |
+| Persona catalogue | 27 machines — the 27th arrived through the issue form on 13.09.2026, a Windows 10 desktop with a GTX 950. More personas means better crowds to hide in, and it is the most useful thing an outside contributor can add — `xchange-detect persona <capture.json>` turns a probe capture from your own computer into one |
+| Speech synthesis voices | a leak, found 24.09.2026. A persona of another OS reports the host's voices: a Windows persona on a Mac answers `speechSynthesis.getVoices()` with 180 macOS voices ("Milena", "Eddy (…)"), which no Windows machine has. The built-in personas carry `voices: []`, so the filter never engages; the contributed Windows 10 one lists only Google voices, which XChange does not have, and patch 0041 discards a filter that matches nothing, because an empty list gives the spoofing away even more surely. The patch can only narrow the list. A voice the system does not have cannot be added: `speak()` on it would fail in a way no real machine fails. So on a Mac a Windows persona cannot get Windows voices at all; until this changes, the rule is a persona of the host's OS. CreepJS and the Castle checks do not catch it, they only look for an empty list |
 
 ### Decided against, with the reason
 
@@ -310,10 +310,10 @@ row says why the alternative is worse.
 | | |
 |---|---|
 | Linux | not a target, and this is a decision rather than a gap. The Rust still compiles there so CI and contributors can run the suite; there is no Linux release, no Linux core config and no plan for one. Shipping a third platform nobody tests would be a claim, not a port |
-| WebRTC through the proxy | no. The relay is TCP; patch 0070 puts the browser in the state a real Chrome reaches under the enterprise `WebRTCIPHandlingPolicy` — no ICE candidates at all — rather than let a peer connection go around the proxy and hand the page the real address |
+| WebRTC through the proxy | no. The relay is TCP; patch 0070 puts the browser in the state a real Chrome reaches under the enterprise `WebRTCIPHandlingPolicy` — no ICE candidates at all — rather than let a peer connection go around the proxy and hand the page the real address. A profile may instead ask for `Base on IP` or `Fixed` (patch 0071): the host and srflx candidates are synthesized in the Blink binding and repeated in `getStats()`, while the real UDP sockets stay closed, so actual peer connections do not connect. New profiles start with `Base on IP`; profiles created earlier keep `Off` |
 | Hiding CDP from a timing check | no, and now known to be unclosable rather than merely undone. Split into its two parts ([cdp-timing.py](tools/detect-suite/cdp-timing.py)): attaching costs nothing, `Runtime.enable` costs a fixed 2.7x plus more as the logged object grows. A patch can remove the size half — preview generation — and not the fixed half, which is the message reaching the frontend at all. Real Chrome measures the same. The control that works is `cdp: false`, which is the default |
 | Updates | one button, never on its own. Since 0.2.18 the application asks GitHub for a new release at start and every six hours and shows a bar; Settings → About turns the check off. From 0.3.0 the bar's **Update** downloads the new version, checks its signature against the project's key, installs it and restarts; it refuses while profiles are open, and a file without that signature is never installed. The request goes from this machine's address, not a profile's proxy. How it is kept safe: [docs/15](docs/15-install.md) |
-| QUIC / HTTP-3 | no difference from Chrome, but it does show the proxy. Measured on three sites: real Chrome with no proxy uses h3; real Chrome behind a SOCKS5 proxy uses h2 and never h3. Chromium does not carry QUIC through a proxy, and a profile is always behind one, so Fury behaves exactly like Chrome behind the same proxy. That is not the same as looking like a home user: a site that offers h3 and sees a client stay on h2 visit after visit can conclude that UDP does not reach it, meaning the client is behind a proxy or on a network that blocks UDP. The signal is weak (h2 is also normal on office networks and on a first visit, before the browser learns about h3), but it exists and Fury does not hide it. Hiding it takes a proxy that forwards UDP, which Chromium cannot do through `--proxy-server`; turning that on would make Fury *differ* from Chrome behind a proxy |
+| QUIC / HTTP-3 | no difference from Chrome, but it does show the proxy. Measured on three sites: real Chrome with no proxy uses h3; real Chrome behind a SOCKS5 proxy uses h2 and never h3. Chromium does not carry QUIC through a proxy, and a profile is always behind one, so XChange behaves exactly like Chrome behind the same proxy. That is not the same as looking like a home user: a site that offers h3 and sees a client stay on h2 visit after visit can conclude that UDP does not reach it, meaning the client is behind a proxy or on a network that blocks UDP. The signal is weak (h2 is also normal on office networks and on a first visit, before the browser learns about h3), but it exists and XChange does not hide it. Hiding it takes a proxy that forwards UDP, which Chromium cannot do through `--proxy-server`; turning that on would make XChange *differ* from Chrome behind a proxy |
 
 ### Closed
 
@@ -323,7 +323,7 @@ row says why the alternative is worse.
 | ~~Chromium 155~~ | done: the Windows core moved from 153 to 155.0.8059.12 on 27.09.2026 (0.2.3), macOS on 30.09.2026 (0.2.10). A copy running an older build of the browser is told so and offered the new one (0.2.16). Both moved to the stable 155.0.8059.39, with its 247 security fixes, on 08.10.2026 (0.2.21) |
 | ~~pixelscan and iphey flagging profiles~~ | done 29.09.2026 (0.2.9), with edge noise that keeps the colour in 0.2.10: what they caught were the fonts a persona reported and the shape of the canvas and WebGL noise |
 | ~~MCP for AI assistants~~ | done 08.10.2026 (0.2.18): built into the application. It used to be a Python script that needed the HTTP API switched on by hand and was in no installer |
-| ~~Windows core build~~ | done 16.08.2026: the core builds on the build server, release `v0.1.2` ships `fury-core-0.1.2-windows-x64.tar.xz` on Chromium 153, `verify-windows.ps1` passes 30 claims, Widevine answers |
+| ~~Windows core build~~ | done 16.08.2026: the core builds on the build server, release `v0.1.2` ships `xchange-core-0.1.2-windows-x64.tar.xz` on Chromium 153, `verify-windows.ps1` passes 30 claims, Widevine answers |
 | ~~Windows launcher~~ | done: agent and shell run, NSIS installer in the releases. The config reaches the browser as an inherited HANDLE and no persona value appears in any argv — checked on a live machine |
 | ~~Code signing and notarisation, macOS~~ | done 21.09.2026: Developer ID, notarised, stapled — application, core and disk image, [sign-core.sh](tools/release/sign-core.sh) and [sign-shell.sh](tools/release/sign-shell.sh). Verified on the files downloaded back from the release page with the quarantine flag set |
 | ~~Client-side bundle encryption~~ | done, and verified end to end against a running server: what it writes to disk holds neither the cookie, nor a tar header, nor a gzip header, and a foreign organisation key does not open it |
@@ -336,7 +336,7 @@ row says why the alternative is worse.
 ## Contributing
 
 The most useful thing you can send is a persona from your own computer —
-`fury-detect persona` turns a probe capture into one, and the catalogue is 27
+`xchange-detect persona` turns a probe capture into one, and the catalogue is 27
 machines, each of which is a crowd for somebody to hide in. The second most
 useful is a site that caught a profile. [CONTRIBUTING.md](CONTRIBUTING.md) has
 both, and the rule that governs everything else: measurements are welcome,
@@ -371,13 +371,13 @@ unredistributable library inside
 
 ## Acceptable use
 
-Fury is a privacy and multi-account management tool, built for QA, ad
+XChange is a privacy and multi-account management tool, built for QA, ad
 verification, market research, scraping within terms, and running several
 legitimate business accounts. Using it for fraud, credential stuffing, phishing
 or evading law enforcement is not supported and not welcome in this issue
 tracker.
 
-Fury is an independent project, not affiliated with or endorsed by Google, and
+XChange is an independent project, not affiliated with or endorsed by Google, and
 carries no Chrome or Google branding. Chromium is used under its own licence.
 The User-Agent declares Chrome because sites branch on it and a browser that says
 anything else is distinguishable in one line — which is the whole point of the

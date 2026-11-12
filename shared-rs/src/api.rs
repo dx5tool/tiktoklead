@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright 2026 Bogdan Shapovalov and the Fury authors
+// Copyright 2026 Bogdan Shapovalov and the XChange authors
 
 //! Wire types for the server REST API and the agent local API.
 
@@ -18,6 +18,13 @@ pub struct ProjectSummary {
     pub name: String,
     pub description: String,
     pub color: Option<String>,
+    /// Lower sorts first; equal weights are ordered by name.
+    #[serde(default)]
+    pub sort_weight: i32,
+    /// Who made it: the user's email on a team server. Empty from a server
+    /// older than this field.
+    #[serde(default)]
+    pub creator: String,
     pub profile_count: i64,
     /// What the requesting user may do here. Resolved server-side; the client
     /// must not compute this itself.
@@ -96,6 +103,16 @@ pub struct ProxySummary {
     /// How many other profiles share this exact proxy. Shown in the UI because
     /// several accounts behind one IP is a classic farm signal.
     pub shared_with_profiles: i64,
+    /// Who added it, by email. `None` when nobody is recorded: a proxy older
+    /// than the column, and older than the audit entry 0021 fills it from.
+    #[serde(default)]
+    pub added_by: Option<String>,
+    /// Whether the caller may change or delete it, by the server's own rule
+    /// (`rbac_guard::may_change_proxy`). The form used to find out only at
+    /// Save, after every field had been typed in again (tester, 20.10.2026).
+    /// `None` from a server before 0.4.7, which does not say.
+    #[serde(default)]
+    pub may_change: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -177,6 +194,20 @@ pub struct LaunchSpec {
     /// Empty for owners and admins, who have no grant.
     #[serde(default)]
     pub domain_lists: Vec<DomainListText>,
+    /// The key this profile's cookies are encrypted with, wrapped under the
+    /// profile key, hex. `None` until the organisation key has been rotated
+    /// once: until then the cookie key is derived from the profile key, and
+    /// a rotation is what writes it down so it can outlive the old profile
+    /// key (migration 0020).
+    #[serde(default)]
+    pub wrapped_cookie_key: Option<String>,
+    /// The organisation key generation at the moment the lock was taken.
+    /// The shell checks the key it holds against it and hands it to the
+    /// agent, which sends it back with the bundle; a bundle sealed under a
+    /// generation that has since been replaced is refused rather than stored
+    /// unopenable. `None` from a server older than that check.
+    #[serde(default)]
+    pub key_generation: Option<i32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -193,7 +224,8 @@ pub struct DomainListText {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SealedProxy {
     pub id: Uuid,
-    /// http | https | socks5
+    /// http | https | socks5 | wireguard. For wireguard, host and port are the
+    /// config's Endpoint and the whole .conf is the sealed `password`.
     pub kind: String,
     pub host: String,
     pub port: u16,
@@ -309,6 +341,22 @@ pub struct GrantRequest {
     /// project. Absent keeps what the grant already carries.
     #[serde(default)]
     pub domain_lists: Option<Vec<Uuid>>,
+    /// One of the organisation's own roles (server 0017). Absent keeps the
+    /// link the grant already has; `null` unlinks it, so the boxes sent in
+    /// `permissions` stand on their own; an id links it, and `permissions` is
+    /// then ignored in favour of the role's.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    pub access_role: Option<Option<Uuid>>,
+}
+
+/// Tells an absent field from an explicit `null`: absent is the outer `None`
+/// (from `#[serde(default)]`), `null` arrives here and becomes `Some(None)`.
+fn present<'de, D, T>(d: D) -> Result<Option<Option<T>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Option::<T>::deserialize(d).map(Some)
 }
 
 // ---------------------------------------------------------------------------
@@ -337,5 +385,26 @@ mod hex_bytes {
             .step_by(2)
             .map(|i| u8::from_str_radix(&s[i..i + 2], 16).ok())
             .collect()
+    }
+}
+
+#[cfg(test)]
+mod grant_request_tests {
+    use super::GrantRequest;
+
+    fn parse(extra: &str) -> GrantRequest {
+        serde_json::from_str(&format!(
+            r#"{{"user_id":"aaaaaaaa-0000-0000-0000-000000000001","permissions":["view"],"expires_at":null{extra}}}"#
+        ))
+        .unwrap()
+    }
+
+    #[test]
+    fn absent_null_and_an_id_are_three_different_answers() {
+        // Absent keeps the link: attaching a domain list must not unlink a role.
+        assert_eq!(parse("").access_role, None);
+        assert_eq!(parse(r#","access_role":null"#).access_role, Some(None));
+        let id = uuid::Uuid::parse_str("eeeeeeee-0000-0000-0000-000000000001").unwrap();
+        assert_eq!(parse(r#","access_role":"eeeeeeee-0000-0000-0000-000000000001""#).access_role, Some(Some(id)));
     }
 }
