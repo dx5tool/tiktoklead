@@ -126,7 +126,7 @@ mod tests {
         let dock = root.join("dock.noindex");
 
         let exe = named_core_in(&dock, &core.join("XChange"), "p-1", "kg-seo 1").unwrap();
-        assert_eq!(exe, dock.join("p-1/kg-seo 1.app/Contents/MacOS/Fury"));
+        assert_eq!(exe, dock.join("p-1/kg-seo 1.app/Contents/MacOS/XChange"));
         assert_eq!(std::fs::read(&exe).unwrap(), b"v1");
 
         // A new core and a renamed profile: the old clone goes, the new one
