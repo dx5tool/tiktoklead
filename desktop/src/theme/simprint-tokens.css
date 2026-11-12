@@ -15,6 +15,7 @@
   --simprint-border: #1e293b;
   --simprint-border-subtle: rgba(255, 255, 255, 0.08);
   --simprint-border-glow: rgba(6, 182, 212, 0.3);
+  --simprint-pager-h: 2.75rem;
 
   --simprint-text: #f8fafc;
   --simprint-text-muted: #94a3b8;
@@ -49,7 +50,7 @@
   --simprint-btn-gradient: linear-gradient(135deg, #06b6d4 0%, #2563eb 100%);
   --simprint-btn-gradient-hover: linear-gradient(135deg, #22d3ee 0%, #3b82f6 100%);
 
-  /* Fury base variables for dark mode */
+  /* XChange base variables for dark mode */
   --bg: #090d16;
   --surface: #111827;
   --raised: #161f30;
@@ -100,7 +101,7 @@
   --simprint-input-border: #cbd5e1;
   --simprint-input-text: #0f172a;
 
-  /* Fury base variables for light mode */
+  /* XChange base variables for light mode */
   --bg: #f8fafc;
   --surface: #ffffff;
   --raised: #f1f5f9;
@@ -413,4 +414,287 @@ button.ghost:hover:not(:disabled) {
   background: #e2e8f0 !important;
   color: #0f172a !important;
   border-color: #cbd5e1 !important;
+}
+
+/* Open / Close in the profile row. Named rules rather than utilities because
+   the global `button` rule above owns color and background, and an unlayered
+   rule beats a Tailwind utility. Green means open, red means close, and the
+   icon inherits the same colour through currentColor. */
+.simprint-action-open {
+  color: var(--simprint-emerald) !important;
+  background: color-mix(in srgb, var(--simprint-emerald) 12%, transparent) !important;
+  border: 1px solid color-mix(in srgb, var(--simprint-emerald) 35%, transparent) !important;
+  border-radius: 12px !important;
+}
+
+.simprint-action-open:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--simprint-emerald) 20%, transparent) !important;
+  border-color: color-mix(in srgb, var(--simprint-emerald) 50%, transparent) !important;
+}
+
+.simprint-action-close {
+  color: var(--simprint-rose) !important;
+  background: color-mix(in srgb, var(--simprint-rose) 12%, transparent) !important;
+  border: 1px solid color-mix(in srgb, var(--simprint-rose) 35%, transparent) !important;
+  border-radius: 12px !important;
+}
+
+.simprint-action-close:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--simprint-rose) 20%, transparent) !important;
+  border-color: color-mix(in srgb, var(--simprint-rose) 50%, transparent) !important;
+}
+
+/* Login sits beside Open and means a different thing: the profile is closed,
+   and pressing this opens it through its proxy and signs the saved account in.
+   Blue rather than green so it does not read as a second Open. */
+.simprint-action-login {
+  color: var(--simprint-blue) !important;
+  background: color-mix(in srgb, var(--simprint-blue) 12%, transparent) !important;
+  border: 1px solid color-mix(in srgb, var(--simprint-blue) 35%, transparent) !important;
+  border-radius: 12px !important;
+}
+
+.simprint-action-login:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--simprint-blue) 20%, transparent) !important;
+  border-color: color-mix(in srgb, var(--simprint-blue) 50%, transparent) !important;
+}
+
+:root[data-theme="light"] .simprint-action-open {
+  color: #047857 !important;
+}
+
+:root[data-theme="light"] .simprint-action-close {
+  color: #be123c !important;
+}
+
+:root[data-theme="light"] .simprint-action-login {
+  color: #0369a1 !important;
+}
+
+/* The two file actions in the Cookies dialog: cookies in from a file, cookies
+   out to one. Import is emerald and export is cyan, so the pair is read as a
+   direction rather than as two buttons with the same job — and neither takes
+   the accent, which belongs to the dialog's one committing action (Write to
+   profile). Both are theme-driven; the light overrides at the end only deepen
+   the same hues for contrast on white. */
+.ck-file {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 10px !important;
+  font-weight: 560 !important;
+}
+
+.ck-file-import {
+  color: var(--simprint-emerald) !important;
+  background: color-mix(in srgb, var(--simprint-emerald) 12%, transparent) !important;
+  border: 1px solid color-mix(in srgb, var(--simprint-emerald) 38%, transparent) !important;
+}
+
+.ck-file-import:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--simprint-emerald) 20%, transparent) !important;
+  border-color: color-mix(in srgb, var(--simprint-emerald) 55%, transparent) !important;
+}
+
+.ck-file-export {
+  color: var(--simprint-cyan) !important;
+  background: color-mix(in srgb, var(--simprint-cyan) 12%, transparent) !important;
+  border: 1px solid color-mix(in srgb, var(--simprint-cyan) 38%, transparent) !important;
+}
+
+.ck-file-export:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--simprint-cyan) 20%, transparent) !important;
+  border-color: color-mix(in srgb, var(--simprint-cyan) 55%, transparent) !important;
+}
+
+:root[data-theme="light"] .ck-file-import { color: #047857 !important; }
+:root[data-theme="light"] .ck-file-export { color: #0e7490 !important; }
+
+/* Floating bulk-selection bar. A light surface in light mode, the dark
+   surface in dark mode, with buttons from the same token set — the bar used
+   to be hardcoded slate-900 and stayed dark over a white page. */
+.simprint-bulk-bar {
+  background: color-mix(in srgb, var(--simprint-surface) 96%, transparent) !important;
+  border: 1px solid var(--simprint-border) !important;
+  color: var(--simprint-text) !important;
+  border-radius: 16px !important;
+  box-shadow: 0 16px 40px rgba(15, 23, 42, 0.18) !important;
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+
+:root:not([data-theme="light"]) .simprint-bulk-bar {
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45) !important;
+}
+
+.simprint-bulk-btn {
+  background: var(--simprint-btn-bg) !important;
+  color: var(--simprint-btn-text) !important;
+  border: 1px solid var(--simprint-btn-border) !important;
+  border-radius: 12px !important;
+  padding: 6px 12px !important;
+}
+
+.simprint-bulk-btn:hover:not(:disabled) {
+  background: var(--simprint-btn-hover) !important;
+}
+
+.simprint-bulk-danger {
+  color: var(--simprint-rose) !important;
+  background: color-mix(in srgb, var(--simprint-rose) 12%, transparent) !important;
+  border: 1px solid color-mix(in srgb, var(--simprint-rose) 35%, transparent) !important;
+  border-radius: 12px !important;
+  padding: 6px 12px !important;
+}
+
+.simprint-bulk-danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--simprint-rose) 20%, transparent) !important;
+}
+
+.simprint-bulk-warn {
+  color: var(--simprint-amber) !important;
+  background: color-mix(in srgb, var(--simprint-amber) 12%, transparent) !important;
+  border: 1px solid color-mix(in srgb, var(--simprint-amber) 35%, transparent) !important;
+  border-radius: 12px !important;
+  padding: 6px 10px !important;
+}
+
+.simprint-bulk-warn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--simprint-amber) 20%, transparent) !important;
+}
+
+.simprint-bulk-info {
+  color: var(--simprint-cyan) !important;
+  background: color-mix(in srgb, var(--simprint-cyan) 12%, transparent) !important;
+  border: 1px solid color-mix(in srgb, var(--simprint-cyan) 35%, transparent) !important;
+  border-radius: 12px !important;
+  padding: 6px 10px !important;
+}
+
+.simprint-bulk-info:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--simprint-cyan) 20%, transparent) !important;
+}
+
+.simprint-bulk-select {
+  background: var(--simprint-input-bg) !important;
+  color: var(--simprint-input-text) !important;
+  border: 1px solid var(--simprint-input-border) !important;
+  border-radius: 12px !important;
+  padding: 6px 24px 6px 28px !important;
+}
+
+.simprint-bulk-select:focus {
+  border-color: var(--simprint-cyan) !important;
+}
+
+.simprint-bulk-icon {
+  background: transparent !important;
+  color: var(--simprint-text-dim) !important;
+  border: 0 !important;
+  border-radius: 10px !important;
+  padding: 6px !important;
+}
+
+.simprint-bulk-icon:hover:not(:disabled) {
+  background: var(--simprint-btn-hover) !important;
+  color: var(--simprint-text) !important;
+}
+
+/* The Tool popover on the bulk bar. Same surface tokens as the bar it hangs
+   from: a menu drawn in hardcoded slate floats invisibly over a light page. */
+.simprint-tool-menu {
+  background: var(--simprint-surface) !important;
+  border: 1px solid var(--simprint-border) !important;
+  color: var(--simprint-text) !important;
+  box-shadow: 0 16px 40px rgba(15, 23, 42, 0.18) !important;
+}
+
+:root:not([data-theme="light"]) .simprint-tool-menu {
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45) !important;
+}
+
+.simprint-tool-item {
+  width: 100% !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+  padding: 7px 10px !important;
+  border-radius: 10px !important;
+  text-align: left !important;
+  background: transparent !important;
+  border: 0 !important;
+  color: var(--simprint-text) !important;
+  font-size: 12px !important;
+}
+
+.simprint-tool-item:hover:not(:disabled) {
+  background: var(--simprint-btn-hover) !important;
+}
+
+.simprint-tool-item:disabled {
+  opacity: 0.45;
+}
+
+:root[data-theme="light"] .simprint-bulk-danger { color: #be123c !important; }
+:root[data-theme="light"] .simprint-bulk-warn { color: #b45309 !important; }
+:root[data-theme="light"] .simprint-bulk-info { color: #0369a1 !important; }
+
+.simprint-pager {
+  background: var(--simprint-surface) !important;
+  color: var(--simprint-text) !important;
+}
+
+.simprint-pager-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--simprint-text-muted) !important;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 150ms ease, color 150ms ease;
+}
+
+.simprint-pager-btn:hover:not(:disabled) {
+  background: var(--simprint-btn-hover) !important;
+  color: var(--simprint-text) !important;
+}
+
+.simprint-pager-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.simprint-pager-input {
+  width: 3rem;
+  padding: 0;
+  background: var(--simprint-input-bg) !important;
+  border: 1px solid var(--simprint-input-border) !important;
+  color: var(--simprint-input-text) !important;
+}
+
+.simprint-pager-input:focus {
+  border-color: var(--simprint-cyan) !important;
+}
+
+.simprint-pager-select {
+  width: auto;
+  height: 32px;
+  padding: 0 28px 0 10px;
+  border-radius: 12px;
+  border: 1px solid var(--simprint-input-border) !important;
+  background: var(--simprint-input-bg) !important;
+  color: var(--simprint-input-text) !important;
+  appearance: none;
+  cursor: pointer;
+  outline: none;
+}
+
+.simprint-pager-select:focus {
+  border-color: var(--simprint-cyan) !important;
 }

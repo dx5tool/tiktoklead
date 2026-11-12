@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: AGPL-3.0-or-later
-# Copyright 2026 Bogdan Shapovalov and the Fury authors
+# Copyright 2026 Bogdan Shapovalov and the XChange authors
 
 # Capture a fingerprint baseline from a real browser with no clicking.
 #

@@ -30,7 +30,7 @@
 своих сборок **на своих машинах** через Personal Team. Нотаризации и Developer ID
 там нет, и это не лазейка, а прямо описанная граница.
 
-Для Fury это уже измерено и записано в `sign-core.sh`: ad-hoc подпись прогоняет
+Для XChange это уже измерено и записано в `sign-core.sh`: ad-hoc подпись прогоняет
 пайплайн до конца, `codesign --verify --deep --strict` проходит, **и браузер не
 стартует**:
 
@@ -62,7 +62,7 @@ mapping process and mapped file (non-platform) have different Team IDs
 подписан бандл, читается кем угодно одной командой:
 
 ```bash
-codesign -dv --verbose=4 /Applications/Fury.app
+codesign -dv --verbose=4 /Applications/XChange.app
 ```
 
 и там будет `Developer ID Application: Имя Фамилия (TEAMID)`. При Individual это
@@ -126,7 +126,7 @@ Media Services в России не работает, а на форумах р�
 а страница именно про Developer ID — только «Account Holder». Исходить стоит из
 второго.
 
-**Mac App Store для Fury закрыт, и не по причине качества.** Проект под
+**Mac App Store для XChange закрыт, и не по причине качества.** Проект под
 AGPL-3.0, а условия App Store накладывают ограничения на дальнейшее
 распространение, несовместимые с копилефтом GPL-семейства — это известная
 коллизия, из-за которой в своё время из App Store убрали VLC. Отдельно от
@@ -295,7 +295,7 @@ security find-identity -v -p codesigning
 5. **Сохранить учётные данные нотариуса один раз в keychain:**
 
 ```bash
-xcrun notarytool store-credentials fury-notary --apple-id you@example.com --team-id TEAMID --password APP_SPECIFIC_PASSWORD
+xcrun notarytool store-credentials xchange-notary --apple-id you@example.com --team-id TEAMID --password APP_SPECIFIC_PASSWORD
 ```
 
 Team ID виден на developer.apple.com/account в правом верхнем углу и в скобках
@@ -326,8 +326,8 @@ validation), а `codesign --deep` раздал бы всем одно и то ж
 вот что было измерено на бандле в `target/release` до правок:
 
 ```
-Contents/MacOS/fury-desktop   flags=0x20002(adhoc,linker-signed)  TeamIdentifier=not set
-Contents/MacOS/fury-agent     flags=0x20002(adhoc,linker-signed)  TeamIdentifier=not set
+Contents/MacOS/xchange-desktop   flags=0x20002(adhoc,linker-signed)  TeamIdentifier=not set
+Contents/MacOS/xchange-agent     flags=0x20002(adhoc,linker-signed)  TeamIdentifier=not set
 ```
 
 Оба бинарника несли подпись, которую оставляет линкер. Это не Developer ID,
@@ -416,8 +416,8 @@ Hardened Runtime и Sandbox — разные вещи, их часто пута�
 Тикет надо **прибить** к тому, что раздаётся:
 
 ```bash
-xcrun stapler staple Fury.app
-xcrun stapler validate Fury.app
+xcrun stapler staple XChange.app
+xcrun stapler validate XChange.app
 ```
 
 Без этого первый запуск на машине **без интернета** провалится: Gatekeeper не
@@ -468,7 +468,7 @@ xcrun stapler validate Fury.app
 4. Выпустить Developer ID Application, поставить в Keychain, проверить
    `security find-identity`. **Сделано 21.09.2026**: `Developer ID Application:
    Bogdan Shapovalov (JKN8WHX7FS)` в Keychain, Individual. Шаги 1-3 позади.
-5. `xcrun notarytool store-credentials fury-notary …` с app-specific password.
+5. `xcrun notarytool store-credentials xchange-notary …` с app-specific password.
 6. `tools/release/sign-core.sh --identity … --notarize` — ядро.
 7. `tools/release/sign-shell.sh --identity … --notarize` — оболочка.
    Написана 15.08.2026; первый прогон с настоящим сертификатом состоялся

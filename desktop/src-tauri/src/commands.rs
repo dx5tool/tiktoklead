@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright 2026 Bogdan Shapovalov and the Fury authors
+// Copyright 2026 Bogdan Shapovalov and the XChange authors
 
 //! Everything the webview is allowed to ask for.
 //!
@@ -23,7 +23,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Mutex;
 
-use fury_shared::api::{ProfileSummary, ProjectSummary};
+use xchange_shared::api::{ProfileSummary, ProjectSummary};
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
@@ -322,7 +322,7 @@ pub struct Shell {
     /// A core is installed but it is a different Chrome from the one this
     /// version claims to be: `{ have, need }`. core_ready is false with it.
     pub core_outdated: Option<serde_json::Value>,
-    /// The right Chrome, an older Fury build of it: `{ have, need }`, with
+    /// The right Chrome, an older XChange build of it: `{ have, need }`, with
     /// `have` null when the release was never recorded. core_ready stays true.
     pub core_stale: Option<serde_json::Value>,
     /// This build, for the About panel and for any bug report that follows it.
@@ -353,6 +353,18 @@ pub struct Shell {
     /// one anyway. They typed it, it was right, and they arrived back at the
     /// same box. Reported from the machine somebody was trying to join on.
     pub awaiting_key: bool,
+
+    /// Where profiles, `xchange.db` and the browser are kept — `dirs::data_dir()`,
+    /// the same function the agent uses.
+    ///
+    /// Shown on Settings → Data because it is the one thing an operator
+    /// deploying to a second machine has to decide BEFORE the first launch:
+    /// `FURY_HOME` is read at startup and never again, so a directory chosen
+    /// afterwards means moving a database and hundreds of megabytes of browser
+    /// data by hand. Not editable here — changing it would change the IPC pipe
+    /// name too (dirs::short_tag hashes this path), so it is a read-out and an
+    /// "open it" button, not a setting.
+    pub data_dir: String,
 }
 
 /// Does this action go to the local store, or to the server?
@@ -478,6 +490,7 @@ pub async fn shell_state(state: State<'_, AppState>) -> Result<Shell, ApiErr> {
         last_email,
         last_server,
         awaiting_key,
+        data_dir: xchange_platform::dirs::data_dir().display().to_string(),
     })
 }
 
@@ -508,7 +521,7 @@ pub async fn disconnect_server(state: State<'_, AppState>) -> Result<Shell, ApiE
 pub async fn set_server(state: State<'_, AppState>, url: String) -> R<Shell> {
     let normalised = settings::normalise_server_url(&url).map_err(ApiErr::local)?;
 
-    // /v1/me with no token. A Fury server answers exactly 401 with
+    // /v1/me with no token. An XChange server answers exactly 401 with
     // {"error":"unauthenticated"} — see server/src/error.rs. Checking for that
     // pair rather than "some JSON with an error key" matters: half the APIs on
     // the internet return an error object, and accepting one of those here would
@@ -534,16 +547,16 @@ pub async fn set_server(state: State<'_, AppState>, url: String) -> R<Shell> {
         .ok()
         .and_then(|t| serde_json::from_str(&t).ok());
 
-    let looks_like_fury = status == reqwest::StatusCode::UNAUTHORIZED
+    let looks_like_xchange = status == reqwest::StatusCode::UNAUTHORIZED
         && body
             .as_ref()
             .and_then(|v| v.get("error"))
             .and_then(serde_json::Value::as_str)
             == Some("unauthenticated");
 
-    if !looks_like_fury {
+    if !looks_like_xchange {
         return Err(ApiErr::local(format!(
-            "{normalised} answered ({status}) but does not look like a Fury server."
+            "{normalised} answered ({status}) but does not look like an XChange server."
         )));
     }
 
@@ -1170,6 +1183,11 @@ pub struct UiProject {
     pub origin: &'static str,
     pub id: String,
     pub name: String,
+    /// Lower sorts first; equal weights by name.
+    pub sort_weight: i64,
+    /// Who made it: the device name for a local folder, the user's email for a
+    /// team project.
+    pub creator: String,
     pub profile_count: i64,
 }
 
@@ -1223,7 +1241,7 @@ pub struct UiProfile {
     /// Machine fields pinned by hand over the persona. Round-tripped by the
     /// editor like the two above.
     #[serde(default)]
-    pub overrides: fury_shared::overrides::MachineOverrides,
+    pub overrides: xchange_shared::overrides::MachineOverrides,
     /// Local profiles only; a server row carries none.
     #[serde(default)]
     pub blocklists: Vec<String>,
@@ -1280,6 +1298,14 @@ pub async fn projects(state: State<'_, AppState>) -> R<Vec<UiProject>> {
         .map(|p| UiProject {
             id: p.id,
             name: p.name,
+            sort_weight: p.sort_weight,
+            // Rows from before the creator column were still made on this
+            // machine: the store is this machine's alone.
+            creator: if p.creator.trim().is_empty() {
+                settings::machine_name()
+            } else {
+                p.creator
+            },
             profile_count: p.profile_count,
             origin: "local",
         })
@@ -1297,6 +1323,8 @@ pub async fn projects(state: State<'_, AppState>) -> R<Vec<UiProject>> {
         .map(|p| UiProject {
             id: p.id.to_string(),
             name: p.name,
+            sort_weight: p.sort_weight as i64,
+            creator: p.creator,
             profile_count: p.profile_count,
             origin: "team",
         })
@@ -1535,7 +1563,7 @@ pub async fn profiles(
 
 /// Serde already spells these the way the interface expects; going through it
 /// keeps one definition rather than a second list that can drift.
-fn perm_name(p: &fury_shared::rbac::Perm) -> String {
+fn perm_name(p: &xchange_shared::rbac::Perm) -> String {
     serde_json::to_value(p)
         .ok()
         .and_then(|v| v.as_str().map(str::to_string))
@@ -1556,7 +1584,7 @@ struct LockGrant {
     lock_token: String,
     expires_at: String,
     restrictions: serde_json::Value,
-    spec: fury_shared::api::LaunchSpec,
+    spec: xchange_shared::api::LaunchSpec,
 }
 
 /// Open a profile.
@@ -1597,6 +1625,47 @@ pub async fn launch(
         "expires_at": grant.expires_at,
         "restrictions": grant.restrictions,
     }))
+}
+
+/// Sign a local profile into its platform through its own browser.
+///
+/// The agent opens the profile with CDP, checks whether the stored session is
+/// already signed in, writes the stored cookie only when it is not, and fills
+/// the form with human key events if a username and password are stored. The
+/// browser is deliberately left open: a verification code or captcha is a step
+/// for the person, not for the automation. Local only for now — a team profile
+/// signs in through its own window, where its lock and permissions live.
+#[tauri::command]
+pub async fn login_profile(
+    state: State<'_, AppState>,
+    profile_id: String,
+    cookies: serde_json::Value,
+    username: Option<String>,
+    password: Option<String>,
+    platform: Option<String>,
+    url: String,
+    check_url: String,
+    origin: Option<String>,
+) -> R<serde_json::Value> {
+    if !local_for(&state, origin.as_deref()) {
+        return Err(ApiErr::coded(
+            "err.loginLocalOnly",
+            "Login is available for profiles on this machine. A team profile signs in through its own window.",
+        ));
+    }
+    Ok(crate::agent::call(
+        "profile.login",
+        serde_json::json!({
+            "id": profile_id,
+            "cookies": cookies,
+            "username": username,
+            "password": password,
+            "platform": platform.unwrap_or_else(|| "shopee".into()),
+            "url": url,
+            "check_url": check_url,
+        }),
+    )
+    .await?)
 }
 
 /// Take a team profile's lock and start its browser on it; the lock is given
@@ -1712,7 +1781,7 @@ async fn launch_from_spec(state: &AppState, grant: &LockGrant, cdp: bool) -> R<s
         let _ = s.save(&state.config_dir);
     }
 
-    let seed = fury_shared::persona::seed::from_hex(&spec.fp_seed).ok_or_else(|| {
+    let seed = xchange_shared::persona::seed::from_hex(&spec.fp_seed).ok_or_else(|| {
         ApiErr::local("The server sent a fingerprint seed this version cannot read.")
     })?;
 
@@ -1725,7 +1794,7 @@ async fn launch_from_spec(state: &AppState, grant: &LockGrant, cdp: bool) -> R<s
         "notes": "",
         "tags": [],
         "persona_id": spec.persona_id,
-        "fp_seed": fury_shared::persona::seed::to_i64(seed),
+        "fp_seed": xchange_shared::persona::seed::to_i64(seed),
         "proxy": {
             "id": spec.proxy.id.to_string(),
             "name": "",
@@ -1994,7 +2063,7 @@ pub async fn remove_member(
         .await?;
 
     let generation = material.get("generation").and_then(|v| v.as_i64()).unwrap_or(0);
-    let new_key = fury_shared::keys::new_org_key();
+    let new_key = xchange_shared::keys::new_org_key();
 
     // Sealed to everyone who stays. A member left out of this list is a member
     // locked out of the organisation, and nothing later can repair it except
@@ -2033,7 +2102,7 @@ pub async fn remove_member(
     // the team under a key nobody held any more.
     //
     // What the old key does not open is named, not fatal. It is already lost
-    // -- an earlier rotation by a Fury that did not carry it over -- and one
+    // -- an earlier rotation by an XChange that did not carry it over -- and one
     // such profile must not block removing somebody for good. The server
     // refuses anything left out WITHOUT being named.
     let list = |name: &str| -> Vec<serde_json::Value> {
@@ -2271,28 +2340,41 @@ pub async fn preview(spec: serde_json::Value) -> R<serde_json::Value> {
     Ok(crate::agent::call("profile.preview", spec).await?)
 }
 
-/// Logins stored beside a profile: username, password, two-factor seed.
+/// Logins stored beside a profile: username, password, two-factor seed, cookie.
 ///
-/// Local only, and that is a decision rather than an omission. The server's
-/// `credentials` table takes a blob sealed with the organisation key, and
-/// sealing it correctly is the difference between a team feature and a way to
-/// hand a server everybody's passwords. Doing the local half first means an
-/// operator working alone — which is most of them — gets the feature now, and
-/// the team half arrives without changing what it looks like.
+/// `origin` says where the row's logins live. It cannot be the shell's mode:
+/// a shell connected to a server also lists this machine's own profiles, and
+/// reading their logins from the server would either 404 or, worse, find a
+/// different profile that happens to share an id.
 #[tauri::command]
 pub async fn credentials(
     state: State<'_, AppState>,
     profile_id: String,
+    origin: Option<String>,
 ) -> R<serde_json::Value> {
-    if mode_of(&state) == "local" {
+    if local_for(&state, origin.as_deref()) {
         return Ok(
             crate::agent::call("credentials.list", serde_json::json!({ "profile_id": profile_id }))
                 .await?,
         );
     }
 
-    // Team mode. The server hands back a blob and a wrapped key; both are
-    // opened here, in the application process, and never in the webview.
+    Ok(serde_json::Value::Array(
+        team_credentials(state.inner(), &profile_id).await?,
+    ))
+}
+
+/// A team profile's logins, opened with the organisation key.
+///
+/// Shared by the Logins tab and the profile export. The server hands back a
+/// blob and a wrapped key; both are opened here, in the application process,
+/// and never in the webview. One function rather than two copies, because the
+/// `unreadable` flag is what tells the export to stop before writing a login
+/// with an empty password.
+async fn team_credentials(
+    state: &AppState,
+    profile_id: &str,
+) -> Result<Vec<serde_json::Value>, ApiErr> {
     let org_key = state.org_key().ok_or_else(|| {
         ApiErr::coded(
             "err.noOrgKeyOpen",
@@ -2327,19 +2409,32 @@ pub async fn credentials(
             "username": payload.get("username").cloned().unwrap_or(serde_json::Value::Null),
             "password": payload.get("password").cloned().unwrap_or(serde_json::Value::Null),
             "totp": payload.get("totp").cloned().unwrap_or(serde_json::Value::Null),
+            "cookie": payload.get("cookie").cloned().unwrap_or(serde_json::Value::Null),
             "notes": payload.get("notes").and_then(|v| v.as_str()).unwrap_or_default(),
             "unreadable": payload.is_null(),
         }));
     }
-    Ok(serde_json::Value::Array(out))
+    Ok(out)
+}
+
+/// Every login's identity on this machine, for the Import Account dialog.
+///
+/// Local only, like the import itself: a paste is checked against this
+/// machine's rows whatever server the shell happens to be connected to. No
+/// password travels — see `credential_index` in the agent for the one
+/// exception, a login with no username.
+#[tauri::command]
+pub async fn credential_index() -> R<serde_json::Value> {
+    Ok(crate::agent::call("credentials.index", serde_json::json!({})).await?)
 }
 
 #[tauri::command]
 pub async fn save_credential(
     state: State<'_, AppState>,
     credential: serde_json::Value,
+    origin: Option<String>,
 ) -> R<serde_json::Value> {
-    if mode_of(&state) == "local" {
+    if local_for(&state, origin.as_deref()) {
         return Ok(crate::agent::call("credentials.upsert", credential).await?);
     }
 
@@ -2361,7 +2456,7 @@ pub async fn save_credential(
     // of the person who typed it rather than at the moment they need to log in.
     let totp = match field("totp").map(|v| v.trim().to_string()).filter(|v| !v.is_empty()) {
         Some(raw) => Some(
-            fury_shared::totp::Totp::parse(&raw)
+            xchange_shared::totp::Totp::parse(&raw)
                 .map_err(|e| ApiErr::local(e.to_string()))?
                 .to_uri(),
         ),
@@ -2372,6 +2467,7 @@ pub async fn save_credential(
         "username": field("username").filter(|v| !v.is_empty()),
         "password": field("password").filter(|v| !v.is_empty()),
         "totp": totp,
+        "cookie": field("cookie").filter(|v| !v.is_empty()),
         "notes": field("notes").unwrap_or_default(),
     });
     let (payload_enc, wrapped_dek) = crypto::seal_credential(&org_key, &payload)
@@ -2411,8 +2507,9 @@ pub async fn delete_credential(
     state: State<'_, AppState>,
     id: String,
     profile_id: String,
+    origin: Option<String>,
 ) -> R<serde_json::Value> {
-    if mode_of(&state) == "local" {
+    if local_for(&state, origin.as_deref()) {
         return Ok(crate::agent::call("credentials.delete", serde_json::json!({ "id": id })).await?);
     }
     state
@@ -2486,7 +2583,7 @@ pub async fn totp_code(
         .filter(|v| !v.is_empty())
         .ok_or_else(|| ApiErr::local("This login has no two-factor seed."))?;
 
-    let totp = fury_shared::totp::Totp::parse(seed).map_err(|e| ApiErr::local(e.to_string()))?;
+    let totp = xchange_shared::totp::Totp::parse(seed).map_err(|e| ApiErr::local(e.to_string()))?;
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
@@ -2512,7 +2609,7 @@ pub async fn proxies(
     // Reshaped into what the local store returns, so the interface has one
     // proxy and not two. The password is absent rather than empty: the server
     // never sends it, and a blank string would read as "no password set".
-    let remote: Vec<fury_shared::api::ProxySummary> = state
+    let remote: Vec<xchange_shared::api::ProxySummary> = state
         .call(reqwest::Method::GET, "/v1/proxies", Body::None, true)
         .await?;
     Ok(serde_json::Value::Array(
@@ -2592,7 +2689,7 @@ pub async fn save_proxy(
     })?;
 
     let field = |k: &str| proxy.get(k).and_then(|v| v.as_str()).map(str::to_string);
-    let mut credentials = fury_shared::api::ProxyCredentials {
+    let mut credentials = xchange_shared::api::ProxyCredentials {
         username: field("username").filter(|v| !v.is_empty()),
         password: field("password").filter(|v| !v.is_empty()),
     };
@@ -2672,7 +2769,7 @@ async fn stored_proxy_credentials(
     state: &State<'_, AppState>,
     org_key: &[u8; 32],
     id: &str,
-) -> R<(serde_json::Value, fury_shared::api::ProxyCredentials)> {
+) -> R<(serde_json::Value, xchange_shared::api::ProxyCredentials)> {
     let sealed: serde_json::Value = state
         .call(reqwest::Method::GET, &format!("/v1/proxies/{id}/credentials"), Body::None, true)
         .await?;
@@ -2879,7 +2976,7 @@ pub async fn save_profile(
         }
         let mut body = body;
         body["persona_id"] = serde_json::json!(s("persona_id"));
-        body["fp_seed"] = serde_json::json!(fury_shared::persona::seed::to_hex(seed));
+        body["fp_seed"] = serde_json::json!(xchange_shared::persona::seed::to_hex(seed));
         state
             .call(
                 reqwest::Method::POST,
@@ -2901,6 +2998,35 @@ pub async fn save_profile(
 }
 
 #[tauri::command]
+/// Rewrite only the note beside a profile.
+///
+/// The whole-profile endpoint exists and would work, but it also carries the
+/// name, the proxy and the machine it read at listing time. A note edited from
+/// the table must not undo a colleague's change to any of those.
+pub async fn save_notes(
+    state: State<'_, AppState>,
+    profile_id: String,
+    notes: String,
+    origin: Option<String>,
+) -> R<serde_json::Value> {
+    if local_for(&state, origin.as_deref()) {
+        return Ok(crate::agent::call(
+            "profiles.set_notes",
+            serde_json::json!({ "id": profile_id, "notes": notes }),
+        )
+        .await?);
+    }
+    state
+        .call(
+            reqwest::Method::PATCH,
+            &format!("/v1/profiles/{profile_id}/notes"),
+            Body::Json(serde_json::json!({ "notes": notes })),
+            true,
+        )
+        .await
+}
+
+#[tauri::command]
 pub async fn delete_profile(
     state: State<'_, AppState>,
     id: String,
@@ -2912,6 +3038,27 @@ pub async fn delete_profile(
     state
         .call(reqwest::Method::DELETE, &format!("/v1/profiles/{id}"), Body::None, true)
         .await
+}
+
+#[tauri::command]
+/// Deletes this profile's browser folder and creates a fresh one in the
+/// storage folder chosen now.
+///
+/// The profile itself, its tags and the logins kept in XChange stay; the cookies
+/// and site data in the old folder do not. The agent refuses while a browser is
+/// open, because its files are still being written. Available for a team
+/// profile too: its local copy is rebuilt from the server on the next open.
+pub async fn reset_profile(id: String) -> R<serde_json::Value> {
+    // The id is a path component in the agent, so it is checked as one rather
+    // than trusted -- the same guard `open_profile_folder` uses.
+    if id.is_empty()
+        || !id
+            .bytes()
+            .all(|c| c.is_ascii_alphanumeric() || c == b'-' || c == b'_')
+    {
+        return Err(ApiErr::local(format!("not a profile id: {id:?}")));
+    }
+    Ok(crate::agent::call("profiles.reset", serde_json::json!({ "id": id })).await?)
 }
 
 #[tauri::command]
@@ -3082,18 +3229,20 @@ pub async fn rename_project(
     id: String,
     name: String,
     origin: Option<String>,
+    sort_weight: Option<i32>,
 ) -> R<serde_json::Value> {
     if local_for(&state, origin.as_deref()) {
-        return Ok(
-            crate::agent::call("projects.rename", serde_json::json!({ "id": id, "name": name }))
-                .await?,
-        );
+        return Ok(crate::agent::call(
+            "projects.rename",
+            serde_json::json!({ "id": id, "name": name, "sort_weight": sort_weight }),
+        )
+        .await?);
     }
     state
         .call(
             reqwest::Method::PATCH,
             &format!("/v1/projects/{id}"),
-            Body::Json(serde_json::json!({ "name": name })),
+            Body::Json(serde_json::json!({ "name": name, "sort_weight": sort_weight })),
             true,
         )
         .await
@@ -3118,15 +3267,25 @@ pub async fn create_project(
     state: State<'_, AppState>,
     name: String,
     origin: Option<String>,
+    sort_weight: Option<i32>,
 ) -> R<serde_json::Value> {
     if local_for(&state, origin.as_deref()) {
-        return Ok(crate::agent::call("projects.create", serde_json::json!({ "name": name })).await?);
+        return Ok(crate::agent::call(
+            "projects.create",
+            serde_json::json!({
+                "name": name,
+                "sort_weight": sort_weight.unwrap_or(0),
+                // This machine made it. The agent has no users to name.
+                "created_by": settings::machine_name(),
+            }),
+        )
+        .await?);
     }
     state
         .call(
             reqwest::Method::POST,
             "/v1/projects",
-            Body::Json(serde_json::json!({ "name": name })),
+            Body::Json(serde_json::json!({ "name": name, "sort_weight": sort_weight })),
             true,
         )
         .await
@@ -3220,9 +3379,9 @@ pub async fn create_profiles(
         one["name"] = serde_json::json!(pattern.replace("{n}", &i.to_string()));
         if pick {
             one["persona_id"] =
-                serde_json::json!(fury_shared::catalogue::pick_weighted_on(
+                serde_json::json!(xchange_shared::catalogue::pick_weighted_on(
                 rand::random(),
-                fury_shared::catalogue::host_os(),
+                xchange_shared::catalogue::host_os(),
             )
             .id);
         }
@@ -3284,7 +3443,7 @@ pub async fn clone_profile(
 /// to say to the operator about a paste that did not match.
 #[tauri::command]
 pub fn parse_proxy_line(line: String) -> Option<serde_json::Value> {
-    let p = fury_shared::proxy_list::parse_line(&line).ok()?;
+    let p = xchange_shared::proxy_list::parse_line(&line).ok()?;
     Some(serde_json::json!({
         "kind": p.scheme,
         "host": p.host,
@@ -3312,6 +3471,86 @@ pub async fn sniff_proxy_kind(host: String, port: u16) -> R<serde_json::Value> {
     .await?)
 }
 
+/// One new KiotProxy exit for an API key.
+///
+/// The window may reach `ipc:` and nothing else (tauri.conf.json
+/// `connect-src`), so the fetch that used to live in providerProxy.ts never
+/// left the webview: opening a profile behind a provider proxy failed as a
+/// bare "Failed to fetch" before any packet was sent. The request is made
+/// here, on the same client the shell uses for its server, and the provider's
+/// own body is handed back — "key expired" and "wait before the next exit"
+/// are said there, and the interface reads them the same way in browser
+/// development, where Vite proxies the same endpoint.
+#[tauri::command]
+pub async fn fetch_kiot_proxy(state: State<'_, AppState>, key: String) -> R<serde_json::Value> {
+    let key = key.trim();
+    if key.is_empty() {
+        return Err(ApiErr::coded(
+            "prov.noKey",
+            "No provider key on this machine for this proxy.",
+        ));
+    }
+
+    let res = state
+        .http
+        .get("https://api.kiotproxy.com/api/v1/proxies/new")
+        .query(&[("key", key), ("region", "random")])
+        .header(reqwest::header::ACCEPT, "application/json")
+        .send()
+        .await
+        // The URL carries the key and reqwest puts the URL in its Display, so
+        // the full error goes to the log only after the URL is stripped. What
+        // the operator sees is the interface's own sentence.
+        .map_err(|e| {
+            tracing::warn!("KiotProxy request failed: {}", e.without_url());
+            ApiErr::coded(
+                "prov.unreachable",
+                "The provider could not be reached from this machine.",
+            )
+        })?;
+
+    let status = res.status().as_u16();
+    let body = res.json::<serde_json::Value>().await.unwrap_or(serde_json::Value::Null);
+    Ok(serde_json::json!({ "status": status, "body": body }))
+}
+
+/// One NestProxy exit for a proxy key.
+///
+/// Made here for the same reason as `fetch_kiot_proxy`: the window's CSP
+/// allows only `ipc:`, so a fetch from the page never leaves the webview.
+/// `/proxy/available` is public — the proxy key is the only credential, and
+/// the account's API key is not used — and asking twice returns the same
+/// address until the old one is released, so a launch may call it freely.
+#[tauri::command]
+pub async fn fetch_nest_proxy(state: State<'_, AppState>, key: String) -> R<serde_json::Value> {
+    let key = key.trim();
+    if key.is_empty() {
+        return Err(ApiErr::coded(
+            "prov.noKey",
+            "No provider key on this machine for this proxy.",
+        ));
+    }
+
+    let res = state
+        .http
+        .get("https://nestproxy.com/api/client/proxy/available")
+        .query(&[("proxy_key", key)])
+        .header(reqwest::header::ACCEPT, "application/json")
+        .send()
+        .await
+        .map_err(|e| {
+            tracing::warn!("NestProxy request failed: {}", e.without_url());
+            ApiErr::coded(
+                "prov.unreachable",
+                "The provider could not be reached from this machine.",
+            )
+        })?;
+
+    let status = res.status().as_u16();
+    let body = res.json::<serde_json::Value>().await.unwrap_or(serde_json::Value::Null);
+    Ok(serde_json::json!({ "status": status, "body": body }))
+}
+
 /// A pasted supplier block.
 #[tauri::command]
 pub async fn import_proxies(
@@ -3336,7 +3575,7 @@ pub async fn import_proxies(
     let prefix = name_prefix.trim();
     let mut saved = Vec::new();
     let mut rejected = Vec::new();
-    for (line, parsed) in fury_shared::proxy_list::parse_block(&text) {
+    for (line, parsed) in xchange_shared::proxy_list::parse_block(&text) {
         match parsed {
             Ok(p) => {
                 let name = if prefix.is_empty() {
@@ -3409,6 +3648,292 @@ pub async fn import_cookies(id: String, cookies: serde_json::Value) -> R<serde_j
         serde_json::json!({ "id": id, "cookies": cookies }),
     )
     .await?)
+}
+
+/// The operating system's own folder chooser.
+///
+/// Every other destination in this application is a typed path — see
+/// `set_profile_root` and `save_server_kit` — and that is right for the places
+/// an operator names from memory. A cookie export is aimed wherever they happen
+/// to keep cookie files, which is the one case where a typed path is a guess.
+///
+/// `None` is the chooser being dismissed, which is not a failure and must not
+/// read as one: the caller does nothing at all with it.
+///
+/// Blocking, so it runs on a pool thread rather than on the thread that drives
+/// the window. On macOS the dialog dispatches itself to the main queue and waits
+/// there, and holding the async runtime's own thread while a person browses
+/// folders would stall every other call behind it.
+#[tauri::command]
+pub async fn pick_folder(window: tauri::WebviewWindow, title: String) -> R<Option<String>> {
+    let picked = tauri::async_runtime::spawn_blocking(move || {
+        rfd::FileDialog::new()
+            // Parented, or the chooser opens behind the application on Windows
+            // and looks like the button did nothing.
+            .set_parent(&window)
+            .set_title(title)
+            .pick_folder()
+    })
+    .await
+    .map_err(|e| ApiErr::local(format!("the folder chooser could not be opened: {e}")))?;
+
+    Ok(picked.map(|p| p.display().to_string()))
+}
+
+/// A cookie file written where the operator pointed.
+///
+/// `file_name` arrives whole rather than as a stem because the interface builds
+/// it from the profile's own name and the time of the export. That name is the
+/// only part of the path a profile can influence, so it is refused if it carries
+/// a separator or a parent component: a profile called `..\\..\\startup` must not
+/// be able to choose where this writes. The rest of the path came from the
+/// chooser and is whatever the person picked.
+#[tauri::command]
+pub async fn write_cookies_file(dir: String, file_name: String, text: String) -> R<serde_json::Value> {
+    // Exactly one component, named normally: `..` and `.` are components of
+    // their own, and a separator makes two.
+    if !matches!(
+        std::path::Path::new(&file_name).components().collect::<Vec<_>>().as_slice(),
+        [std::path::Component::Normal(_)]
+    ) {
+        return Err(ApiErr::local(format!("\"{file_name}\" is not a file name")));
+    }
+
+    let dir = PathBuf::from(shellexpand(&dir));
+    std::fs::create_dir_all(&dir)
+        .map_err(|e| ApiErr::local(format!("Could not create {}: {e}", dir.display())))?;
+    let path = dir.join(&file_name);
+    std::fs::write(&path, text)
+        .map_err(|e| ApiErr::local(format!("Could not write {}: {e}", path.display())))?;
+
+    Ok(serde_json::json!({ "path": path.display().to_string() }))
+}
+
+/// The operating system's own file chooser, for the profile export zip.
+///
+/// rfd has no combined "file or folder" dialog, so the import dialog offers
+/// two buttons and this is the file half. `add_filter` still lets the operator
+/// type any path; the agent refuses anything that is not a `.zip`.
+#[tauri::command]
+pub async fn pick_zip(window: tauri::WebviewWindow, title: String) -> R<Option<String>> {
+    let picked = tauri::async_runtime::spawn_blocking(move || {
+        rfd::FileDialog::new()
+            .set_parent(&window)
+            .set_title(title)
+            .add_filter("Zip", &["zip"])
+            .pick_file()
+    })
+    .await
+    .map_err(|e| ApiErr::local(format!("the file chooser could not be opened: {e}")))?;
+
+    Ok(picked.map(|p| p.display().to_string()))
+}
+
+/// One account list the operator chose, already read.
+///
+/// Text files keep their text because the CSV reader lives in the interface,
+/// where the same quoting and separator rules are used for a paste. A
+/// spreadsheet is read here and arrives as rows, so the page never has to see
+/// a zip of XML. Exactly one of the two is present.
+#[derive(Serialize)]
+pub struct AccountFile {
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rows: Option<Vec<Vec<String>>>,
+}
+
+/// The file chooser for Import Account: text and spreadsheets in one dialog.
+///
+/// A browser file input cannot hand Rust a path and cannot read a spreadsheet,
+/// which is why this is a native command rather than `<input type="file">`.
+/// The webview still uses its own input in browser development mode, where no
+/// Rust side exists.
+///
+/// Reading happens on a pool thread with the dialog: a spreadsheet parser and
+/// a person browsing for a file must not hold the thread that drives the
+/// window.
+#[tauri::command]
+pub async fn pick_account_file(
+    window: tauri::WebviewWindow,
+    title: String,
+) -> R<Option<AccountFile>> {
+    let picked = tauri::async_runtime::spawn_blocking(move || -> R<Option<AccountFile>> {
+        let Some(path) = rfd::FileDialog::new()
+            .set_parent(&window)
+            .set_title(title)
+            .add_filter(
+                "Accounts",
+                &["txt", "csv", "tsv", "xlsx", "xlsm", "xls", "xlsb", "ods"],
+            )
+            .pick_file()
+        else {
+            return Ok(None);
+        };
+
+        let name = path
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_else(|| path.display().to_string());
+        let extension = path
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+
+        if matches!(
+            extension.as_str(),
+            "xlsx" | "xlsm" | "xls" | "xlsb" | "ods"
+        ) {
+            let rows = crate::spreadsheet::read_rows(&path)?;
+            return Ok(Some(AccountFile {
+                name,
+                text: None,
+                rows: Some(rows),
+            }));
+        }
+
+        // The same ceiling Import Account applied to a File in the webview:
+        // past it a line-by-line parse would freeze before the operator could
+        // see why. The spreadsheet reader has its own, larger one.
+        const TEXT_LIMIT: u64 = 5 * 1024 * 1024;
+        let size = std::fs::metadata(&path)
+            .map_err(|e| ApiErr::local(format!("Could not read {}: {e}", path.display())))?
+            .len();
+        if size >= TEXT_LIMIT {
+            return Err(ApiErr::coded(
+                "imp.fileTooLarge",
+                format!(
+                    "{} is {} MB or larger",
+                    path.display(),
+                    TEXT_LIMIT / (1024 * 1024)
+                ),
+            ));
+        }
+        let bytes = std::fs::read(&path)
+            .map_err(|e| ApiErr::local(format!("Could not read {}: {e}", path.display())))?;
+        let text = String::from_utf8_lossy(&bytes).into_owned();
+
+        Ok(Some(AccountFile {
+            name,
+            text: Some(text),
+            rows: None,
+        }))
+    })
+    .await
+    .map_err(|e| ApiErr::local(format!("the file chooser could not be opened: {e}")))??;
+
+    Ok(picked)
+}
+
+/// Profiles in from an exported folder or zip — the other half of
+/// [`export_profiles`].
+///
+/// The agent does the detection and the copying. `project_id` is the local
+/// project the operator is looking at, or null: imported profiles are local
+/// rows, never team ones.
+#[tauri::command]
+pub async fn import_profiles(path: String, project_id: Option<String>) -> R<serde_json::Value> {
+    Ok(crate::agent::call(
+        "profiles.import",
+        serde_json::json!({ "path": path, "project_id": project_id }),
+    )
+    .await?)
+}
+
+/// One profile's export target, as the interface knows it.
+#[derive(serde::Deserialize, serde::Serialize)]
+pub struct ExportTarget {
+    pub id: String,
+    pub name: String,
+    /// "local" | "team" | "shared" — decides where the logins are read.
+    pub origin: String,
+}
+
+/// Profiles out to a folder or a zip: browser data plus every saved login.
+///
+/// The logins are why this is its own command. A local profile's rows are read
+/// by the agent, from the vault that sealed them; a team profile's rows live on
+/// the server and only this process can open them, with the organisation key.
+/// Reading them here also means the export fails BEFORE a directory is created
+/// when a login cannot be opened — an export missing an account is worse than
+/// no export at all.
+#[tauri::command]
+pub async fn export_profiles(
+    state: State<'_, AppState>,
+    dir: String,
+    name: String,
+    format: String,
+    profiles: Vec<ExportTarget>,
+) -> R<serde_json::Value> {
+    // Same rule as write_cookies_file: exactly one normal component.
+    if !matches!(
+        std::path::Path::new(&name).components().collect::<Vec<_>>().as_slice(),
+        [std::path::Component::Normal(_)]
+    ) {
+        return Err(ApiErr::local(format!("\"{name}\" is not a folder name")));
+    }
+
+    let mut targets = Vec::with_capacity(profiles.len());
+    for p in profiles {
+        let logins = if local_for(&state, Some(p.origin.as_str())) {
+            // The agent reads these itself; there is no reason to take the
+            // plaintext through the webview and hand it back.
+            serde_json::Value::Null
+        } else {
+            let rows = team_credentials(state.inner(), &p.id).await?;
+            if rows
+                .iter()
+                .any(|r| r.get("unreadable").and_then(|v| v.as_bool()) == Some(true))
+            {
+                return Err(ApiErr::coded(
+                    "err.exportLoginsUnreadable",
+                    "A login of this profile was sealed with a different organisation key, \
+                     so it cannot be exported. Re-save it before exporting.",
+                ));
+            }
+            serde_json::Value::Array(rows.iter().map(login_for_export).collect())
+        };
+        targets.push(serde_json::json!({
+            "id": p.id,
+            "name": p.name,
+            "logins": logins,
+        }));
+    }
+
+    let dir = PathBuf::from(shellexpand(&dir));
+    std::fs::create_dir_all(&dir)
+        .map_err(|e| ApiErr::local(format!("Could not create {}: {e}", dir.display())))?;
+
+    Ok(crate::agent::call(
+        "profiles.export",
+        serde_json::json!({
+            "dir": dir.display().to_string(),
+            "name": name,
+            "format": format,
+            "profiles": targets,
+        }),
+    )
+    .await?)
+}
+
+/// The seven fields a login carries on the way out.
+///
+/// `id` and `profile_id` stay behind: an import creates new rows under a new
+/// profile, and an identifier from the old machine is a promise the file
+/// cannot keep.
+fn login_for_export(row: &serde_json::Value) -> serde_json::Value {
+    let field = |k: &str| row.get(k).cloned().unwrap_or(serde_json::Value::Null);
+    serde_json::json!({
+        "label": field("label"),
+        "site": field("site"),
+        "username": field("username"),
+        "password": field("password"),
+        "totp": field("totp"),
+        "cookie": field("cookie"),
+        "notes": field("notes"),
+    })
 }
 
 /// Another anti-detect browser's profiles, read through its API with the
@@ -3649,6 +4174,113 @@ pub async fn trim_profile(id: String) -> R<serde_json::Value> {
     Ok(crate::agent::call("profiles.trim", serde_json::json!({ "id": id })).await?)
 }
 
+/// Hands a directory to this computer's file manager.
+///
+/// Shared by the profile folder and the data folder, so the three platforms are
+/// spelled out once. Windows uses `explorer`: it is a GUI-subsystem binary and
+/// allocates no console, and it exits non-zero even when it opened the folder —
+/// which is why only the spawn is checked and never the status.
+pub(crate) fn reveal(dir: &std::path::Path) -> std::io::Result<()> {
+    #[cfg(target_os = "macos")]
+    let spawned = std::process::Command::new("open").arg(dir).spawn();
+
+    #[cfg(windows)]
+    let spawned = std::process::Command::new("explorer").arg(dir).spawn();
+
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let spawned = std::process::Command::new("xdg-open").arg(dir).spawn();
+
+    spawned.map(|_| ())
+}
+
+/// Opens a profile's folder in this computer's file manager.
+///
+/// The path comes from the agent rather than being computed here. It used to be
+/// `data_dir()/profiles/<id>` in this file, which was right while there was one
+/// root and wrong the moment an operator could choose another: the folder would
+/// open empty, or on a directory that no longer holds the profile.
+///
+/// A profile that has never opened on this machine has no directory yet. That
+/// is not a failure — it is a path to show, so the answer says whether anything
+/// was opened as well as where the folder would be.
+#[tauri::command]
+pub async fn open_profile_folder(id: String) -> R<serde_json::Value> {
+    // The id is a path component on the agent's side too, so it is checked as
+    // one instead of trusted: `../..` from a compromised webview would otherwise
+    // reach directories no profile ever lives in.
+    if id.is_empty() || !id.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'-' || c == b'_') {
+        return Err(ApiErr::local(format!("not a profile id: {id:?}")));
+    }
+
+    let answer = crate::agent::call::<serde_json::Value>(
+        "profiles.dir",
+        serde_json::json!({ "id": id }),
+    )
+    .await?;
+    let path = answer
+        .get("dir")
+        .and_then(|d| d.as_str())
+        .ok_or_else(|| ApiErr::local("the agent did not say where this profile's data is"))?
+        .to_string();
+
+    let dir = std::path::PathBuf::from(&path);
+    if !dir.is_dir() {
+        return Ok(serde_json::json!({ "path": path, "opened": false }));
+    }
+
+    reveal(&dir).map_err(|e| ApiErr::local(format!("could not open {path}: {e}")))?;
+    Ok(serde_json::json!({ "path": path, "opened": true }))
+}
+
+/// Opens the folder `FURY_HOME` names — the root of everything this machine's
+/// XChange owns. The read-out beside it in Settings → Data comes from
+/// `Shell::data_dir`; this is the button next to it.
+///
+/// The directory always exists by the time anyone can press this: the agent
+/// creates it on its first start, and the shell only draws the screen after the
+/// window is up. Created anyway rather than reported missing, because "open the
+/// folder" failing on a working installation would be a puzzle with no cause.
+#[tauri::command]
+pub async fn open_data_folder() -> R<serde_json::Value> {
+    let dir = xchange_platform::dirs::data_dir();
+    let path = dir.display().to_string();
+    std::fs::create_dir_all(&dir)
+        .map_err(|e| ApiErr::local(format!("could not create {path}: {e}")))?;
+    reveal(&dir).map_err(|e| ApiErr::local(format!("could not open {path}: {e}")))?;
+    Ok(serde_json::json!({ "path": path }))
+}
+
+/// Where new profiles are made, and where the ones that exist already are.
+///
+/// Passed through from the agent, which owns both answers: the root is a row in
+/// the agent's database, and the per-profile paths are what that row decided at
+/// the moment each profile was first launched.
+#[tauri::command]
+pub async fn storage_info() -> R<serde_json::Value> {
+    Ok(crate::agent::call("storage.get", serde_json::json!({})).await?)
+}
+
+/// Chooses the folder new profiles are created under.
+///
+/// Every check lives on the agent's side, deliberately: it is the process that
+/// will write there, the one that knows which roots are already in use, and the
+/// one that has to fail in a way the interface can translate. This is a
+/// pass-through so that the refusal keeps its code.
+#[tauri::command]
+pub async fn set_profile_root(path: String, create: bool) -> R<serde_json::Value> {
+    Ok(crate::agent::call(
+        "storage.setRoot",
+        serde_json::json!({ "path": path, "create": create }),
+    )
+    .await?)
+}
+
+/// Back to the default root, which is where `FURY_HOME` points.
+#[tauri::command]
+pub async fn reset_profile_root() -> R<serde_json::Value> {
+    Ok(crate::agent::call("storage.resetRoot", serde_json::json!({})).await?)
+}
+
 // ---- domain lists ---------------------------------------------------------
 //
 // The relay has refused hosts by name since 07.08.2026 and, from 12.09.2026,
@@ -3782,7 +4414,7 @@ pub async fn kept_personas(state: State<'_, AppState>) -> R<serde_json::Value> {
         } else {
             None
         };
-    let dir = fury_platform::dirs::data_dir().join("personas");
+    let dir = xchange_platform::dirs::data_dir().join("personas");
     let mut out = Vec::new();
     for entry in std::fs::read_dir(&dir).into_iter().flatten().flatten() {
         let path = entry.path();
@@ -3807,9 +4439,9 @@ pub async fn kept_personas(state: State<'_, AppState>) -> R<serde_json::Value> {
 /// (agent/src/personas.rs), unchanged files left alone.
 fn keep_persona_here(persona: &serde_json::Value) -> R<String> {
     let id = persona_id(persona)?.to_string();
-    serde_json::from_value::<fury_shared::persona::Persona>(persona.clone())
+    serde_json::from_value::<xchange_shared::persona::Persona>(persona.clone())
         .map_err(|e| ApiErr::local(format!("this is not a persona the agent can read: {e}")))?;
-    let dir = fury_platform::dirs::data_dir().join("personas");
+    let dir = xchange_platform::dirs::data_dir().join("personas");
     std::fs::create_dir_all(&dir).map_err(|e| ApiErr::local(format!("Could not create {}: {e}", dir.display())))?;
     let path = dir.join(format!("{id}.json"));
     let text = serde_json::to_string_pretty(&persona).map_err(|e| ApiErr::local(e.to_string()))?;
@@ -3827,7 +4459,7 @@ pub async fn save_persona_file(persona: serde_json::Value) -> R<String> {
         .ok_or_else(|| ApiErr::local("no home directory"))?;
     let dir = std::path::Path::new(&home).join("Downloads");
     std::fs::create_dir_all(&dir).map_err(|e| ApiErr::local(format!("Could not create {}: {e}", dir.display())))?;
-    let path = dir.join(format!("fury-persona-{id}.json"));
+    let path = dir.join(format!("xchange-persona-{id}.json"));
     let text = serde_json::to_string_pretty(&persona).map_err(|e| ApiErr::local(e.to_string()))?;
     std::fs::write(&path, text).map_err(|e| ApiErr::local(format!("Could not write {}: {e}", path.display())))?;
     Ok(path.display().to_string())
@@ -4007,7 +4639,7 @@ pub async fn save_server_kit(dir: String) -> Result<serde_json::Value, ApiErr> {
         // The parent has to exist first. tar::Entry::unpack writes exactly the
         // path it is given and does not create directories on the way, so the
         // very first entry — server/Cargo.toml — failed with "failed to unpack
-        // into .../fury-server/server/Cargo.toml" on a directory that was never
+        // into .../xchange-server/server/Cargo.toml" on a directory that was never
         // made. Found by pressing the button; the code and the types were happy.
         let target = dir.join(&path);
         if let Some(parent) = target.parent() {
@@ -4257,9 +4889,9 @@ pub async fn shared_with_me(state: State<'_, AppState>) -> R<Vec<UiProfile>> {
             // PermSet is a bitmask with no iterator, so the names are filtered
             // out of the canonical list rather than invented here -- one
             // spelling of a permission in this repository, not two.
-            permissions: fury_shared::rbac::Perm::ALL
+            permissions: xchange_shared::rbac::Perm::ALL
                 .iter()
-                .filter(|p| fury_shared::rbac::PermSet(r.permissions).has(**p))
+                .filter(|p| xchange_shared::rbac::PermSet(r.permissions).has(**p))
                 .map(perm_name)
                 .collect(),
             blocklists: Vec::new(),
@@ -4341,8 +4973,8 @@ fn upload_body(me: &crate::agent::LocalProfile, proxy_id: Option<String>) -> ser
         "name": me.name,
         "tags": me.tags,
         "persona_id": me.persona_id,
-        "fp_seed": fury_shared::persona::seed::to_hex(
-            fury_shared::persona::seed::from_i64(me.fp_seed),
+        "fp_seed": xchange_shared::persona::seed::to_hex(
+            xchange_shared::persona::seed::from_i64(me.fp_seed),
         ),
         "timezone": me.timezone.clone().unwrap_or_default(),
         "languages": me.languages.clone().unwrap_or_default(),
@@ -4438,7 +5070,7 @@ pub async fn upload_profile(
                 })
                 .and_then(|x| x.get("id").and_then(|v| v.as_str()).map(str::to_string));
 
-            let credentials = fury_shared::api::ProxyCredentials {
+            let credentials = xchange_shared::api::ProxyCredentials {
                 username: p.username.clone().filter(|v| !v.is_empty()),
                 password: p.password.clone().filter(|v| !v.is_empty()),
             };
@@ -4635,7 +5267,7 @@ mod upload_tests {
         // the local store holds. A seed that survives the trip as a different
         // number is a warmed account with a different machine.
         assert_eq!(
-            fury_shared::persona::seed::from_hex(seed),
+            xchange_shared::persona::seed::from_hex(seed),
             Some(4985899071852176304u64),
         );
     }
@@ -4649,7 +5281,7 @@ mod upload_tests {
         let body = upload_body(&p, Some("p".into()));
         let seed = body["fp_seed"].as_str().unwrap();
         assert_eq!(
-            fury_shared::persona::seed::from_hex(seed),
+            xchange_shared::persona::seed::from_hex(seed),
             Some((-1234567890123456789i64) as u64),
         );
     }

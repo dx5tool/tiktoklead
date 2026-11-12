@@ -1,15 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright 2026 Bogdan Shapovalov and the Fury authors
+// Copyright 2026 Bogdan Shapovalov and the XChange authors
 
 //! The profile's name under its icon in the macOS Dock.
 //!
-//! Every profile is the same signed core, so every one of them said "Fury"
+//! Every profile is the same signed core, so every one of them said "XChange"
 //! in the Dock, and with five open the only way to find an account was to
 //! click through them (tester, 12.10.2026).
 //!
 //! What the Dock shows is the application bundle's DIRECTORY name, not
 //! CFBundleName and not anything the running process says about itself.
-//! Measured on a two-line Cocoa program: CFBundleName "Fury" in a bundle named
+//! Measured on a two-line Cocoa program: CFBundleName "XChange" in a bundle named
 //! DockName.app showed "DockName"; the same bundle copied to "console1 TR.app"
 //! showed "console1 TR"; renaming the running process through LaunchServices
 //! (_LSSetApplicationInformationItem, kLSDisplayNameKey) changed what lsappinfo
@@ -26,16 +26,16 @@
 //!   - the keychain does not ask: the Safe Storage entry trusts the core by
 //!     its designated requirement (identifier dev.fury.core, team JKN8WHX7FS),
 //!     not by path, so a clone anywhere opens it like the original;
-//!   - the menu bar still says Fury: that one is CFBundleName.
+//!   - the menu bar still says XChange: that one is CFBundleName.
 //!
 //! Remade on every launch -- the core may have been updated since the last
 //! one, and a profile is never launched twice at once, so its clone is never
 //! replaced under a running browser. Any failure here is not a failed launch:
-//! the original core runs, and the Dock says Fury, as before.
+//! the original core runs, and the Dock says XChange, as before.
 
 use std::path::{Path, PathBuf};
 
-/// The name as the Dock will show it, or None to leave it "Fury".
+/// The name as the Dock will show it, or None to leave it "XChange".
 ///
 /// A directory name, so the two characters a macOS path cannot hold in a
 /// component -- `/`, and `:` which Finder shows as `/` -- become `-`, control
@@ -91,7 +91,7 @@ fn named_core_in(dock_dir: &Path, core_binary: &Path, profile_id: &str, name: &s
 
 #[cfg(target_os = "macos")]
 fn clone(src: &Path, dst: &Path) -> std::io::Result<()> {
-    fury_platform::tree::clone_tree(src, dst)
+    xchange_platform::tree::clone_tree(src, dst)
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -118,25 +118,25 @@ mod tests {
     #[cfg(target_os = "macos")]
     #[test]
     fn the_copy_is_named_after_the_profile_and_remade_each_time() {
-        let root = std::env::temp_dir().join(format!("fury-dock-{}", std::process::id()));
+        let root = std::env::temp_dir().join(format!("xchange-dock-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         let core = root.join("core.bundle/Fury.app/Contents/MacOS");
         std::fs::create_dir_all(&core).unwrap();
-        std::fs::write(core.join("Fury"), b"v1").unwrap();
+        std::fs::write(core.join("XChange"), b"v1").unwrap();
         let dock = root.join("dock.noindex");
 
-        let exe = named_core_in(&dock, &core.join("Fury"), "p-1", "kg-seo 1").unwrap();
+        let exe = named_core_in(&dock, &core.join("XChange"), "p-1", "kg-seo 1").unwrap();
         assert_eq!(exe, dock.join("p-1/kg-seo 1.app/Contents/MacOS/Fury"));
         assert_eq!(std::fs::read(&exe).unwrap(), b"v1");
 
         // A new core and a renamed profile: the old clone goes, the new one
         // carries the new core.
-        std::fs::write(core.join("Fury"), b"v2").unwrap();
-        let exe = named_core_in(&dock, &core.join("Fury"), "p-1", "kg-seo 2").unwrap();
+        std::fs::write(core.join("XChange"), b"v2").unwrap();
+        let exe = named_core_in(&dock, &core.join("XChange"), "p-1", "kg-seo 2").unwrap();
         assert_eq!(std::fs::read(&exe).unwrap(), b"v2");
         assert!(!dock.join("p-1/kg-seo 1.app").exists());
 
-        assert!(named_core_in(&dock, &core.join("Fury"), "../x", "n").is_err());
+        assert!(named_core_in(&dock, &core.join("XChange"), "../x", "n").is_err());
         assert!(named_core_in(&dock, Path::new("/usr/bin/true"), "p-2", "n").is_err());
         std::fs::remove_dir_all(&root).unwrap();
     }

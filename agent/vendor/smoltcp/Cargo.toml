@@ -335,7 +335,7 @@ std = [
 ]
 verbose = []
 
-# FURY: upstream's own warnings, which crates.io builds never print. Vendored,
+# XCHANGE: upstream's own warnings, which crates.io builds never print. Vendored,
 # they would bury ours.
 [lints.rust]
 warnings = "allow"

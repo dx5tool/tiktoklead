@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright 2026 Bogdan Shapovalov and the Fury authors
+// Copyright 2026 Bogdan Shapovalov and the XChange authors
 
 import { useCallback, useRef, useState } from "react";
 import { useI18n } from "../i18n";
@@ -12,6 +12,8 @@ interface Request {
   initial?: string;
   confirmLabel: string;
   danger?: boolean;
+  /** A message with one OK button: no input, no Cancel. */
+  alert?: boolean;
 }
 
 /** Confirmations and prompts, drawn by the application.
@@ -68,7 +70,11 @@ export function useAsk(): {
           <div className="name" style={{ marginBottom: "var(--s-2)" }}>
             {request.title}
           </div>
-          {request.detail && <p className="hint" style={{ margin: 0 }}>{request.detail}</p>}
+          {request.detail && (
+            <p className={request.alert ? undefined : "hint"} style={{ margin: 0, lineHeight: request.alert ? 1.55 : undefined }}>
+              {request.detail}
+            </p>
+          )}
           {request.placeholder !== undefined && (
             <input
               style={{ marginTop: "var(--s-3)" }}
@@ -81,9 +87,11 @@ export function useAsk(): {
         </div>
         <div className="modalFoot">
           <div className="spacer" />
-          <button type="button" className="ghost" onClick={() => settle(null)}>
-            {t("ui.cancel")}
-          </button>
+          {!request.alert && (
+            <button type="button" className="ghost" onClick={() => settle(null)}>
+              {t("ui.cancel")}
+            </button>
+          )}
           <button
             type="submit"
             className={request.danger ? "danger" : "primary"}

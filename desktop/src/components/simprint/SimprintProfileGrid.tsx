@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright 2026 Bogdan Shapovalov and the XChange authors
+
 import React, { useState } from "react";
 import { createPortal } from "react-dom";
 import {
@@ -11,12 +14,13 @@ import {
   Laptop,
   Users,
   AlertTriangle,
-  Loader2,
   Cookie,
+  FolderOpen,
   MoreVertical,
   Network,
   Globe,
   Cpu,
+  HardDrive,
 } from "lucide-react";
 import { useI18n } from "../../i18n";
 import type { Me, Profile } from "../../api";
@@ -25,6 +29,7 @@ import { assess } from "../../consistency";
 import { isSuggested, statusHue } from "../../status";
 import { SimprintBadge } from "./SimprintBadge";
 import { isOpenHere } from "../ProfileTable";
+import { isProviderProxy } from "../../providerProxy";
 
 interface SimprintProfileGridProps {
   profiles: Profile[];
@@ -38,10 +43,14 @@ interface SimprintProfileGridProps {
   onEdit?: (p: Profile) => void;
   onDelete?: (p: Profile) => void;
   onExtensions?: (p: Profile) => void;
+  onDisk?: (p: Profile) => void;
   onShare?: (p: Profile) => void;
   onNetwork?: (p: Profile) => void;
   onClone?: (p: Profile) => void;
   onCookies?: (p: Profile) => void;
+  /** Opens the profile's folder in the file manager, and says where it is when
+   *  it is not there. Absent where the caller has no shell behind it. */
+  onOpenFolder?: (p: Profile) => void;
   onQuickEdit?: (p: Profile, name: string, tags: string[]) => Promise<void>;
   personas?: Set<string> | null;
   sharing?: Map<string, number>;
@@ -61,10 +70,12 @@ export const SimprintProfileGrid: React.FC<SimprintProfileGridProps> = ({
   onEdit,
   onDelete,
   onExtensions,
+  onDisk,
   onShare,
   onNetwork,
   onClone,
   onCookies,
+  onOpenFolder,
   onQuickEdit,
   personas,
   sharing,
@@ -98,8 +109,8 @@ export const SimprintProfileGrid: React.FC<SimprintProfileGridProps> = ({
       const parsedTags = Array.from(
         new Set(
           quickTags
-            .split(/[,\s]+/)
-            .map((t) => t.replace(/^#/, "").trim())
+            .split(/[,;\n]+/)
+            .map((t) => t.trim().replace(/^#/, "").trim().replace(/\s+/g, " "))
             .filter(Boolean),
         ),
       );
@@ -133,7 +144,10 @@ export const SimprintProfileGrid: React.FC<SimprintProfileGridProps> = ({
           const open = isOpenHere(p, { local, userId: me?.user_id, machine: thisMachine });
           const starting = launching?.has(p.id) ?? false;
           const sharedExitCount = sharing?.get(p.id) ?? 0;
-          const verdict = assess(p, personas ?? null, sharedExitCount);
+          // A provider hands the same exit to many of its customers, so a
+          // shared address is expected there and not a farm signature.
+          const providerBacked = isProviderProxy(p.proxy);
+          const verdict = assess(p, personas ?? null, sharedExitCount, providerBacked);
           const verdictText = verdict.notes.map((n) => t(n.key, n.vars)).join(" · ");
           const isPicked = selected.has(p.id);
           const isMenuOpen = openDropdownId === p.id;
@@ -197,9 +211,24 @@ export const SimprintProfileGrid: React.FC<SimprintProfileGridProps> = ({
                       <MoreVertical size={14} />
                     </button>
 
-                    {/* Dropdown Menu (Contains Cookies, Share, Extensions, Clone, Delete) */}
+                    {/* Dropdown Menu (Open folder, Cookies, Share, Extensions, Storage & cache, Clone, Delete).
+                        `w-max` rather than a fixed width, as the table's menu does:
+                        "Open profile folder" — and its Russian translation, longer
+                        still — wraps to two lines inside the 10rem this used to be. */}
                     {isMenuOpen && (
-                      <div className="absolute right-0 top-7 w-40 py-1.5 bg-white border border-slate-200 text-slate-800 shadow-xl dark:bg-slate-900 dark:border-slate-700/80 dark:text-slate-300 dark:shadow-2xl rounded-xl z-50 text-xs">
+                      <div className="absolute right-0 top-7 w-max min-w-40 py-1.5 bg-white border border-slate-200 text-slate-800 shadow-xl dark:bg-slate-900 dark:border-slate-700/80 dark:text-slate-300 dark:shadow-2xl rounded-xl z-50 text-xs">
+                        {onOpenFolder && (
+                          <button
+                            onClick={() => {
+                              setOpenDropdownId(null);
+                              onOpenFolder(p);
+                            }}
+                            className="w-full flex items-center gap-2 px-3 py-1.5 text-slate-700 hover:text-slate-900 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white cursor-pointer text-left !bg-transparent !border-0"
+                          >
+                            <FolderOpen size={13} />
+                            <span>{t("row.openFolder")}</span>
+                          </button>
+                        )}
                         {onCookies && (
                           <button
                             onClick={() => {
@@ -234,6 +263,18 @@ export const SimprintProfileGrid: React.FC<SimprintProfileGridProps> = ({
                           >
                             <Puzzle size={13} />
                             <span>{t("ext.extensions")}</span>
+                          </button>
+                        )}
+                        {onDisk && canEdit && (
+                          <button
+                            onClick={() => {
+                              setOpenDropdownId(null);
+                              onDisk(p);
+                            }}
+                            className="w-full flex items-center gap-2 px-3 py-1.5 text-slate-700 hover:text-slate-900 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white cursor-pointer text-left !bg-transparent !border-0"
+                          >
+                            <HardDrive size={13} />
+                            <span>{t("ext.storageLabel")}</span>
                           </button>
                         )}
                         {onClone && canEdit && (
@@ -316,7 +357,7 @@ export const SimprintProfileGrid: React.FC<SimprintProfileGridProps> = ({
                     </div>
                     <div className="flex items-center gap-1">
                       <Cpu size={11} className="text-slate-400 dark:text-slate-500" />
-                      <span>Fury Core</span>
+                      <span>XChange Core</span>
                     </div>
                   </div>
                 </div>
@@ -405,17 +446,8 @@ export const SimprintProfileGrid: React.FC<SimprintProfileGridProps> = ({
                       onClick={() => onLaunch(p)}
                       className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl font-medium text-xs text-white bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 shadow-md shadow-cyan-500/20 disabled:opacity-40 transition-all cursor-pointer !border-0"
                     >
-                      {starting ? (
-                        <>
-                          <Loader2 size={13} className="animate-spin" />
-                          <span>{t("row.opening")}</span>
-                        </>
-                      ) : (
-                        <>
-                          <Play size={12} fill="currentColor" />
-                          <span>{t("row.open")}</span>
-                        </>
-                      )}
+                      <Play size={12} fill="currentColor" />
+                      <span>{t("row.open")}</span>
                     </button>
                   )}
 

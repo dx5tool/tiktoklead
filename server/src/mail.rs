@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright 2026 Bogdan Shapovalov and the Fury authors
+// Copyright 2026 Bogdan Shapovalov and the XChange authors
 
 //! Email, for one job: proving that whoever redeems an invitation reads the
 //! inbox it was issued for.
@@ -17,7 +17,7 @@
 //! ```text
 //! FURY_SMTP_URL=smtps://user:password@smtp.example.com:465
 //! FURY_SMTP_URL=smtp://user:password@smtp.example.com:587?tls=required
-//! FURY_MAIL_FROM=Fury <noreply@example.com>
+//! FURY_MAIL_FROM=XChange <noreply@example.com>
 //! ```
 
 use lettre::message::{header::ContentType, Mailbox};
@@ -75,21 +75,21 @@ impl Mailer {
 pub fn email_code_letter(lang: &str, org: &str, code: &str, minutes: i64) -> (String, String) {
     if lang.starts_with("ru") {
         (
-            format!("Код подтверждения Fury: {code}"),
+            format!("Код подтверждения XChange: {code}"),
             format!(
-                "Код для регистрации в команде «{org}» в Fury: {code}\n\n\
+                "Код для регистрации в команде «{org}» в XChange: {code}\n\n\
                  Введите его в окне регистрации. Код действует {minutes} минут.\n\n\
-                 Если вы не регистрировались в Fury, просто удалите это письмо: \
+                 Если вы не регистрировались в XChange, просто удалите это письмо: \
                  без этого кода аккаунт на ваш адрес никто не создаст.\n"
             ),
         )
     } else {
         (
-            format!("Fury confirmation code: {code}"),
+            format!("XChange confirmation code: {code}"),
             format!(
-                "Your code for joining the team \"{org}\" in Fury: {code}\n\n\
+                "Your code for joining the team \"{org}\" in XChange: {code}\n\n\
                  Type it into the sign-up window. It is valid for {minutes} minutes.\n\n\
-                 If you did not sign up for Fury, delete this letter: without the \
+                 If you did not sign up for XChange, delete this letter: without the \
                  code nobody can make an account under your address.\n"
             ),
         )

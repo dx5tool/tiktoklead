@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright 2026 Bogdan Shapovalov and the Fury authors
+// Copyright 2026 Bogdan Shapovalov and the XChange authors
 
-//! fury-detect — compare fingerprint dumps produced by probe.js.
+//! xchange-detect — compare fingerprint dumps produced by probe.js.
 //!
 //! Phase 0 workflow (docs/09-roadmap.md):
 //!
 //!   1. Open probe.html in real Chrome          -> baselines/chrome-<ver>-<os>.json
 //!   2. Open probe.html in the build under test -> candidate.json
-//!   3. fury-detect diff --mode spoof baselines/chrome-151-macos.json candidate.json
+//!   3. xchange-detect diff --mode spoof baselines/chrome-151-macos.json candidate.json
 //!
 //! Exit code is 0 only when nothing that matters differs, so this drops straight
 //! into CI as the release gate.
@@ -35,32 +35,32 @@ fn main() -> Result<()> {
         Some("personas-check") => persona::cmd_personas_check(&args[1..]),
         _ => {
             eprintln!(
-                "fury-detect {}\n\
+                "xchange-detect {}\n\
                  \n\
                  Compare fingerprint dumps captured with tools/detect-suite/probe.html\n\
                  \n\
                  USAGE:\n  \
-                   fury-detect diff [--mode spoof|identity] <baseline.json> <candidate.json>\n      \
+                   xchange-detect diff [--mode spoof|identity] <baseline.json> <candidate.json>\n      \
                      identity  same browser twice: nothing may differ\n      \
-                     spoof     real Chrome vs Fury: values may differ, behaviour may not\n\
+                     spoof     real Chrome vs XChange: values may differ, behaviour may not\n\
                  \n  \
-                   fury-detect persona <capture.json> [--id name] [--weight 0.01]\n      \
+                   xchange-detect persona <capture.json> [--id name] [--weight 0.01]\n      \
                      Turn a probe capture into a persona for the catalogue.\n\
                  \n  \
-                   fury-detect personas-check [shared/personas/contributed]\n      \
+                   xchange-detect personas-check [shared/personas/contributed]\n      \
                      What CI runs on a contributed persona: parses, validates,\n      \
                      unique id, source \"capture\", no network fields.\n\
                  \n  \
-                   fury-detect redact --check [dir]\n      \
+                   xchange-detect redact --check [dir]\n      \
                      Fail if any baseline still carries a routable address.\n\
                  \n  \
-                   fury-detect gate <dump.json>\n      \
+                   xchange-detect gate <dump.json>\n      \
                      Release-gate checks on a single dump. Non-zero exit on failure.\n\
                  \n  \
-                   fury-detect flatten <dump.json>\n      \
+                   xchange-detect flatten <dump.json>\n      \
                      Print the dump as sorted dotted paths.\n\
                  \n  \
-                   fury-detect redact <in.json> <out.json>\n      \
+                   xchange-detect redact <in.json> <out.json>\n      \
                      Strip network-identifying fields so a reference baseline\n      \
                      can be committed. Required before publishing one.\n",
                 env!("CARGO_PKG_VERSION")
@@ -125,7 +125,7 @@ fn load(path: &str) -> Result<BTreeMap<String, String>> {
 }
 
 fn cmd_flatten(args: &[String]) -> Result<()> {
-    let path = args.first().context("usage: fury-detect flatten <dump.json>")?;
+    let path = args.first().context("usage: xchange-detect flatten <dump.json>")?;
     for (k, v) in load(path)? {
         println!("{k} = {v}");
     }
@@ -354,7 +354,7 @@ fn cmd_redact(args: &[String]) -> Result<()> {
         if untracked > 0 {
             println!(
                 "  ({untracked} uncommitted capture(s) here do — that is what a raw capture is. \
-                 Run `fury-detect redact` on one before committing it.)"
+                 Run `xchange-detect redact` on one before committing it.)"
             );
         }
 
@@ -417,8 +417,8 @@ fn cmd_redact(args: &[String]) -> Result<()> {
     let (input, output) = match args {
         [i, o] => (i, o),
         _ => anyhow::bail!(
-            "usage: fury-detect redact <in.json> <out.json>\n\
-             \x20      fury-detect redact --check [dir]"
+            "usage: xchange-detect redact <in.json> <out.json>\n\
+             \x20      xchange-detect redact --check [dir]"
         ),
     };
 
@@ -569,7 +569,7 @@ fn cmd_diff(args: &[String]) -> Result<()> {
 
     let (a_path, b_path) = match positional.as_slice() {
         [a, b] => (a.clone(), b.clone()),
-        _ => anyhow::bail!("usage: fury-detect diff [--mode spoof|identity] <baseline> <candidate>"),
+        _ => anyhow::bail!("usage: xchange-detect diff [--mode spoof|identity] <baseline> <candidate>"),
     };
 
     let a = load(&a_path)?;
@@ -672,7 +672,7 @@ fn abbreviate(v: Option<&str>) -> String {
 fn report(findings: &[Finding], mode: Mode, a_path: &str, b_path: &str) -> Result<()> {
     let mode_name = match mode {
         Mode::Identity => "identity (same browser twice — nothing may differ)",
-        Mode::Spoof => "spoof (Chrome vs Fury — values may differ, behaviour may not)",
+        Mode::Spoof => "spoof (Chrome vs XChange — values may differ, behaviour may not)",
     };
 
     println!("baseline   {}", Path::new(a_path).display());
@@ -930,7 +930,7 @@ fn gate_checks(flat: &std::collections::BTreeMap<String, String>) -> Vec<Check> 
 
 /// A release report: the gate's verdict, plus everything needed to re-take it.
 ///
-///     fury-detect report <dump.json> --core <binary> [--out report.md]
+///     xchange-detect report <dump.json> --core <binary> [--out report.md]
 ///
 /// The point is not the verdict. Anyone can print a verdict; ShardBrowser's
 /// evidence is screenshots on imgur and CloakBrowser's is a table in a README,
@@ -963,7 +963,7 @@ fn cmd_report(args: &[String]) -> Result<()> {
         }
     }
     let dump = dump.context(
-        "usage: fury-detect report <dump.json> --core <binary> [--out report.md]",
+        "usage: xchange-detect report <dump.json> --core <binary> [--out report.md]",
     )?;
 
     let hash_of = |path: &str| -> Result<String> {
@@ -1008,7 +1008,7 @@ fn cmd_report(args: &[String]) -> Result<()> {
         .unwrap_or_else(|| "(not a git checkout)".into());
 
     let mut md = String::new();
-    md.push_str("# Fury — measurement report\n\n");
+    md.push_str("# XChange — measurement report\n\n");
     md.push_str(&format!(
         "{}\n\n",
         if failed == 0 {
@@ -1037,7 +1037,7 @@ fn cmd_report(args: &[String]) -> Result<()> {
     }
 
     md.push_str(
-        "\n## Taking it again\n\n         This document is a claim about a specific binary, and the hashes above          are what make it checkable rather than believable. With the same          release:\n\n         ```bash\n         shasum -a 256 <the core binary>          # must match `core sha256`\n         tools/detect-suite/capture-chrome.sh mine <the core binary>\n         cargo run -p fury-detect -- report tools/detect-suite/baselines/mine.json \\\n             --core <the core binary>\n         ```\n\n         A different verdict from the same core hash is a bug worth reporting          (SECURITY.md). A different verdict from a different core hash is a          different browser.\n",
+        "\n## Taking it again\n\n         This document is a claim about a specific binary, and the hashes above          are what make it checkable rather than believable. With the same          release:\n\n         ```bash\n         shasum -a 256 <the core binary>          # must match `core sha256`\n         tools/detect-suite/capture-chrome.sh mine <the core binary>\n         cargo run -p xchange-detect -- report tools/detect-suite/baselines/mine.json \\\n             --core <the core binary>\n         ```\n\n         A different verdict from the same core hash is a bug worth reporting          (SECURITY.md). A different verdict from a different core hash is a          different browser.\n",
     );
 
     match out {
@@ -1054,7 +1054,7 @@ fn cmd_report(args: &[String]) -> Result<()> {
 }
 
 fn cmd_gate(args: &[String]) -> Result<()> {
-    let path = args.first().context("usage: fury-detect gate <dump.json>")?;
+    let path = args.first().context("usage: xchange-detect gate <dump.json>")?;
     let flat = load(path)?;
     let checks = gate_checks(&flat);
     println!("gate  {}\n", Path::new(path).display());

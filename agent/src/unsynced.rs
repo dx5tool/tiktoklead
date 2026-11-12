@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright 2026 Bogdan Shapovalov and the Fury authors
+// Copyright 2026 Bogdan Shapovalov and the XChange authors
 
 //! A team profile whose last session never reached the server.
 //!
@@ -24,7 +24,7 @@
 //! The marker lives beside the directory, not in it, so that it is never packed
 //! into a bundle and never unpacked from one.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
@@ -36,19 +36,26 @@ struct Marker {
     since: String,
 }
 
-fn marker_path(profile_id: &str) -> PathBuf {
-    crate::paths::profile_dir(profile_id).with_extension("unsynced.json")
+/// Where the two markers for this profile live, given where its data does.
+///
+/// Derived from the directory rather than computed from `data_dir`, and that is
+/// load-bearing: a profile can be filed under a chosen root, and a marker left
+/// behind at the old location would make `held` answer `None` — which `decide`
+/// reads as "nothing local to lose" and answers `Unpack`, overwriting a session
+/// that never reached the server.
+fn marker_path(dir: &Path) -> PathBuf {
+    dir.with_extension("unsynced.json")
 }
 
 /// Record that this profile's local copy holds a session the server lacks.
-pub fn mark(profile_id: &str, base_version: i32) {
+pub fn mark(dir: &Path, profile_id: &str, base_version: i32) {
     let marker = Marker {
         base_version,
         since: time::OffsetDateTime::now_utc()
             .format(&time::format_description::well_known::Rfc3339)
             .unwrap_or_default(),
     };
-    let path = marker_path(profile_id);
+    let path = marker_path(dir);
     match serde_json::to_vec_pretty(&marker) {
         Ok(bytes) => {
             if let Err(e) = std::fs::write(&path, bytes) {
@@ -60,23 +67,22 @@ pub fn mark(profile_id: &str, base_version: i32) {
 }
 
 /// The server version the local copy grew from, if its last session is unsent.
-pub fn base(profile_id: &str) -> Option<i32> {
-    let bytes = std::fs::read(marker_path(profile_id)).ok()?;
+pub fn base(dir: &Path) -> Option<i32> {
+    let bytes = std::fs::read(marker_path(dir)).ok()?;
     serde_json::from_slice::<Marker>(&bytes).ok().map(|m| m.base_version)
 }
 
 /// The local copy and the server agree again.
-pub fn clear(profile_id: &str) {
-    let _ = std::fs::remove_file(marker_path(profile_id));
+pub fn clear(dir: &Path) {
+    let _ = std::fs::remove_file(marker_path(dir));
 }
 
 /// Move the local copy out of the way, keeping it. Returns where it went.
-pub fn set_aside(profile_id: &str) -> anyhow::Result<PathBuf> {
-    let dir = crate::paths::profile_dir(profile_id);
+pub fn set_aside(dir: &Path) -> anyhow::Result<PathBuf> {
     let aside = dir.with_extension(format!("unsent-{}", time::OffsetDateTime::now_utc().unix_timestamp()));
-    std::fs::rename(&dir, &aside)?;
-    clear(profile_id);
-    let _ = std::fs::remove_file(held_path(profile_id));
+    std::fs::rename(dir, &aside)?;
+    clear(dir);
+    let _ = std::fs::remove_file(held_path(dir));
     Ok(aside)
 }
 
@@ -92,21 +98,21 @@ pub fn set_aside(profile_id: &str) -> anyhow::Result<PathBuf> {
 // browser open, nothing pushed and nothing marked -- is kept rather than
 // overwritten with the older bundle it grew from, which is what used to happen.
 
-fn held_path(profile_id: &str) -> PathBuf {
-    crate::paths::profile_dir(profile_id).with_extension("version")
+fn held_path(dir: &Path) -> PathBuf {
+    dir.with_extension("version")
 }
 
 /// The server version this machine's copy of the profile is, if it has one.
-pub fn held(profile_id: &str) -> Option<i32> {
-    if !crate::paths::profile_dir(profile_id).is_dir() {
+pub fn held(dir: &Path) -> Option<i32> {
+    if !dir.is_dir() {
         return None;
     }
-    std::fs::read_to_string(held_path(profile_id)).ok()?.trim().parse().ok()
+    std::fs::read_to_string(held_path(dir)).ok()?.trim().parse().ok()
 }
 
 /// The local copy and server version `version` are the same profile.
-pub fn record_held(profile_id: &str, version: i32) {
-    if let Err(e) = std::fs::write(held_path(profile_id), version.to_string()) {
+pub fn record_held(dir: &Path, profile_id: &str, version: i32) {
+    if let Err(e) = std::fs::write(held_path(dir), version.to_string()) {
         tracing::warn!(profile = %profile_id, error = %e, "could not record which version is here");
     }
 }

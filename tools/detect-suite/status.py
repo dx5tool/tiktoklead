@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: AGPL-3.0-or-later
-# Copyright 2026 Bogdan Shapovalov and the Fury authors
+# Copyright 2026 Bogdan Shapovalov and the XChange authors
 """Generate the status page from the captures in git.
 
     ./status.py                 write status.html
@@ -91,7 +91,7 @@ def gate(name):
         return None, f"no {path.name}"
     try:
         proc = subprocess.run(
-            ["cargo", "run", "-q", "-p", "fury-detect", "--", "gate", str(path)],
+            ["cargo", "run", "-q", "-p", "xchange-detect", "--", "gate", str(path)],
             cwd=HERE.parent.parent,
             capture_output=True,
             text=True,
@@ -125,7 +125,7 @@ def e(x):
 
 
 def build():
-    fury = load("ctx-fury-redacted")
+    xchange = load("ctx-xchange-redacted")
     chrome = load("ctx-chrome-redacted")
     gate_rows, gate_error = gate("gate-persona-redacted")
 
@@ -139,7 +139,7 @@ def build():
     try:
         commit = subprocess.run(
             ["git", "log", "-1", "--format=%h %ad", "--date=short", "--",
-             "baselines/ctx-fury-redacted.json",
+             "baselines/ctx-xchange-redacted.json",
              "baselines/ctx-chrome-redacted.json",
              "baselines/gate-persona-redacted.json"],
             cwd=HERE, capture_output=True, text=True, timeout=30,
@@ -150,10 +150,10 @@ def build():
     parts = [HEAD]
 
     # --- the headline ---------------------------------------------------
-    if fury and chrome:
-        f_dis = dig(fury, "crossContext.disagreementCount")
+    if xchange and chrome:
+        f_dis = dig(xchange, "crossContext.disagreementCount")
         c_dis = dig(chrome, "crossContext.disagreementCount")
-        f_ctx = len(dig(fury, "crossContext.contextsProbed") or [])
+        f_ctx = len(dig(xchange, "crossContext.contextsProbed") or [])
         c_ctx = len(dig(chrome, "crossContext.contextsProbed") or [])
         verdict_class = "ok" if f_dis == 0 else "bad"
         parts.append(f"""
@@ -166,11 +166,11 @@ def build():
      the only acceptable answer is the one Chrome gives.</p>
 </section>""")
     else:
-        parts.append(section_missing("cross-context", "ctx-fury-redacted.json / ctx-chrome-redacted.json"))
+        parts.append(section_missing("cross-context", "ctx-xchange-redacted.json / ctx-chrome-redacted.json"))
 
     # --- context table --------------------------------------------------
-    if fury:
-        probed = set(dig(fury, "crossContext.contextsProbed") or [])
+    if xchange:
+        probed = set(dig(xchange, "crossContext.contextsProbed") or [])
         rows = "".join(
             f"<tr><td>{e(label)}</td><td class=\"{'yes' if key in probed else 'no'}\">"
             f"{'probed' if key in probed else 'not reached'}</td></tr>"
@@ -179,10 +179,10 @@ def build():
         # A field missing from a context is not a disagreement, and the two are
         # worth keeping apart. navigator.userAgent does not exist inside an
         # AudioWorklet and navigator.webdriver does not exist in any worker —
-        # in Chrome either. What would be alarming is a field present in Fury
+        # in Chrome either. What would be alarming is a field present in XChange
         # and absent in Chrome, or the reverse, so the two lists are compared
-        # rather than only Fury's being printed.
-        f_abs = dig(fury, "crossContext.absences") or []
+        # rather than only XChange's being printed.
+        f_abs = dig(xchange, "crossContext.absences") or []
         c_abs = dig(chrome, "crossContext.absences") if chrome else None
         note = ""
         if f_abs:
@@ -227,7 +227,7 @@ def build():
         parts.append(f"""
 <section>
   <h2>Release gate <span class="tally">{passed} passed, {failed} failed</span></h2>
-  <p class="note">Run it yourself: <code>cargo run -p fury-detect -- gate &lt;capture.json&gt;</code>.
+  <p class="note">Run it yourself: <code>cargo run -p xchange-detect -- gate &lt;capture.json&gt;</code>.
      This table is that command's output, not a second implementation of it.</p>
   <table><tbody>{rows}</tbody></table>
 </section>""")
@@ -235,10 +235,10 @@ def build():
         parts.append(section_missing("release gate", gate_error or "gate-persona-redacted.json"))
 
     # --- side by side ---------------------------------------------------
-    if fury and chrome:
+    if xchange and chrome:
         rows = ""
         for path, label in COMPARED:
-            f_val, c_val = dig(fury, path), dig(chrome, path)
+            f_val, c_val = dig(xchange, path), dig(chrome, path)
             # Both absent means the path is wrong, not that the browsers agree.
             # This rendered "WebGL vendor — — same" until it was looked at,
             # which is the most confident way to say nothing.
@@ -255,13 +255,13 @@ def build():
         chrome_label = f"Chrome {_m.group(1)}" if _m else "Chrome"
         parts.append(f"""
 <section>
-  <h2>Fury and Chrome, side by side</h2>
+  <h2>XChange and Chrome, side by side</h2>
   <p class="note">Both captures were taken on the same machine. <em>differs</em> is
      the expected answer for a spoofed profile and <em>same</em> is the expected
      answer for everything the persona does not claim — the point is that each
      one is deliberate.</p>
   <table>
-    <thead><tr><th></th><th>Fury</th><th>{e(chrome_label)}</th><th></th></tr></thead>
+    <thead><tr><th></th><th>XChange</th><th>{e(chrome_label)}</th><th></th></tr></thead>
     <tbody>{rows}</tbody>
   </table>
 </section>""")
@@ -294,7 +294,7 @@ def section_missing(what, why):
 
 HEAD = """<!doctype html>
 <meta charset="utf-8">
-<title>Fury — measured</title>
+<title>XChange — measured</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
   :root { color-scheme: light dark; --line: #8883; --ok: #1a7f37; --bad: #c1121f; }
@@ -325,7 +325,7 @@ HEAD = """<!doctype html>
            font-size: .85rem; opacity: .8; }
 </style>
 <body><main>
-<h1>Fury, measured</h1>
+<h1>XChange, measured</h1>
 <p class="sub">Every number on this page came from a browser that was running.
    None of them are claims.</p>"""
 

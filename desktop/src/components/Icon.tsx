@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright 2026 Bogdan Shapovalov and the Fury authors
+// Copyright 2026 Bogdan Shapovalov and the XChange authors
 
 /** The line icons the toolbars use.
  *
@@ -21,6 +21,9 @@ const P = {
   share:
     "M4 12v7a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7M12 3v13M12 3 8 7M12 3l4 4",
   upload: "M12 20V8M12 4 7 9M12 4l5 5M4 20h16",
+  /** The mirror of it: something arriving rather than leaving. Paired with
+   *  `upload` on the two buttons that move cookies between a file and the box. */
+  download: "M12 4v12M12 20 7 15M12 20l5-5M4 4h16",
   copy: "M9 9h10v10a1 1 0 0 1-1 1H9a1 1 0 0 1-1-1V9ZM6 15H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h9a1 1 0 0 1 1 1v1",
   cookie:
     "M21 12a9 9 0 1 1-9-9 3 3 0 0 0 3 3 3 3 0 0 0 3 3 3 3 0 0 0 3 3ZM9 10h.01M8 15h.01M13 15h.01M15 11h.01",

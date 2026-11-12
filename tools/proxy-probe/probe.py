@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: AGPL-3.0-or-later
-# Copyright 2026 Bogdan Shapovalov and the Fury authors
+# Copyright 2026 Bogdan Shapovalov and the XChange authors
 """What a proxy actually answers, byte by byte, for one host:port:user:pass line.
 
 Prints every reply of the SOCKS5 handshake and of an HTTP CONNECT, once with

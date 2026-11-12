@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright 2026 Bogdan Shapovalov and the Fury authors
+// Copyright 2026 Bogdan Shapovalov and the XChange authors
 
 //! The session token, and the two places it may live.
 //!
@@ -27,7 +27,7 @@
 
 use std::sync::Mutex;
 
-const SERVICE: &str = "dev.fury.desktop";
+const SERVICE: &str = "dev.xchange.desktop";
 
 /// Where the organisation key is remembered, keyed by server like the token.
 fn org_key_account(server_url: &str) -> String {

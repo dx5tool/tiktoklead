@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: AGPL-3.0-or-later
-# Copyright 2026 Bogdan Shapovalov and the Fury authors
+# Copyright 2026 Bogdan Shapovalov and the XChange authors
 """Generate deploy/workspace.toml from the repository's Cargo.toml.
 
     ./gen-deploy-workspace.py            write it

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright 2026 Bogdan Shapovalov and the Fury authors
+// Copyright 2026 Bogdan Shapovalov and the XChange authors
 
 //! Fetching a `.crx` from the Chrome Web Store by id, the way the browser
 //! itself would — and from where the browser would.
@@ -35,7 +35,7 @@ pub fn crx_url(id: &str) -> String {
 
 /// Download the package for `id`, through `proxy_url` when there is one.
 pub async fn fetch(id: &str, proxy_url: Option<&str>) -> Result<Vec<u8>> {
-    if !fury_shared::extensions::is_id(id) {
+    if !xchange_shared::extensions::is_id(id) {
         bail!("{id:?} is not an extension id");
     }
     let mut b = reqwest::Client::builder()

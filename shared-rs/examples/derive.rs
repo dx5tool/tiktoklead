@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright 2026 Bogdan Shapovalov and the Fury authors
+// Copyright 2026 Bogdan Shapovalov and the XChange authors
 
 fn main() {
     let text = std::fs::read_to_string(std::env::args().nth(1).unwrap()).unwrap();
-    let p: fury_shared::Persona = serde_json::from_str(&text).unwrap();
+    let p: xchange_shared::Persona = serde_json::from_str(&text).unwrap();
     p.validate().expect("persona is inconsistent");
-    let ctx = fury_shared::ProfileContext {
+    let ctx = xchange_shared::ProfileContext {
         timezone: "America/New_York".into(),
         languages: vec!["en-US".into(), "en".into()],
         ui_locale: "en-US".into(),

@@ -57,7 +57,7 @@ systemctl reload ssh
 Скрипт ставит Postgres, собирает сервер из исходников, кладёт systemd-юнит с
 урезанными правами, включает ufw (22, 80, 443) и Caddy, который сам получает и
 продлевает сертификат. В конце он сам проверяет, что `/v1/me` отвечает ровно
-`401 {"error":"unauthenticated"}` — приложение считает признаком «здесь Fury»
+`401 {"error":"unauthenticated"}` — приложение считает признаком «здесь XChange»
 именно это, и установка не считается законченной, пока ответ другой.
 
 Обновить сервер потом — та же команда.
@@ -74,7 +74,7 @@ Postgres, он сломает соседей. Так было у тестера 
 Раздел написан 02.10.2026 по файлам репозитория. На машине с Docker в этот день
 его не прогоняли — Docker не было ни на одной из наших.
 
-Сервер приходит готовым образом `ghcr.io/furyteamtop/fury-server:<версия>`:
+Сервер приходит готовым образом `ghcr.io/xchange/xchange-server:<версия>`:
 его собирает и проверяет CI на каждый релиз, и `docker compose` его просто
 скачивает. Какую версию запускать, решает `FURY_VERSION` в `.env`, а не
 `git checkout`: файлы репозитория нужны только ради `docker-compose.yml`.
@@ -84,7 +84,7 @@ Postgres, он сломает соседей. Так было у тестера 
 **Первый запуск.**
 
 ```bash
-git clone https://github.com/furyteamtop/fury-antidetect-browser fury && cd fury
+git clone https://github.com/dx5tool/fury-nomaster xchange && cd xchange
 cp .env.example .env
 # в .env: FURY_DB_PASSWORD=свой пароль, FURY_VERSION=0.4.20 (последняя версия со страницы релизов)
 docker compose up -d
@@ -95,8 +95,8 @@ curl -s http://127.0.0.1:8901/v1/me  # должно быть {"error":"unauthent
 `latest` Docker скачивает один раз и дальше сам не обновляет: через месяц
 это будет та версия, что была новой в день установки.
 
-Данные живут в двух томах: `fury-db` (база) и `fury-bundles` (сами профили,
-`/var/lib/fury/bundles` в контейнере). Пересборка и замена контейнера их не
+Данные живут в двух томах: `xchange-db` (база) и `xchange-bundles` (сами профили,
+`/var/lib/xchange/bundles` в контейнере). Пересборка и замена контейнера их не
 трогает, `docker compose down -v` — стирает.
 
 **nginx перед ним.** Обычный `server` с вашим сертификатом и `proxy_pass` на
@@ -129,17 +129,17 @@ location / {
 **Обновление** — четыре шага, и первый не пропускайте. Шаг 3 зависит от того,
 как сервер запущен: готовым образом (вариант А, так ставит «Первый запуск»
 выше) или собран у вас из исходников (вариант Б). Не знаете — посмотрите
-`docker compose images server`: `ghcr.io/furyteamtop/fury-server` это А,
-`fury-server` с тегом `local` это Б.
+`docker compose images server`: `ghcr.io/xchange/xchange-server` это А,
+`xchange-server` с тегом `local` это Б.
 
 ```bash
-cd fury
+cd xchange
 
 # 1. Копии базы и профилей. Имя тома с профилями — с префиксом проекта,
-#    обычно fury_fury-bundles; точное покажет `docker volume ls`.
-docker compose exec -T db pg_dump -U fury fury | gzip > ~/fury-$(date +%F).sql.gz
-docker run --rm -v fury_fury-bundles:/b -v "$HOME":/out debian:bookworm-slim \
-  tar czf /out/fury-bundles-$(date +%F).tar.gz -C /b .
+#    обычно xchange_xchange-bundles; точное покажет `docker volume ls`.
+docker compose exec -T db pg_dump -U xchange xchange | gzip > ~/xchange-$(date +%F).sql.gz
+docker run --rm -v xchange_xchange-bundles:/b -v "$HOME":/out debian:bookworm-slim \
+  tar czf /out/xchange-bundles-$(date +%F).tar.gz -C /b .
 
 # 2. Свежий docker-compose.yml и нужная версия
 git fetch --tags
@@ -170,7 +170,7 @@ docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build s
 старте сервера.
 
 ```bash
-docker compose logs --tail=20 server      # последняя строка — "fury-server listening"
+docker compose logs --tail=20 server      # последняя строка — "xchange-server listening"
 curl -s http://127.0.0.1:8901/v1/me       # {"error":"unauthenticated"}
 docker compose images server              # версия та, на которую обновляли
 ```
@@ -183,12 +183,12 @@ docker compose images server              # версия та, на котору
 **Если сервер поднят по `docker-compose.yml` до 02.10.2026** — сначала найдите,
 где лежат профили. В том файле не было тома для них, а образ не создавал
 каталог, поэтому сервер в нём просто не стартовал (`cannot create the bundle
-directory /var/lib/fury/bundles (Permission denied)`). Если у вас работает,
+directory /var/lib/xchange/bundles (Permission denied)`). Если у вас работает,
 значит, вы задали `FURY_BUNDLE_DIR` или монтирование сами — проверьте, что это
 том, а не каталог внутри контейнера:
 
 ```bash
-docker compose exec server sh -c 'echo "${FURY_BUNDLE_DIR:-/var/lib/fury/bundles}"'
+docker compose exec server sh -c 'echo "${FURY_BUNDLE_DIR:-/var/lib/xchange/bundles}"'
 docker inspect "$(docker compose ps -q server)" --format '{{json .Mounts}}'
 ```
 
@@ -197,14 +197,14 @@ docker inspect "$(docker compose ps -q server)" --format '{{json .Mounts}}'
 обновления и верните после:
 
 ```bash
-docker compose cp server:/var/lib/fury/bundles ./bundles-before-update
+docker compose cp server:/var/lib/xchange/bundles ./bundles-before-update
 # ... шаги 2-3 выше ...
-docker compose cp ./bundles-before-update/. server:/var/lib/fury/bundles/
-docker compose exec -u root server chown -R fury:fury /var/lib/fury/bundles
+docker compose cp ./bundles-before-update/. server:/var/lib/xchange/bundles/
+docker compose exec -u root server chown -R xchange:xchange /var/lib/xchange/bundles
 ```
 
 Если `FURY_BUNDLE_DIR` у вас задан другим путём, подставьте его вместо
-`/var/lib/fury/bundles`.
+`/var/lib/xchange/bundles`.
 
 **Если домен в Cloudflare — запись должна быть «DNS only» (серое облако), не
 «Proxied».** Через прокси Cloudflare проходят маленькие запросы — вход, список
@@ -225,15 +225,15 @@ error sending request for url (…/bundle)`. Caddy на сервере сам п
 
 ```bash
 ssh root@ВАШ_АДРЕС
-source /etc/fury/fury.env && export DATABASE_URL
-fury-server invite --email you@example.com --org "Моя команда"
+source /etc/xchange/xchange.env && export DATABASE_URL
+xchange-server invite --email you@example.com --org "Моя команда"
 ```
 
 Если сервер поднят не скриптом, а через `docker compose` из [13](13-self-hosting.md),
 переменная уже внутри контейнера, и команда одна:
 
 ```bash
-docker compose exec server fury-server invite --email you@example.com --org "Моя команда"
+docker compose exec server xchange-server invite --email you@example.com --org "Моя команда"
 ```
 
 Получите код вида `5rrk-qgfr-gtyd-mw0f-sp12-axzy-0jsz-sx19`. Он живёт 48 часов,
@@ -260,7 +260,7 @@ docker compose exec server fury-server invite --email you@example.com --org "М�
 Появится код — передайте его человеку. То же самое из шелла:
 
 ```bash
-fury-server invite --email colleague@example.com --org-id <UUID> --role member
+xchange-server invite --email colleague@example.com --org-id <UUID> --role member
 ```
 
 Человек вводит код у себя и заводит **свой** пароль. Вы его не знаете и знать
@@ -400,8 +400,8 @@ fury-server invite --email colleague@example.com --org-id <UUID> --role member
 Две вещи, и обе обязательны:
 
 ```bash
-sudo -u postgres pg_dump fury | gzip > /var/backups/fury-$(date +%F).sql.gz
-tar czf /var/backups/fury-bundles-$(date +%F).tar.gz -C /var/lib/fury bundles
+sudo -u postgres pg_dump xchange | gzip > /var/backups/xchange-$(date +%F).sql.gz
+tar czf /var/backups/xchange-bundles-$(date +%F).tar.gz -C /var/lib/xchange bundles
 ```
 
 Сервер в Docker — те же две копии, командами из

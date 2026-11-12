@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright 2026 Bogdan Shapovalov and the Fury authors
+// Copyright 2026 Bogdan Shapovalov and the XChange authors
 
 //! Fingerprint configuration: the JSON handed to the patched Chromium core.
 //!
@@ -562,6 +562,9 @@ pub const CORE_CONFIG_KEYS: &[&str] = &[
     "speech.androidVoices",
     "speech.voices",
     "webrtc.ipHandlingPolicy",
+    "webrtc.localIp",
+    "webrtc.mode",
+    "webrtc.publicIp",
     "window.profileName",
 ];
 
@@ -580,7 +583,7 @@ pub const CORE_CONFIG_KEYS: &[&str] = &[
 /// `geolocation` is absent when the exit checker could not place the proxy —
 /// and absent is the right answer there, not a fallback coordinate. Patch 0082
 /// creates no provider without it, so the machine's own location service
-/// answers, exactly as it would in a browser with no Fury in it. Inventing a
+/// answers, exactly as it would in a browser with no XChange in it. Inventing a
 /// position from the country alone would drop the profile in the middle of a
 /// country while its address resolves to a city, which is worse than not
 /// knowing: geolocation needs a permission prompt to be read at all, and the
@@ -650,12 +653,21 @@ pub fn check_core_config(config: &serde_json::Value) -> Result<(), Vec<String>> 
     // the monitor itself (overrides::MachineOverrides::apply_config).
     let real_rects = lookup(config, "noise.clientRects").and_then(|v| v.as_str()) == Some("real");
     let real_screen = lookup(config, "screen.size").and_then(|v| v.as_str()) == Some("real");
+    // The candidate addresses are only part of the contract when a mode
+    // reports a candidate set. `Off` is the default and every profile that
+    // never touched the setting carries it, so an absent pair is correct
+    // there (overrides::WebRtcMode).
+    let webrtc_off =
+        lookup(config, "webrtc.mode").and_then(|v| v.as_str()).unwrap_or("off") == "off";
 
     let missing: Vec<String> = CORE_CONFIG_KEYS
         .iter()
         .filter(|path| !skipped.contains(path))
         .filter(|path| !(real_canvas && **path == "noise.canvasSeed"))
         .filter(|path| !(real_rects && **path == "noise.clientRectsSeed"))
+        .filter(|path| {
+            !(webrtc_off && matches!(**path, "webrtc.publicIp" | "webrtc.localIp"))
+        })
         .filter(|path| {
             !(real_screen && crate::overrides::MONITOR_KEYS.iter().any(|k| path.strip_prefix("screen.") == Some(*k)))
         })

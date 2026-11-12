@@ -10,23 +10,23 @@ COPY tools ./tools
 COPY shared ./shared
 # Only the server. The agent and the desktop shell belong on an operator's
 # machine, not on a box that holds other people's metadata.
-RUN cargo build --release -p fury-server
+RUN cargo build --release -p xchange-server
 
 FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
 # Not root: a container that only needs to listen and talk to Postgres has no
 # business being able to write to its own filesystem as root.
-RUN useradd --system --uid 10001 fury
+RUN useradd --system --uid 10001 xchange
 # Where bundles live (FURY_BUNDLE_DIR's default), made here and handed to the
 # user the server runs as. Without it the server refused to start: it checks
 # the directory before opening its socket, and uid 10001 cannot create
 # anything under /var/lib -- "cannot create the bundle directory
-# /var/lib/fury/bundles (Permission denied)", reproduced 02.10.2026 by running
+# /var/lib/xchange/bundles (Permission denied)", reproduced 02.10.2026 by running
 # the binary as an ordinary user. docker-compose.yml mounts a volume here; a
 # new named volume is filled from the image, ownership included, which is why
 # the chown matters.
-RUN mkdir -p /var/lib/fury/bundles && chown -R fury:fury /var/lib/fury
-COPY --from=build /src/target/release/fury-server /usr/local/bin/fury-server
-USER fury
+RUN mkdir -p /var/lib/xchange/bundles && chown -R xchange:xchange /var/lib/xchange
+COPY --from=build /src/target/release/xchange-server /usr/local/bin/xchange-server
+USER xchange
 EXPOSE 8901
-CMD ["fury-server"]
+CMD ["xchange-server"]

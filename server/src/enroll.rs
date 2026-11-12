@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright 2026 Bogdan Shapovalov and the Fury authors
+// Copyright 2026 Bogdan Shapovalov and the XChange authors
 
 //! Invitations — the only way an account comes into existence.
 //!
 //! # Why there is no registration form
 //!
-//! A Fury server holds the working accounts of a team. Open registration on
+//! An XChange server holds the working accounts of a team. Open registration on
 //! such a server is a door without a lock. So an account starts as an
 //! invitation issued by someone who already runs the box, or already runs the
 //! organisation.
@@ -26,7 +26,7 @@
 //! minted at the command line by whoever has a shell on the machine:
 //!
 //! ```text
-//! fury-server invite --email you@example.com --org "My team"
+//! xchange-server invite --email you@example.com --org "My team"
 //! ```
 //!
 //! That produces an owner invitation, which carries an organisation name rather
@@ -131,7 +131,7 @@ pub enum Org<'a> {
     New(&'a str),
 }
 
-/// `fury-server invite --email … [--org "Name" | --org-id UUID] [--role member]`
+/// `xchange-server invite --email … [--org "Name" | --org-id UUID] [--role member]`
 ///
 /// Lives in the server binary rather than a separate tool because it needs the
 /// database URL the server already knows how to find, and because a self-hoster
@@ -198,7 +198,7 @@ pub async fn cli(args: &[String]) -> anyhow::Result<()> {
 
     println!("Invitation for {email} ({role}), valid {TTL_HOURS} hours:\n");
     println!("    {code}\n");
-    println!("Enter it in Fury under \"I have an invitation\", together with this");
+    println!("Enter it in XChange under \"I have an invitation\", together with this");
     println!("server's address. The code is shown once — it is not stored.");
     Ok(())
 }

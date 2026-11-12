@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright 2026 Bogdan Shapovalov and the Fury authors
+// Copyright 2026 Bogdan Shapovalov and the XChange authors
 
 import { useCallback, useEffect, useState } from "react";
 import { api, type AccessRole, type Perm, type Project } from "../api";
@@ -11,6 +11,7 @@ import { Security } from "./Security";
 import { TeamDomainLists } from "./TeamDomainLists";
 import type { OrgDomainList } from "../api";
 import { useAsk } from "./Ask";
+import { IconButton } from "./Icon";
 import { Select } from "./Select";
 
 type Members = Awaited<ReturnType<typeof api.orgMembers>>;
@@ -30,10 +31,10 @@ const TAB_LABEL: Record<UsersTab, Key> = {
   audit: "team.tabAudit",
 };
 /** The tab last open, so coming back to Users lands where one left. */
-const TAB_KEY = "fury.usersTab";
+const TAB_KEY = "xchange.usersTab";
 
-/** Where a newcomer downloads Fury, in the instructions sent with a code. */
-const FURY_SITE = "https://furybrowser.dev";
+/** Where a newcomer downloads XChange, in the instructions sent with a code. */
+const XCHANGE_SITE = "https://xchange.dev";
 
 /** What being let into a project means: see it, open the profiles in it, and
  *  edit them. Not `reveal_secrets`, not `manage_access`, not deletion — those
@@ -239,9 +240,20 @@ export function Users({
 
   // A rotation carries every profile, bundle and saved login over to the new
   // key, except what the old key could not open: lost already, to a rotation
-  // by a Fury that did not carry them. Said, because it is otherwise silent.
+  // by an XChange that did not carry them. Said, because it is otherwise silent.
   const noteUnreadable = (out: { unreadable?: number } | null) => {
     if (out?.unreadable) setError(t("team.rotateUnreadable", { n: String(out.unreadable) }));
+  };
+
+  // Closing the invitation panel discards the code shown in it, so the cross at
+  // the top and the Dismiss button at the bottom right run the same five
+  // statements rather than two copies of them.
+  const closeInvite = () => {
+    setCode(null);
+    setCopied(null);
+    setSending(false);
+    setTextCopied(null);
+    setInviting(false);
   };
 
   if (local) {
@@ -555,6 +567,7 @@ export function Users({
               )}
               {code && (
                 <div className="notice" role="status" style={{ marginTop: "var(--s-3)", alignItems: "flex-start" }}>
+                  <IconButton icon="close" label={t("app.dismiss")} onClick={closeInvite} />
                   <div style={{ flex: 1 }}>
                     <div>{t("team.codeFor", { email: code.email })}</div>
                     {/* Shown once. The server keeps only a hash of it. */}
@@ -590,7 +603,7 @@ export function Users({
                     </div>
                     {sending && (() => {
                       // Everything the person needs on the other end, in the order
-                      // the screens ask for it: where to get Fury, which button,
+                      // the screens ask for it: where to get XChange, which button,
                       // which server, the code, the password warning, and that they
                       // still have to be let in -- the step a newcomer cannot see.
                       const text = t("team.msgBody", {
@@ -631,7 +644,7 @@ export function Users({
                               onClick={() =>
                                 void api
                                   .openUrl(
-                                    `https://t.me/share/url?url=${encodeURIComponent(FURY_SITE)}&text=${encodeURIComponent(text)}`,
+                                    `https://t.me/share/url?url=${encodeURIComponent(XCHANGE_SITE)}&text=${encodeURIComponent(text)}`,
                                   )
                                   .catch((e) => setError(say(e)))
                               }
@@ -658,16 +671,7 @@ export function Users({
                       );
                     })()}
                   </div>
-                  <button
-                    className="ghost"
-                    onClick={() => {
-                      setCode(null);
-                      setCopied(null);
-                      setSending(false);
-                      setTextCopied(null);
-                      setInviting(false);
-                    }}
-                  >
+                  <button className="ghost" onClick={closeInvite}>
                     {t("app.dismiss")}
                   </button>
                 </div>
@@ -1139,7 +1143,7 @@ function roleWhat(role: string): "role.ownerWhat" | "role.adminWhat" | "role.man
  *  they are let in, so the Let in dialog has those projects ticked already.
  *  Local, because it is a convenience for the person who sent the invite and
  *  not something the server needs to hold. */
-const INVITED = "fury.invitedFor";
+const INVITED = "xchange.invitedFor";
 
 function invitedFor(email: string): string[] {
   try {
@@ -1166,7 +1170,7 @@ function rememberInvite(email: string, project: string, accessRole: string) {
 
 /** The organisation role the invitation was sent on, kept beside the projects
  *  and for the same reason. One that has since been deleted is dropped. */
-const INVITED_ROLE = "fury.invitedRole";
+const INVITED_ROLE = "xchange.invitedRole";
 
 function invitedRole(email: string, roles: AccessRole[]): string {
   try {

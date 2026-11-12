@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright 2026 Bogdan Shapovalov and the Fury authors
+// Copyright 2026 Bogdan Shapovalov and the XChange authors
 
 // The server is the only authority on what a user may do. Nothing here decides
 // permissions; it reads the set the server resolved and renders accordingly.
@@ -31,6 +31,10 @@ export interface Project {
   origin: Origin;
   id: string;
   name: string;
+  /** Lower sorts first; equal weights are ordered by name. */
+  sort_weight: number;
+  /** Who made it: the device name locally, the user's email on a team server. */
+  creator: string;
   profile_count: number;
 }
 
@@ -66,11 +70,37 @@ export interface Credential {
    *  Present here because the operator has to be able to see and correct what
    *  they typed — there is nobody on this machine to hide it from. */
   totp: string | null;
+  /** Session cookies for this login, as a Cookie header: `SPC_F=…; SPC_EC=…`.
+   *  Stored sealed with the rest of the login. The Login button on a profile
+   *  writes it into that profile's browser jar only when the profile is not
+   *  already signed in. */
+  cookie: string | null;
   notes: string;
   /** Team mode only: the server had this login and this machine's organisation
    *  key did not open it — almost always a key rotated after this copy was
    *  handed over. Shown, not hidden: an empty row reads as a deleted password. */
   unreadable?: boolean;
+}
+
+/** A login as the account import recognises it. No password, no 2FA seed: the
+ *  import only has to know that the account is here and where. A login with
+ *  no username carries its session instead, which is the only thing that can
+ *  recognise a cookie-only paste. */
+export interface CredentialIdentity {
+  id: string;
+  profile_id: string;
+  profile_name: string;
+  site: string;
+  username: string | null;
+  cookie: string | null;
+}
+
+/** One account list chosen in the shell. A text file arrives as its text; a
+ *  spreadsheet arrives as rows. Exactly one of the two is present. */
+export interface AccountFile {
+  name: string;
+  text?: string;
+  rows?: string[][];
 }
 
 export interface TotpCode {
@@ -135,6 +165,24 @@ export interface Profile {
    *  colleague's browser shows up through `lock`, not here. */
   running: boolean;
   last_opened_at: string | null;
+}
+
+export type ProfilesExportFormat = "directory" | "zip";
+
+/** Where a profiles export landed, and what it carried. */
+export interface ProfilesExportResult {
+  path: string;
+  profiles: number;
+  /** Open profiles and profiles with no browser data on this machine. */
+  skipped: number;
+  bytes: number;
+}
+
+/** What an import created, for the notice and the refresh that follows. */
+export interface ProfilesImportResult {
+  imported: number;
+  logins: number;
+  names: string[];
 }
 
 /** A named list of domains the relay refuses — or, with `@allow-only` on its
@@ -358,7 +406,7 @@ export interface Usage {
   files: number;
 }
 
-/** Mirrors fury_shared::overrides::MachineOverrides. Every key optional. */
+/** Mirrors xchange_shared::overrides::MachineOverrides. Every key optional. */
 export interface MachineOverrides {
   ui_locale?: string;
   screen?: { width: number; height: number; device_pixel_ratio: number };
@@ -369,6 +417,12 @@ export interface MachineOverrides {
   geolocation?: { latitude: number; longitude: number };
   /** Canvas and WebGL readback: noised (absent, the default) or this machine's own. */
   canvas?: "noise" | "real";
+  /** What a page reads from RTCPeerConnection. Absent is off: no candidates. */
+  webrtc?: {
+    mode: "off" | "base_on_ip" | "fixed";
+    public_ip?: string;
+    local_ip?: string;
+  };
 }
 
 /** What the pickers may offer for one machine, filtered by its OS. */
@@ -451,6 +505,8 @@ export interface Preview {
   media_devices: string | null;
   ui_locale: string;
   webrtc: string;
+  webrtc_public_ip: string | null;
+  webrtc_local_ip: string | null;
   js_heap_gb: number | null;
   persona_source: string | null;
   persona_weight: number;
@@ -536,7 +592,7 @@ export interface Shell {
   /** Installed, but a different Chrome from the one this version claims to
    *  be. core_ready is false with it, so the download bar shows. */
   core_outdated?: { have: string; need: number } | null;
-  /** The right Chrome, but an older Fury build of it than this version
+  /** The right Chrome, but an older XChange build of it than this version
    *  expects. Not blocking: core_ready stays true and profiles launch; the
    *  shell offers the new build. `have` is null for a core installed before
    *  releases were recorded. */
@@ -573,6 +629,10 @@ export interface Shell {
    *  fixes one of those and cannot fix the other. False against a server too
    *  old to answer the question. */
   awaiting_key: boolean;
+  /** Where profiles, `xchange.db` and the browser are kept. Read-only: the value
+   *  comes from `dirs::data_dir()`, which reads `FURY_HOME` once at startup,
+   *  so it can be shown and opened but not changed from here. */
+  data_dir: string;
 }
 
 /** Note what is absent: the lock token. It authorises overwriting a bundle,
@@ -589,7 +649,26 @@ export interface LaunchResult {
   renewed?: boolean;
 }
 
-const TOKEN_KEY = "fury.token";
+/** What a Login press did.
+ *
+ *  `logged_in` is the state of the site after the attempt, not merely whether
+ *  the form was submitted. `cookie_written` says whether the stored session was
+ *  injected — false when the profile was already signed in and the cookie was
+ *  left alone. `needs_action` means the browser is open and a person has to
+ *  finish (a verification code, a captcha, or a changed login form). */
+export interface LoginResult {
+  launched: boolean;
+  logged_in: boolean;
+  cookie_written: boolean;
+  /** True when the saved username and password were typed in and accepted,
+   *  rather than the stored cookie being enough on its own. */
+  signed_in_now: boolean;
+  needs_action: boolean;
+  url?: string;
+  reason?: "otp" | "captcha" | "no_credentials" | "login_failed" | "no_form";
+}
+
+const TOKEN_KEY = "xchange.token";
 
 // A build that once ran in the browser leaves a token behind in the webview's
 // data store, where it survives every later launch of the packaged app. The
@@ -598,7 +677,7 @@ const TOKEN_KEY = "fury.token";
 // copy nothing will ever expire. Drop it on sight.
 if (isDesktop && typeof localStorage !== "undefined") {
   localStorage.removeItem(TOKEN_KEY);
-  localStorage.removeItem("fury.machine_id");
+  localStorage.removeItem("xchange.machine_id");
 }
 
 /** A profile a bulk action (warming, mirroring) could not take. `code` is
@@ -615,6 +694,20 @@ export type Assistants = {
 };
 
 export type Refusal = { id: string; reason: string; code?: string | null };
+
+/** Where profiles live. `profile_root` is null while nobody has chosen one, in
+ *  which case new profiles follow `default_root` — and `FURY_HOME`, which is
+ *  what makes a relocated installation keep working. */
+export interface StorageInfo {
+  profile_root: string | null;
+  default_root: string;
+  /** Profiles whose data is under `default_root`. */
+  profiles_here: number;
+  /** Profiles filed under some other root, usually one chosen earlier. They
+   *  keep working; they are reported so "the ones you have stay put" is a
+   *  number rather than a promise. */
+  profiles_elsewhere: number;
+}
 
 export class ApiError extends Error {
   constructor(
@@ -682,6 +775,15 @@ async function cmd<T>(name: string, args: Record<string, unknown> = {}): Promise
   try {
     return await invoke<T>(name, args);
   } catch (raw: any) {
+    // Anything that is not a serialised ApiErr was rejected by Tauri itself:
+    // the command is not in this build's `invoke_handler`, or its arguments do
+    // not match the signature. Those arrive as a bare string, and treating one
+    // as an ApiErr renamed every such error "Could not reach the server" —
+    // which is how a stale `xchange-desktop.exe` made a missing command look like
+    // a network problem. The string is the only thing that says what happened.
+    if (typeof raw === "string") {
+      throw new ApiError(0, `Tauri IPC command "${name}" failed: ${raw}`);
+    }
     const status = typeof raw?.status === "number" ? raw.status : 0;
     const body = raw?.body ?? null;
     // Prefer the message the transport wrote (it names the actual host and
@@ -727,7 +829,7 @@ async function http<T>(path: string, init: RequestInit = {}): Promise<T> {
 
 /** Stable per installation, so the lock list names the same browser each time. */
 function devMachineId(): string {
-  const key = "fury.machine_id";
+  const key = "xchange.machine_id";
   let id = localStorage.getItem(key);
   if (!id) {
     id = crypto.randomUUID();
@@ -735,17 +837,28 @@ function devMachineId(): string {
   }
   return id;
 }
-const DEV_PROFILES_KEY = "fury.dev_profiles";
-const DEV_PROJECTS_KEY = "fury.dev_projects";
+const DEV_PROFILES_KEY = "xchange.dev_profiles";
+const DEV_PROJECTS_KEY = "xchange.dev_projects";
 
 function devProjects(): Project[] {
   try {
     const raw = localStorage.getItem(DEV_PROJECTS_KEY);
-    if (raw) return JSON.parse(raw);
+    if (raw) {
+      // Rows written before sort_weight/creator existed must still render, and
+      // an old object must not leave two columns blank forever.
+      return (JSON.parse(raw) as Partial<Project>[]).map((p) => ({
+        id: String(p.id ?? ""),
+        name: String(p.name ?? ""),
+        sort_weight: Number.isFinite(p.sort_weight) ? Number(p.sort_weight) : 0,
+        creator: typeof p.creator === "string" && p.creator !== "" ? p.creator : "DEV",
+        profile_count: Number.isFinite(p.profile_count) ? Number(p.profile_count) : 0,
+        origin: p.origin ?? "local",
+      }));
+    }
   } catch {}
   return [
-    { id: "p1", name: "Dự án 2", profile_count: 1, origin: "local" },
-    { id: "p2", name: "My profiles", profile_count: 0, origin: "local" },
+    { id: "p1", name: "Dự án 2", sort_weight: 0, creator: "LAPTOP-DELL", profile_count: 1, origin: "local" },
+    { id: "p2", name: "My profiles", sort_weight: 1, creator: "LAPTOP-DELL", profile_count: 0, origin: "local" },
   ];
 }
 
@@ -788,7 +901,7 @@ function devProfiles(): Profile[] {
       origin: "local",
       project_id: null,
       project_name: null,
-      tags: ["hot", "vip", "cần", "lưu", "ý", "kiểm", "tra"],
+      tags: ["hot", "vip", "cần lưu ý", "kiểm tra"],
       notes: "",
       status: "Idle",
       persona_id: "mac-m2",
@@ -818,7 +931,7 @@ function saveDevProfiles(list: Profile[]): void {
 export const api = {
   shell(): Promise<Shell> {
     if (isDesktop) return cmd<Shell>("shell_state");
-    const devMode = typeof localStorage !== "undefined" ? localStorage.getItem("fury.dev_mode") : null;
+    const devMode = typeof localStorage !== "undefined" ? localStorage.getItem("xchange.dev_mode") : null;
     const isLocal = devMode !== "team" && storedToken() === null;
     if (isLocal) {
       return Promise.resolve({
@@ -833,6 +946,7 @@ export const api = {
         last_email: null,
         last_server: null,
         awaiting_key: false,
+        data_dir: "(browser development build — no data directory)",
         server_url: null,
         machine_name: navigator.platform || "this browser",
         signed_in: true,
@@ -851,6 +965,7 @@ export const api = {
       last_email: null,
       last_server: null,
       awaiting_key: false,
+      data_dir: "(browser development build — no data directory)",
       server_url: "http://127.0.0.1:8901 (vite proxy)",
       machine_name: navigator.platform || "this browser",
       signed_in: storedToken() !== null,
@@ -908,7 +1023,7 @@ export const api = {
   invitationEmailVerify: (url: string, code: string, emailCode: string): Promise<{ email_proof: string }> =>
     cmd("invitation_email_verify", { url, code, emailCode }),
   /** Eight digits from a member's public key as the server lists it, to
-   *  compare with what that person's own Fury shows (crypto::verify_code). */
+   *  compare with what that person's own XChange shows (crypto::verify_code). */
   verifyCode: (publicKey: string): Promise<string> => cmd<string>("verify_code", { publicKey }),
   /** This installation's own code, from the key it made or opened itself.
    *  Null when it has not seen that key (see own_verify_code). */
@@ -973,20 +1088,27 @@ export const api = {
 
   projects: (): Promise<Project[]> => {
     if (isDesktop) return cmd<Project[]>("projects");
-    const devMode = typeof localStorage !== "undefined" ? localStorage.getItem("fury.dev_mode") : null;
+    const devMode = typeof localStorage !== "undefined" ? localStorage.getItem("xchange.dev_mode") : null;
     if (devMode !== "team" && storedToken() === null) {
       return Promise.resolve(devProjects());
     }
     return http<Project[]>("/v1/projects");
   },
 
-  createProjectIn: (name: string, origin: Origin): Promise<{ id: string }> => {
+  createProjectIn: (name: string, origin: Origin, sortWeight = 0): Promise<{ id: string }> => {
     if (isDesktop) {
-      return cmd<{ id: string }>("create_project", { name, origin });
+      return cmd<{ id: string }>("create_project", { name, origin, sortWeight });
     }
     const all = devProjects();
     const id = `p_${crypto.randomUUID()}`;
-    all.push({ id, name, profile_count: 0, origin: "local" });
+    all.push({
+      id,
+      name,
+      sort_weight: sortWeight,
+      creator: "DEV",
+      profile_count: 0,
+      origin: "local",
+    });
     saveDevProjects(all);
     return Promise.resolve({ id });
   },
@@ -995,7 +1117,7 @@ export const api = {
     if (isDesktop) {
       return cmd<Profile[]>("profiles", { projectId: projectId ?? null, origin: origin ?? null });
     }
-    const devMode = typeof localStorage !== "undefined" ? localStorage.getItem("fury.dev_mode") : null;
+    const devMode = typeof localStorage !== "undefined" ? localStorage.getItem("xchange.dev_mode") : null;
     if (devMode !== "team" && storedToken() === null) {
       const all = devProfiles();
       if (!projectId) return Promise.resolve(all);
@@ -1169,7 +1291,7 @@ export const api = {
   disconnectServer: (): Promise<Shell> => {
     if (!isDesktop) {
       if (typeof localStorage !== "undefined") {
-        localStorage.setItem("fury.dev_mode", "local");
+        localStorage.setItem("xchange.dev_mode", "local");
         localStorage.removeItem(TOKEN_KEY);
       }
       return api.shell();
@@ -1202,13 +1324,53 @@ export const api = {
   },
   saveServerKit: (dir: string): Promise<{ path: string; files: number }> =>
     cmd<{ path: string; files: number }>("save_server_kit", { dir }),
-  /** Logins stored beside a profile. Local mode only for now — see commands.rs. */
-  credentials: (profileId: string): Promise<Credential[]> =>
-    cmd<Credential[]>("credentials", { profileId }),
-  saveCredential: (credential: Credential): Promise<{ id: string }> =>
-    cmd<{ id: string }>("save_credential", { credential }),
-  deleteCredential: (id: string, profileId: string): Promise<unknown> =>
-    cmd("delete_credential", { id, profileId }),
+  /** Logins stored beside a profile. `origin` matters when a local profile is
+   *  open in a shell connected to a server: the row says where its logins are. */
+  credentials: (profileId: string, origin?: Origin): Promise<Credential[]> =>
+    cmd<Credential[]>("credentials", { profileId, origin: origin ?? null }),
+  /** Every login's identity on this machine: what the account import checks a
+   *  pasted row against. Local only, in one call rather than one per profile.
+   *  Empty in browser dev, where profiles are a fixture and nothing is at
+   *  stake in a second import. */
+  credentialIndex: (): Promise<CredentialIdentity[]> =>
+    isDesktop ? cmd<CredentialIdentity[]>("credential_index") : Promise.resolve([]),
+  /** Writes a login; `origin` picks this machine's agent or the team server. */
+  saveCredential: (credential: Credential, origin?: Origin): Promise<{ id: string }> =>
+    cmd<{ id: string }>("save_credential", { credential, origin: origin ?? null }),
+  deleteCredential: (id: string, profileId: string, origin?: Origin): Promise<unknown> =>
+    cmd("delete_credential", { id, profileId, origin: origin ?? null }),
+
+  /** Sign one local profile into its platform.
+   *
+   *  The profile is opened through its own proxy and persona. Cookies are
+   *  written only when the stored session is not already signed in; the agent
+   *  then fills the login form with human key events if credentials are saved.
+   *  The browser is left open, so a verification code or captcha can be
+   *  finished by hand. */
+  loginProfile: (
+    profileId: string,
+    args: {
+      cookies: unknown[];
+      username: string | null;
+      password: string | null;
+      platform: string;
+      url: string;
+      checkUrl: string;
+      origin?: Origin;
+    },
+  ): Promise<LoginResult> =>
+    isDesktop
+      ? cmd<LoginResult>("login_profile", {
+          profileId,
+          cookies: args.cookies,
+          username: args.username,
+          password: args.password,
+          platform: args.platform,
+          url: args.url,
+          checkUrl: args.checkUrl,
+          origin: args.origin ?? null,
+        })
+      : Promise.reject(new ApiError(0, "Login is only available in Desktop App mode.")),
   /** Six digits and how long they last. The seed stays in the agent. */
   /** Ask the agent to fetch and install the browser. Returns once the download
    *  has started; watch shell.core_download for the rest. */
@@ -1289,7 +1451,7 @@ export const api = {
     if (isDesktop) {
       return cmd<{ id: string }>("save_profile", { profile, origin: origin ?? null });
     }
-    const devMode = typeof localStorage !== "undefined" ? localStorage.getItem("fury.dev_mode") : null;
+    const devMode = typeof localStorage !== "undefined" ? localStorage.getItem("xchange.dev_mode") : null;
     if (devMode !== "team" && storedToken() === null) {
       const p = profile as Partial<Profile> & { id?: string };
       const all = devProfiles();
@@ -1345,7 +1507,7 @@ export const api = {
     if (isDesktop) {
       return cmd("delete_profile", { id, origin: origin ?? null });
     }
-    const devMode = typeof localStorage !== "undefined" ? localStorage.getItem("fury.dev_mode") : null;
+    const devMode = typeof localStorage !== "undefined" ? localStorage.getItem("xchange.dev_mode") : null;
     if (devMode !== "team" && storedToken() === null) {
       const all = devProfiles().filter((x) => x.id !== id);
       saveDevProfiles(all);
@@ -1353,6 +1515,12 @@ export const api = {
     }
     return Promise.resolve();
   },
+  /** Deletes this profile's browser folder and creates a fresh one in the
+   *  storage folder chosen in Settings. The profile, its tags and the logins
+   *  kept in XChange stay; the cookies and site data in that folder do not.
+   *  Desktop only: the folder lives on this machine and the agent owns it. */
+  resetProfile: (id: string): Promise<{ dir: string; previous: string; removed: boolean }> =>
+    cmd("reset_profile", { id }),
 
   /** Many profiles from one template. Each gets its own seed and its own
    *  persona — see the agent for why that is the whole safety property. */
@@ -1389,6 +1557,17 @@ export const api = {
   sniffProxyKind: (host: string, port: number): Promise<{ kind: "http" | "socks5" | null }> =>
     cmd("sniff_proxy_kind", { host, port }),
 
+  /** One new KiotProxy exit. Through Rust because the window's CSP allows no
+   *  third-party `connect-src`: a fetch to the provider from here never leaves
+   *  the webview. The provider's own body comes back for the caller to read. */
+  fetchKiotProxy: (key: string): Promise<{ status: number; body: unknown }> =>
+    cmd("fetch_kiot_proxy", { key }),
+
+  /** One new NestProxy exit for a Proxy Key, for the same CSP reason as
+   *  `fetchKiotProxy`. The provider's own body comes back for the caller. */
+  fetchNestProxy: (key: string): Promise<{ status: number; body: unknown }> =>
+    cmd("fetch_nest_proxy", { key }),
+
   /** A pasted supplier block. Every line is reported back with its number. */
   importProxies: (
     text: string,
@@ -1406,6 +1585,66 @@ export const api = {
     cookies: unknown[],
   ): Promise<{ imported: number; session_only: number; skipped: number }> =>
     cmd("import_cookies", { id, cookies }),
+
+  /** The OS folder chooser, for exporting a cookie file.
+   *
+   *  Null is the chooser dismissed, not a failure — the caller does nothing.
+   *  Only the desktop has one: under `npm run dev` there is no Rust side, so a
+   *  cookie export there has nowhere to write. */
+  pickFolder: (title: string): Promise<string | null> =>
+    isDesktop
+      ? cmd<string | null>("pick_folder", { title })
+      : Promise.reject(new ApiError(0, "Choosing a folder is only available in Desktop App mode.")),
+
+  /** The OS file chooser for an exported `.zip`. The folder chooser cannot
+   *  pick a file, so the import dialog has one button for each. */
+  pickZip: (title: string): Promise<string | null> =>
+    isDesktop
+      ? cmd<string | null>("pick_zip", { title })
+      : Promise.reject(new ApiError(0, "Choosing a file is only available in Desktop App mode.")),
+
+  /** The OS file chooser for Import Account: a CSV/TXT file or a spreadsheet.
+   *
+   *  Null is the chooser dismissed, not a failure. Only the desktop has one:
+   *  under `npm run dev` the dialog's own hidden input is used instead, and a
+   *  spreadsheet cannot be read there. */
+  pickAccountFile: (title: string): Promise<AccountFile | null> =>
+    isDesktop
+      ? cmd<AccountFile | null>("pick_account_file", { title })
+      : Promise.reject(new ApiError(0, "Choosing a file is only available in Desktop App mode.")),
+
+  /** Writes an exported cookie file into that folder and returns where it went. */
+  writeCookiesFile: (dir: string, fileName: string, text: string): Promise<{ path: string }> =>
+    isDesktop
+      ? cmd<{ path: string }>("write_cookies_file", { dir, fileName, text })
+      : Promise.reject(new ApiError(0, "Writing a file is only available in Desktop App mode.")),
+
+  /** Whole profiles — browser data plus every saved login — as a folder or a
+   *  zip, so another machine can import them.
+   *
+   *  `origin` matters: a team profile's logins live on the server and are read
+   *  with the organisation key, while a local profile's are read by the agent
+   *  from its own vault. */
+  exportProfiles: (
+    dir: string,
+    name: string,
+    format: ProfilesExportFormat,
+    profiles: { id: string; name: string; origin: Origin }[],
+  ): Promise<ProfilesExportResult> =>
+    isDesktop
+      ? cmd<ProfilesExportResult>("export_profiles", { dir, name, format, profiles })
+      : Promise.reject(new ApiError(0, "Exporting profiles is only available in Desktop App mode.")),
+
+  /** Profiles in from an exported folder, a single profile folder, or the
+   *  exported `.zip`. Detection of which one was chosen happens in the agent;
+   *  a selection holding no profile is refused there with a message. */
+  importProfiles: (
+    path: string,
+    projectId: string | null,
+  ): Promise<ProfilesImportResult> =>
+    isDesktop
+      ? cmd<ProfilesImportResult>("import_profiles", { path, projectId })
+      : Promise.reject(new ApiError(0, "Importing profiles is only available in Desktop App mode.")),
 
   /** Another anti-detect browser, through its API. The token is passed per
    *  call and kept nowhere; `base` overrides where a local API answers. */
@@ -1458,7 +1697,7 @@ export const api = {
    *  a Chrome window opens and closes. Nothing is sent anywhere. */
   capturePersona: (): Promise<{ persona: Record<string, unknown> & { id: string }; problems: string[]; browser: string }> =>
     cmd("capture_persona"),
-  /** Writes it to ~/Downloads/fury-persona-<id>.json; returns the path. */
+  /** Writes it to ~/Downloads/xchange-persona-<id>.json; returns the path. */
   savePersonaFile: (persona: unknown): Promise<string> => cmd<string>("save_persona_file", { persona }),
   /** Keep a capture on this machine as a persona; returns its id. */
   usePersonaHere: (persona: unknown): Promise<string> => cmd<string>("use_persona_here", { persona }),
@@ -1523,6 +1762,21 @@ export const api = {
   /** Removes caches only. The agent refuses while the profile is open. */
   trimProfile: (id: string): Promise<{ bytes: number; removed: string[] }> =>
     cmd("trim_profile", { id }),
+  /** Opens the profile's folder in the file manager. `opened` is false when
+   *  the profile has never run here, and `path` is where it would be. */
+  openProfileFolder: (id: string): Promise<{ path: string; opened: boolean }> =>
+    cmd("open_profile_folder", { id }),
+  /** Opens the folder `FURY_HOME` names, from Settings → Data. */
+  openDataFolder: (): Promise<{ path: string }> => cmd("open_data_folder"),
+  /** Where new profiles are made, and how many already live elsewhere. */
+  storageInfo: (): Promise<StorageInfo> => cmd("storage_info"),
+  /** Chooses the folder new profiles are created under. `create` allows the
+   *  folder to be made when it does not exist yet; every other check — is it a
+   *  directory, writable, on a filesystem that can be locked to this account —
+   *  is answered by the agent, which is the process that will write there. */
+  setProfileRoot: (path: string, create = false): Promise<{ profile_root: string }> =>
+    cmd("set_profile_root", { path, create }),
+  resetProfileRoot: (): Promise<{ profile_root: null }> => cmd("reset_profile_root"),
 
   exportProject: (id: string, path: string, passphrase: string, withData = true):
     Promise<{ path: string; bytes: number }> =>
@@ -1537,10 +1791,10 @@ export const api = {
     cmd("restore_profile", { id, origin: origin ?? null }),
   purgeProfile: (id: string, origin?: Origin): Promise<unknown> =>
     cmd("purge_profile", { id, origin: origin ?? null }),
-  renameProject: (id: string, name: string, origin?: Origin): Promise<unknown> =>
-    cmd("rename_project", { id, name, origin: origin ?? null }),
+  renameProject: (id: string, name: string, origin?: Origin, sortWeight?: number): Promise<unknown> =>
+    cmd("rename_project", { id, name, origin: origin ?? null, sortWeight: sortWeight ?? null }),
   deleteProject: (id: string, origin?: Origin): Promise<unknown> =>
     cmd("delete_project", { id, origin: origin ?? null }),
-  createProject: (name: string): Promise<{ id: string }> =>
-    cmd<{ id: string }>("create_project", { name }),
+  createProject: (name: string, sortWeight = 0): Promise<{ id: string }> =>
+    cmd<{ id: string }>("create_project", { name, sortWeight }),
 };

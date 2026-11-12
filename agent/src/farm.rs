@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright 2026 Bogdan Shapovalov and the Fury authors
+// Copyright 2026 Bogdan Shapovalov and the XChange authors
 
 //! Farming: warming a set of profiles a little every day, for a number of days.
 //!
@@ -31,7 +31,7 @@
 //! - Open a team profile itself. That takes the server's lock, the bundle and
 //!   the organisation key, which live in the shell. A team session that is due
 //!   waits for the shell to claim it (`farm.due` / `farm.claim`), so team
-//!   profiles farm only while Fury is open. A local one farms whenever the
+//!   profiles farm only while XChange is open. A local one farms whenever the
 //!   agent runs, window or none.
 //! - Run more than `at_once` browsers for one plan. Twenty Chromes started at
 //!   ten o'clock is a frozen laptop, and twenty profiles all active in the same
@@ -251,7 +251,7 @@ impl Farms {
         for farm in &mut list {
             for track in farm.tracks.values_mut() {
                 for s in track.sessions.iter_mut().filter(|s| s.in_flight()) {
-                    s.ended = Some(Outcome::Failed { error: "Fury stopped during the session".into() });
+                    s.ended = Some(Outcome::Failed { error: "XChange stopped during the session".into() });
                 }
             }
         }
@@ -596,7 +596,7 @@ mod tests {
     }
 
     fn farms(targets: Vec<Target>) -> Farms {
-        let dir = std::env::temp_dir().join(format!("fury-farm-{}", uuid::Uuid::now_v7()));
+        let dir = std::env::temp_dir().join(format!("xchange-farm-{}", uuid::Uuid::now_v7()));
         std::fs::create_dir_all(&dir).unwrap();
         let mut f = Farms::load(dir.join("farms.json"));
         f.create(spec(), targets, 0).unwrap();

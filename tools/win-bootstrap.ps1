@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-# Copyright 2026 Bogdan Shapovalov and the Fury authors
+# Copyright 2026 Bogdan Shapovalov and the XChange authors
 #
 # Prepare a fresh Windows machine to build the core.
 #
@@ -29,7 +29,7 @@ function Warn($msg) { Write-Host "!!  $msg" -ForegroundColor Yellow }
 # already close to Windows' limits, and starting from C:\Users\<name>\... spends
 # characters on nothing. See the long-path step below -- that raises the ceiling
 # but does not make every tool in the build honour it.
-$Root = if ($env:FURY_ROOT) { $env:FURY_ROOT } else { 'C:\fury' }
+$Root = if ($env:FURY_ROOT) { $env:FURY_ROOT } else { 'C:\xchange' }
 
 Step "target directory: $Root"
 

@@ -1,24 +1,24 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: AGPL-3.0-or-later
-# Copyright 2026 Bogdan Shapovalov and the Fury authors
+# Copyright 2026 Bogdan Shapovalov and the XChange authors
 """Does a browser use HTTP/3 when it is behind a proxy?
 
     ./h3-through-a-proxy.py --proxy socks5://127.0.0.1:1080 [--url URL]
 
 Answers the question the roadmap had answered the wrong way round for months:
-Fury never negotiates HTTP/3, and that was written down as a difference from
+XChange never negotiates HTTP/3, and that was written down as a difference from
 Chrome that a server advertising alt-svc could see.
 
 It is not. Chromium does not carry QUIC through a proxy at all — QUIC is UDP and
 --proxy-server speaks TCP CONNECT — so real Chrome behind a proxy is h2 too, and
-a Fury profile is always behind one. Measured 04.08.2026, real Chrome 150:
+an XChange profile is always behind one. Measured 04.08.2026, real Chrome 150:
 
     cloudflare-quic.com    h3 x1     ->  h2 x1
     google.com             h3 x28    ->  h2 x27
     blog.cloudflare.com    h3 x36    ->  h2 x36
 
 Kept as a script rather than a note because the next Chromium may change it, and
-because the same question will be asked about Fury's own core. Reads
+because the same question will be asked about XChange's own core. Reads
 `nextHopProtocol` off every resource the page loaded, which is what a server
 would see rather than what a flag claims.
 """
@@ -86,9 +86,9 @@ async def main():
     ap.add_argument("--url", default="https://blog.cloudflare.com/",
                     help="a site that offers HTTP/3")
     # Defaults to the installed Chrome and NOT to FURY_CORE, deliberately: the
-    # point of this script is the comparison, and quietly measuring Fury twice
+    # point of this script is the comparison, and quietly measuring XChange twice
     # would produce two identical numbers and no information. Point --browser at
-    # a core when you want Fury's side of it.
+    # a core when you want XChange's side of it.
     ap.add_argument("--browser", default=DEFAULT_CHROME,
                     help="which browser to drive (default: the installed Chrome)")
     args = ap.parse_args()

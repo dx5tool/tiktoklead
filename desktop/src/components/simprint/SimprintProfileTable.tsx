@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright 2026 Bogdan Shapovalov and the XChange authors
+
 import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
@@ -11,17 +14,22 @@ import {
   Laptop,
   Users,
   AlertTriangle,
-  Loader2,
   Cookie,
+  FolderOpen,
+  LogIn,
   MoreHorizontal,
+  HardDrive,
+  RotateCcw,
 } from "lucide-react";
 import { useI18n } from "../../i18n";
 import type { Me, Profile } from "../../api";
 import { platformOf } from "../../platform";
+import { isShopeeProfile } from "../../shopee";
 import { assess } from "../../consistency";
 import { isSuggested, statusHue } from "../../status";
 import { SimprintBadge } from "./SimprintBadge";
 import { isOpenHere } from "../ProfileTable";
+import { isProviderProxy, providerForProxy } from "../../providerProxy";
 
 function formatSize(bytes: number): string {
   if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
@@ -51,15 +59,30 @@ interface SimprintProfileTableProps {
   local: boolean;
   busy: boolean;
   launching?: Set<string>;
+  /** Profiles whose Login press is in progress. */
+  logging?: Set<string>;
   onLaunch: (p: Profile, force?: boolean) => void;
+  onLogin?: (p: Profile) => void;
+  /** Profile ids that hold at least one saved login. Login is shown only for
+   *  these: the button writes a stored login into the browser, so on a profile
+   *  with none it could only fail. Null while the list is unknown — hidden,
+   *  like an empty one. */
+  withLogin?: Set<string> | null;
   onStop: (p: Profile) => void;
   onEdit?: (p: Profile) => void;
   onDelete?: (p: Profile) => void;
+  /** Clears this profile's browser folder and files a fresh one under the
+   *  storage root chosen now. The row and its saved logins stay. */
+  onReset?: (p: Profile) => void;
   onExtensions?: (p: Profile) => void;
+  onDisk?: (p: Profile) => void;
   onShare?: (p: Profile) => void;
   onNetwork?: (p: Profile) => void;
   onClone?: (p: Profile) => void;
   onCookies?: (p: Profile) => void;
+  /** Opens the profile's folder in the file manager, and says where it is when
+   *  it is not there. Absent where the caller has no shell behind it. */
+  onOpenFolder?: (p: Profile) => void;
   onQuickEdit?: (p: Profile, name: string, tags: string[]) => Promise<void>;
   /** Save just the note beside a profile. Present only where the caller may
    *  edit it; the pencil in that cell is hidden otherwise. */
@@ -69,7 +92,14 @@ interface SimprintProfileTableProps {
   selected: Set<string>;
   onToggle: (id: string) => void;
   onToggleAll: () => void;
+  /** How a row is picked: a click, or a press-and-drag paint (see below). */
+  selectMode?: "click" | "drag";
+  /** Sets membership directly — the paint needs this, `onToggle` only flips. */
+  onSetPicked?: (id: string, on: boolean) => void;
   showProject: boolean;
+  offset?: number;
+  /** Blank space at the end of the table, for the floating bulk bar. */
+  tailSpace?: number;
 }
 
 const WINDOW_FROM = 150;
@@ -82,15 +112,21 @@ export const SimprintProfileTable: React.FC<SimprintProfileTableProps> = ({
   local,
   busy,
   launching,
+  logging,
   onLaunch,
+  onLogin,
+  withLogin,
   onStop,
   onEdit,
   onDelete,
+  onReset,
   onExtensions,
+  onDisk,
   onShare,
   onNetwork,
   onClone,
   onCookies,
+  onOpenFolder,
   onQuickEdit,
   onNotes,
   personas,
@@ -98,12 +134,20 @@ export const SimprintProfileTable: React.FC<SimprintProfileTableProps> = ({
   selected,
   onToggle,
   onToggleAll,
+  selectMode = "click",
+  onSetPicked,
   showProject,
+  offset = 0,
+  tailSpace,
 }) => {
   const { t, say } = useI18n();
   const hasServer = !local;
 
   const tableRef = useRef<HTMLTableElement>(null);
+  // The drag gesture in progress: the state every row it crosses takes. Null
+  // when the button is up. A ref, not state — reading it in mouseenter must
+  // not wait for a render.
+  const paint = useRef<{ on: boolean } | null>(null);
   const [rowHeight, setRowHeight] = useState(60);
   const [range, setRange] = useState({ start: 0, end: WINDOW_FROM });
   // The row menu is drawn in a portal at fixed coordinates. Inside the table
@@ -151,8 +195,8 @@ export const SimprintProfileTable: React.FC<SimprintProfileTableProps> = ({
       const parsedTags = Array.from(
         new Set(
           quickTags
-            .split(/[,\s]+/)
-            .map((t) => t.replace(/^#/, "").trim())
+            .split(/[,;\n]+/)
+            .map((t) => t.trim().replace(/^#/, "").trim().replace(/\s+/g, " "))
             .filter(Boolean),
         ),
       );
@@ -176,9 +220,9 @@ export const SimprintProfileTable: React.FC<SimprintProfileTableProps> = ({
     const viewH = document.documentElement.clientHeight;
     const below = viewH - r.bottom - 8;
     const above = r.top - 8;
-    // Taller than today's four actions, so it flips up before it is cut off
-    // rather than after someone adds the fifth.
-    const want = 320;
+    // Taller than today's actions, so it flips up before it is cut off rather
+    // than after someone adds the next one.
+    const want = 380;
     const up = below < want && above > below;
     setMenu({
       id,
@@ -216,6 +260,23 @@ export const SimprintProfileTable: React.FC<SimprintProfileTableProps> = ({
     };
   }, [menu]);
 
+  // A gesture ends when the button comes up anywhere, including outside the
+  // window, and no row is left mid-paint when the mode changes.
+  useEffect(() => {
+    paint.current = null;
+    if (selectMode !== "drag") return;
+    const end = () => {
+      paint.current = null;
+    };
+    window.addEventListener("mouseup", end);
+    window.addEventListener("blur", end);
+    return () => {
+      paint.current = null;
+      window.removeEventListener("mouseup", end);
+      window.removeEventListener("blur", end);
+    };
+  }, [selectMode]);
+
   const openNotes = (p: Profile) => {
     setMenu(null);
     setNotesFor(p);
@@ -239,7 +300,10 @@ export const SimprintProfileTable: React.FC<SimprintProfileTableProps> = ({
 
   useEffect(() => {
     if (!windowed) return;
-    const scroller = tableRef.current?.parentElement;
+    const scroller =
+      tableRef.current?.closest<HTMLElement>(".tableWrap") ??
+      tableRef.current?.parentElement ??
+      null;
     if (!scroller) return;
     const update = () => {
       const top = scroller.scrollTop;
@@ -277,7 +341,8 @@ export const SimprintProfileTable: React.FC<SimprintProfileTableProps> = ({
   }
 
   const visible = windowed ? profiles.slice(range.start, range.end) : profiles;
-  const columns = 7 + (showProject ? 1 : 0);
+  const pickedOnPage = profiles.filter((p) => selected.has(p.id)).length;
+  const columns = 9 + (showProject ? 1 : 0);
   // The row the open menu belongs to, resolved by id rather than kept as a
   // copy: a poll can replace the row while the menu is open, and the actions
   // must follow the freshest permissions and lock state.
@@ -295,20 +360,22 @@ export const SimprintProfileTable: React.FC<SimprintProfileTableProps> = ({
               <input
                 type="checkbox"
                 aria-label="select all"
-                checked={selected.size > 0 && selected.size === profiles.length}
+                checked={pickedOnPage > 0 && pickedOnPage === profiles.length}
                 ref={(el) => {
-                  if (el) el.indeterminate = selected.size > 0 && selected.size < profiles.length;
+                  if (el) el.indeterminate = pickedOnPage > 0 && pickedOnPage < profiles.length;
                 }}
                 onChange={onToggleAll}
                 className="rounded border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-cyan-600 dark:text-cyan-500 focus:ring-0 focus:ring-offset-0 cursor-pointer"
               />
             </th>
+            <th className="py-3 px-4 w-10">#</th>
             <th className="py-3 px-4">{t("col.name")}</th>
-            {showProject && <th className="py-3 px-4">{t("col.project")}</th>}
+            {showProject && <th className="py-3 px-4 w-[9.36rem] min-w-[9.36rem]">{t("col.project")}</th>}
             <th className="py-3 px-4">{t("col.proxy")}</th>
-            <th className="py-3 px-4">{t("col.status")}</th>
+            <th className="py-3 px-4">{t("col.proxyProvider")}</th>
+            <th className="py-3 px-4 w-32 min-w-[8rem] whitespace-nowrap">{t("col.status")}</th>
             <th className="py-3 px-4">{t("col.lastOpened")}</th>
-            <th className="py-3 px-4">{t("col.notes")}</th>
+            <th className="py-3 px-4 w-52 min-w-[13rem]">{t("col.notes")}</th>
             <th className="py-3 px-4 text-left">{t("ui.save") ? "Actions" : ""}</th>
           </tr>
         </thead>
@@ -318,7 +385,7 @@ export const SimprintProfileTable: React.FC<SimprintProfileTableProps> = ({
               <td colSpan={columns} className="p-0 border-0" />
             </tr>
           )}
-          {visible.map((p) => {
+          {visible.map((p, idx) => {
             const canLaunch = p.permissions.includes("launch");
             const canForce = p.permissions.includes("manage_access");
             const canReveal = p.permissions.includes("reveal_secrets");
@@ -327,14 +394,63 @@ export const SimprintProfileTable: React.FC<SimprintProfileTableProps> = ({
             const open = isOpenHere(p, { local, userId: me?.user_id, machine: thisMachine });
             const starting = launching?.has(p.id) ?? false;
             const sharedExitCount = sharing?.get(p.id) ?? 0;
-            const verdict = assess(p, personas ?? null, sharedExitCount);
+            const providerProxy = p.proxy ? providerForProxy(p.proxy.id) : null;
+            // A provider hands the same exit to many of its customers, so a
+            // shared address is expected there and not a farm signature.
+            const providerBacked = isProviderProxy(p.proxy);
+            const verdict = assess(p, personas ?? null, sharedExitCount, providerBacked);
             const verdictText = verdict.notes.map((n) => t(n.key, n.vars)).join(" · ");
             const isPicked = selected.has(p.id);
+            const providerKey = providerProxy?.api_key?.trim() ?? "";
+            const maskedProviderKey =
+              providerKey.length > 8
+                ? `${providerKey.slice(0, 4)}...${providerKey.slice(-4)}`
+                : providerKey;
+
+            /** A row is a selection target, except where a control was pressed
+             *  and in the Proxy cell, whose own click opens the network view. */
+            const toggleRow = (e: React.MouseEvent<HTMLTableRowElement>) => {
+              const target = e.target as HTMLElement;
+              if (target.closest("button, a, input, select, textarea, label, [data-no-row-toggle]")) {
+                return;
+              }
+              if (window.getSelection()?.toString()) return;
+              onToggle(p.id);
+            };
+
+            /** Drag-select: the press sets the state every row it crosses
+             *  takes, from the row it started on. Controls and the Proxy cell
+             *  keep their own presses. */
+            const startPaint = (e: React.MouseEvent<HTMLTableRowElement>) => {
+              if (selectMode !== "drag" || e.button !== 0 || !onSetPicked) return;
+              const target = e.target as HTMLElement;
+              if (target.closest("button, a, input, select, textarea, label, [data-no-row-toggle]")) {
+                return;
+              }
+              e.preventDefault();
+              const on = !selected.has(p.id);
+              paint.current = { on };
+              onSetPicked(p.id, on);
+            };
+
+            const extendPaint = (e: React.MouseEvent<HTMLTableRowElement>) => {
+              if (selectMode !== "drag" || !paint.current || !onSetPicked) return;
+              // A release outside the window sends no mouseup here; the
+              // button's own state on the next enter is the reliable signal.
+              if (e.buttons === 0) {
+                paint.current = null;
+                return;
+              }
+              onSetPicked(p.id, paint.current.on);
+            };
 
             return (
               <tr
                 key={p.id}
                 data-row
+                onMouseDown={startPaint}
+                onMouseEnter={extendPaint}
+                onClick={selectMode === "click" ? toggleRow : undefined}
                 className={`transition-colors group border-b border-[var(--simprint-border)] ${
                   isPicked
                     ? "bg-cyan-50/80 dark:bg-cyan-950/20"
@@ -352,9 +468,14 @@ export const SimprintProfileTable: React.FC<SimprintProfileTableProps> = ({
                   />
                 </td>
 
+                {/* Row number */}
+                <td className="py-3 px-4 text-slate-400 dark:text-slate-500 font-mono text-[11px] tabular-nums">
+                  {offset + (windowed ? range.start + idx : idx) + 1}
+                </td>
+
                 {/* Profile Name & Badges */}
                 <td className="py-3 px-4">
-                  <div className="group/name flex items-center justify-between gap-2 max-w-full">
+                  <div className="group/name flex items-center gap-2 max-w-full">
                     <div className="flex items-center gap-2 min-w-0 flex-wrap">
                       {/* Platform 2-letter badge */}
                       {(() => {
@@ -378,6 +499,22 @@ export const SimprintProfileTable: React.FC<SimprintProfileTableProps> = ({
                       <span className="font-semibold text-slate-900 dark:text-slate-100 group-hover/name:text-cyan-600 dark:group-hover/name:text-cyan-300 transition-colors">
                         {p.name}
                       </span>
+
+                      {/* Quick Edit Name & Tags, beside the name it edits */}
+                      {canEdit && onQuickEdit && (
+                        <button
+                          type="button"
+                          title="Edit Name & Tags"
+                          aria-label="Edit Name & Tags"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            openQuickEdit(p);
+                          }}
+                          className="shrink-0 p-1 rounded-md text-slate-400 hover:text-cyan-600 dark:hover:text-cyan-400 hover:bg-slate-200/60 dark:hover:bg-slate-800 transition-all opacity-0 group-hover/name:opacity-100 focus:opacity-100 !bg-transparent !border-0 cursor-pointer"
+                        >
+                          <Pencil size={12} />
+                        </button>
+                      )}
 
                       {/* Local only badge */}
                       {hasServer && p.origin === "local" && (
@@ -407,22 +544,6 @@ export const SimprintProfileTable: React.FC<SimprintProfileTableProps> = ({
                         </span>
                       )}
                     </div>
-
-                    {/* Quick Edit Name & Tags Button on Hover */}
-                    {canEdit && onQuickEdit && (
-                      <button
-                        type="button"
-                        title="Edit Name & Tags"
-                        aria-label="Edit Name & Tags"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          openQuickEdit(p);
-                        }}
-                        className="shrink-0 p-1 rounded-md text-slate-400 hover:text-cyan-600 dark:hover:text-cyan-400 hover:bg-slate-200/60 dark:hover:bg-slate-800 transition-all opacity-0 group-hover/name:opacity-100 focus:opacity-100 !bg-transparent !border-0 cursor-pointer"
-                      >
-                        <Pencil size={12} />
-                      </button>
-                    )}
                   </div>
 
                   {/* Tags */}
@@ -442,13 +563,16 @@ export const SimprintProfileTable: React.FC<SimprintProfileTableProps> = ({
 
                 {/* Project column */}
                 {showProject && (
-                  <td className="py-3 px-4 text-slate-500 dark:text-slate-400">
-                    {p.project_name ?? <span className="text-slate-400 dark:text-slate-600 italic">{t("col.noProject")}</span>}
+                  <td className="py-3 px-4 w-[9.36rem] min-w-[9.36rem] text-slate-500 dark:text-slate-400">
+                    <span className="block truncate" title={p.project_name ?? undefined}>
+                      {p.project_name ?? <span className="text-slate-400 dark:text-slate-600 italic">{t("col.noProject")}</span>}
+                    </span>
                   </td>
                 )}
 
                 {/* Proxy column */}
                 <td
+                  data-no-row-toggle
                   className={`py-3 px-4 ${p.proxy && onNetwork ? "cursor-pointer hover:text-cyan-600 dark:hover:text-cyan-300" : ""}`}
                   title={p.proxy && onNetwork ? t("net.current") : undefined}
                   onClick={() => p.proxy && onNetwork?.(p)}
@@ -457,15 +581,30 @@ export const SimprintProfileTable: React.FC<SimprintProfileTableProps> = ({
                     <div>
                       <div className="font-mono text-slate-800 dark:text-slate-200 text-xs flex items-center gap-1.5">
                         <span className="h-1.5 w-1.5 rounded-full bg-cyan-500" />
-                        <span>{p.proxy.display}</span>
-                        {!canReveal && <span className="text-[10px] text-slate-400 dark:text-slate-500 font-sans">({t("row.masked")})</span>}
+                        <span>
+                          {providerProxy
+                            ? p.proxy.kind === "provider"
+                              ? providerProxy.provider
+                              : (providerProxy.last_ip ?? p.proxy.display)
+                            : p.proxy.display}
+                        </span>
+                        {!canReveal && !providerProxy && (
+                          <span className="text-[10px] text-slate-400 dark:text-slate-500 font-sans">({t("row.masked")})</span>
+                        )}
                       </div>
                       <div className="text-[11px] text-slate-500 mt-0.5 flex items-center gap-1">
-                        <span>{p.proxy.country ?? t("row.proxyUnchecked")}</span>
-                        {sharedExitCount >= 2 && (
-                          <span className={sharedExitCount >= 3 ? "text-amber-600 dark:text-amber-400 font-medium" : "text-slate-500 dark:text-slate-400"}>
-                            · {t("row.sharedExit", { n: sharedExitCount })}
-                          </span>
+                        {providerProxy && p.proxy.kind === "provider" ? (
+                          <span>{t("prov.noIpYet")}</span>
+                        ) : (
+                          <>
+                            <span>{p.proxy.country ?? t("row.proxyUnchecked")}</span>
+                            {!providerBacked && sharedExitCount >= 2 && (
+                              <span className={sharedExitCount >= 3 ? "text-amber-600 dark:text-amber-400 font-medium" : "text-slate-500 dark:text-slate-400"}>
+                                · {t("row.sharedExit", { n: sharedExitCount })}
+                              </span>
+                            )}
+                            {providerProxy && <span> · {providerProxy.provider}</span>}
+                          </>
                         )}
                       </div>
                     </div>
@@ -476,8 +615,35 @@ export const SimprintProfileTable: React.FC<SimprintProfileTableProps> = ({
                   )}
                 </td>
 
+                {/* Proxy Provider column */}
+                <td className="py-3 px-4 text-[11px]">
+                  {p.proxy ? (
+                    <div>
+                      <div
+                        className="text-slate-700 dark:text-slate-300 truncate max-w-[140px]"
+                        title={
+                          providerProxy
+                            ? (p.proxy.name.trim() || providerProxy.name.trim() || providerProxy.provider)
+                            : p.proxy.name
+                        }
+                      >
+                        {providerProxy
+                          ? (p.proxy.name.trim() || providerProxy.name.trim() || providerProxy.provider)
+                          : (p.proxy.name || "—")}
+                      </div>
+                      <div className="text-[10px] text-slate-400 dark:text-slate-500 font-mono mt-0.5">
+                        {providerProxy
+                          ? `${p.proxy.kind}${maskedProviderKey ? `|${maskedProviderKey}` : ""}`
+                          : p.proxy.kind}
+                      </div>
+                    </div>
+                  ) : (
+                    <span className="text-slate-400 dark:text-slate-600">—</span>
+                  )}
+                </td>
+
                 {/* Status / Stage column */}
-                <td className="py-3 px-4">
+                <td className="py-3 px-4 w-32 min-w-[8rem]">
                   <div className="flex flex-col gap-1 items-start">
                     {open && (
                       <SimprintBadge variant="emerald" dot pulse>
@@ -543,8 +709,8 @@ export const SimprintProfileTable: React.FC<SimprintProfileTableProps> = ({
                 {/* Notes — the operator's own note on the account, beside the
                     row it is about rather than only inside the editor. The
                     pencil appears on hover and edits just this field. */}
-                <td className="py-3 px-4 text-slate-600 dark:text-slate-400 text-[11px]">
-                  <div className="group/notes inline-flex max-w-[220px] items-center gap-1 align-top">
+                <td className="py-3 px-4 w-52 min-w-[13rem] text-slate-600 dark:text-slate-400 text-[11px]">
+                  <div className="group/notes inline-flex max-w-[156px] items-center gap-1 align-top">
                     <span
                       className={p.notes?.trim() ? "min-w-0 truncate text-slate-700 dark:text-slate-300" : "text-slate-400 dark:text-slate-600"}
                       title={p.notes || undefined}
@@ -574,19 +740,34 @@ export const SimprintProfileTable: React.FC<SimprintProfileTableProps> = ({
                         disabled={busy || starting || verdict.level === "block"}
                         title={verdict.level === "block" ? `${t("row.fixFirst")}: ${verdictText}` : undefined}
                         onClick={() => onLaunch(p)}
-                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-medium text-xs text-white bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 shadow-md shadow-cyan-500/20 disabled:opacity-40 transition-all cursor-pointer"
+                        className="simprint-action-open flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-medium text-xs disabled:opacity-40 transition-all cursor-pointer"
                       >
-                        {starting ? (
-                          <>
-                            <Loader2 size={13} className="animate-spin" />
-                            <span>{t("row.opening")}</span>
-                          </>
-                        ) : (
-                          <>
-                            <Play size={12} fill="currentColor" />
-                            <span>{t("row.open")}</span>
-                          </>
-                        )}
+                        <Play size={12} fill="currentColor" />
+                        <span>{t("row.open")}</span>
+                      </button>
+                    )}
+
+                    {/* Login: writes the saved cookie and fills the form only
+                        when the profile is not already signed in. Local Shopee
+                        profiles first; the agent leaves the browser open so a
+                        verification code can be finished by hand. Shown only
+                        where a login is actually stored — the press has nothing
+                        else to work from. */}
+                    {!open && !locked && canLaunch && p.origin === "local" && onLogin && isShopeeProfile(p) && withLogin?.has(p.id) === true && (
+                      <button
+                        disabled={busy || starting || logging?.has(p.id) || verdict.level === "block"}
+                        title={
+                          verdict.level === "block"
+                            ? `${t("row.fixFirst")}: ${verdictText}`
+                            : p.proxy === null
+                              ? t("login.noProxyWarn")
+                              : undefined
+                        }
+                        onClick={() => onLogin(p)}
+                        className="simprint-action-login flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-medium text-xs disabled:opacity-40 transition-all cursor-pointer"
+                      >
+                        <LogIn size={12} />
+                        <span>{logging?.has(p.id) ? t("row.loggingIn") : t("row.login")}</span>
                       </button>
                     )}
 
@@ -595,7 +776,7 @@ export const SimprintProfileTable: React.FC<SimprintProfileTableProps> = ({
                       <button
                         disabled={busy}
                         onClick={() => onStop(p)}
-                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-medium text-xs text-rose-300 bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/30 transition-all cursor-pointer shadow-sm"
+                        className="simprint-action-close flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-medium text-xs transition-all cursor-pointer shadow-sm"
                       >
                         <Square size={12} fill="currentColor" />
                         <span>{t("row.close")}</span>
@@ -646,6 +827,11 @@ export const SimprintProfileTable: React.FC<SimprintProfileTableProps> = ({
               </tr>
             );
           })}
+          {tailSpace ? (
+            <tr aria-hidden="true" style={{ height: tailSpace }}>
+              <td colSpan={columns} className="p-0 border-0" />
+            </tr>
+          ) : null}
           {windowed && range.end < profiles.length && (
             <tr aria-hidden="true" style={{ height: (profiles.length - range.end) * rowHeight }}>
               <td colSpan={columns} className="p-0 border-0" />
@@ -665,6 +851,19 @@ export const SimprintProfileTable: React.FC<SimprintProfileTableProps> = ({
               ...(menu.top !== null ? { top: menu.top } : { bottom: menu.bottom ?? undefined }),
             }}
           >
+            {onOpenFolder && (
+              <button
+                role="menuitem"
+                onClick={() => {
+                  setMenu(null);
+                  onOpenFolder(menuProfile);
+                }}
+                className="w-full flex items-center gap-2 px-3 py-1.5 text-slate-700 hover:text-slate-900 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white cursor-pointer !bg-transparent !border-0"
+              >
+                <FolderOpen size={13} />
+                <span>{t("row.openFolder")}</span>
+              </button>
+            )}
             {onCookies && (
               <button
                 role="menuitem"
@@ -704,6 +903,19 @@ export const SimprintProfileTable: React.FC<SimprintProfileTableProps> = ({
                 <span>{t("ext.extensions")}</span>
               </button>
             )}
+            {onDisk && menuProfile.permissions.includes("edit_profile") && (
+              <button
+                role="menuitem"
+                onClick={() => {
+                  setMenu(null);
+                  onDisk(menuProfile);
+                }}
+                className="w-full flex items-center gap-2 px-3 py-1.5 text-slate-700 hover:text-slate-900 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white cursor-pointer !bg-transparent !border-0"
+              >
+                <HardDrive size={13} />
+                <span>{t("ext.storageLabel")}</span>
+              </button>
+            )}
             {onClone && menuProfile.permissions.includes("edit_profile") && (
               <button
                 role="menuitem"
@@ -715,6 +927,20 @@ export const SimprintProfileTable: React.FC<SimprintProfileTableProps> = ({
               >
                 <Copy size={13} />
                 <span>{t("bp.clone")}</span>
+              </button>
+            )}
+            {onReset && menuProfile.permissions.includes("delete_profile") && (
+              <button
+                role="menuitem"
+                disabled={busy || menuIsOpen}
+                onClick={() => {
+                  setMenu(null);
+                  onReset(menuProfile);
+                }}
+                className="w-full flex items-center gap-2 px-3 py-1.5 text-amber-700 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-500/10 cursor-pointer disabled:opacity-40 !bg-transparent !border-0"
+              >
+                <RotateCcw size={13} />
+                <span>{t("row.reset")}</span>
               </button>
             )}
             {onDelete && menuProfile.permissions.includes("delete_profile") && (

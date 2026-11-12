@@ -88,7 +88,7 @@ net/socket/ssl_client_socket_impl.cc:207   SSL_CTX_set_grease_enabled(ctx_, 1);
 `core/patches/series`.
 
 Чего записывать нельзя — что это паритет. Это не паритет: настоящий Chrome 150 поднимает
-HTTP/3 с любым сервером, который его предлагает, а Fury — никогда. Отклонение реальное и
+HTTP/3 с любым сервером, который его предлагает, а XChange — никогда. Отклонение реальное и
 незакрытое, и со стороны сервера его видит **любой**, кто анонсирует `Alt-Svc` и смотрит,
 апгрейдится ли клиент, а не только Google.
 
@@ -314,13 +314,20 @@ Times, Segoe UI, что там у платформы за пол, — и про�
 
 ### WebRTC
 
-Патч: `third_party/webrtc/`, `content/browser/renderer_host/`.
+Патчи: `0070-webrtc-policy.patch` (маршрутизация и ноль кандидатов) и
+`0071-webrtc-candidates.patch` (синтезированный набор для страницы).
 
-- Host-кандидаты (локальные IP `192.168.x.x` / mDNS `.local`) — должны соответствовать
-  правдоподобной домашней сети, а не вашей реальной.
-- Server-reflexive кандидаты через STUN — обязаны показывать IP прокси, не ваш.
-- Режимы: `disabled` / `fake` (подставить IP прокси) / `real` (только через прокси).
-  По умолчанию — `fake`.
+- `off` — состояние профилей, созданных раньше: `disable_non_proxied_udp` не собирает
+  ничего, `iceGatheringState` = `complete`, `getStats()` не содержит local-candidate. Это
+  состояние настоящего Chrome под enterprise-политикой. Новые профили начинают с
+  `base_on_ip`.
+- `base_on_ip` — host-кандидат: приватный адрес из seed профиля; srflx: IP выхода прокси,
+  разрешённый при запуске. `fixed` — оба адреса заданы вручную.
+- Кандидаты синтезируются в Blink binding и повторяются в `getStats()`; реальные UDP/STUN
+  сокеты не открываются, peer connection не соединяется. Режима `real` нет: он отдаёт
+  странице настоящий адрес машины.
+- mDNS-кандидат не подменяется: при `off` его нет, при синтезе он не нужен — host-адрес
+  берётся из конфигурации профиля.
 
 Дублирующая защита на уровне relay: см. [05](05-proxy-networking.md).
 
@@ -493,7 +500,7 @@ iframe (`same-origin`, `about:blank`, `srcdoc`), `crossContext.disagreementCount
   ВЫКЛЮЧЕНО: ключ `automation.hideTraces`, ненастроенная сборка остаётся честной. Смысл в
   том, что без него оператор выбирает между «автоматизировать аккаунт» и «сохранить его».
 - `cdc_`-переменные ChromeDriver и `document.$cdc_asdjflasutopfhvcZLmcfl_` — **убирать нечего**.
-  Их ставит ChromeDriver, а Fury его не использует. Измерено: `engine.automation.cdcVars` и
+  Их ставит ChromeDriver, а XChange его не использует. Измерено: `engine.automation.cdcVars` и
   `documentCdc` пусты и у нас, и у чистого Chromium 150, и у настоящего Chrome 150
   (`tools/detect-suite/baselines/*-redacted.json`). Проба снимает их как контроль.
 - `--enable-automation` лончер не передаёт (`agent/src/launcher.rs`), поэтому ни поведения,

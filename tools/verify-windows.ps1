@@ -1,11 +1,11 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-# Copyright 2026 Bogdan Shapovalov and the Fury authors
+# Copyright 2026 Bogdan Shapovalov and the XChange authors
 #
 # The half of the Windows port that a compiler cannot check.
 #
 #     powershell -ExecutionPolicy Bypass -File tools\verify-windows.ps1
 #
-# `cargo check -p fury-platform --target x86_64-pc-windows-msvc` runs on a Mac
+# `cargo check -p xchange-platform --target x86_64-pc-windows-msvc` runs on a Mac
 # and is in CI, and it catches a real class of mistake -- it has already caught
 # three. It cannot catch any of these, because every one of them is a question
 # about what Windows DOES rather than about what compiles:
@@ -21,13 +21,13 @@
 #     WMI can read it.
 #
 # Sections that need an installed core say so and skip. Run it again once
-# `fury-agent install-core` has one, and everything runs.
+# `xchange-agent install-core` has one, and everything runs.
 #
 # State claims, not steps -- same rule as core/verify/README.md. Each claim
 # prints one line and the script exits non-zero if any is false.
 #
 #     powershell -ExecutionPolicy Bypass -File tools\verify-windows.ps1 `
-#         -CoreArchive dist\fury-core-windows.tar.xz
+#         -CoreArchive dist\xchange-core-windows.tar.xz
 #
 # -CoreArchive is how the core section actually runs. Without it that section
 # always skips, and it always skipped: this script gives the run a private
@@ -63,19 +63,19 @@ function Skip {
 }
 
 $repo = Split-Path -Parent $PSScriptRoot
-$agentExe = Join-Path $repo 'target\release\fury-agent.exe'
+$agentExe = Join-Path $repo 'target\release\xchange-agent.exe'
 if (-not (Test-Path $agentExe)) {
-    $agentExe = Join-Path $repo 'target\debug\fury-agent.exe'
+    $agentExe = Join-Path $repo 'target\debug\xchange-agent.exe'
 }
 if (-not (Test-Path $agentExe)) {
-    Write-Host "no fury-agent.exe -- run: cargo build --release -p fury-agent" -ForegroundColor Red
+    Write-Host "no xchange-agent.exe -- run: cargo build --release -p xchange-agent" -ForegroundColor Red
     exit 2
 }
 
 # A data directory of its own, so this never touches a real installation and
 # never talks to an agent holding real profiles. FURY_HOME is what the tag is
 # derived from, so this also gives the run its own pipe name.
-$home_ = Join-Path $env:TEMP ("fury-verify-" + [System.Guid]::NewGuid().ToString('N').Substring(0,8))
+$home_ = Join-Path $env:TEMP ("xchange-verify-" + [System.Guid]::NewGuid().ToString('N').Substring(0,8))
 New-Item -ItemType Directory -Path $home_ -Force | Out-Null
 $env:FURY_HOME = $home_
 
@@ -131,10 +131,10 @@ try {
     # -----------------------------------------------------------------------
     Write-Host "`nthe agent listens, and on a pipe rather than a port"
     # -----------------------------------------------------------------------
-    # Every fury-* pipe that exists BEFORE the agent starts, so the one it
+    # Every xchange-* pipe that exists BEFORE the agent starts, so the one it
     # creates can be told from one that was already there.
     #
-    # This script used to take the first fury-* pipe it found and call it the
+    # This script used to take the first xchange-* pipe it found and call it the
     # agent's. The comment above the loop said the name was derived from the
     # data directory rather than guessed, and it was not: the code guessed, and
     # on a machine with any other agent running it guessed wrong. The build
@@ -152,10 +152,10 @@ try {
     # second copy of that arithmetic in PowerShell is a copy that drifts from
     # the Rust one. The agent's own `dirs::short_tag` stays the only definition.
     $before = @(Get-ChildItem \\.\pipe\ -ErrorAction SilentlyContinue |
-                Where-Object { $_.Name -like 'fury-*' } |
+                Where-Object { $_.Name -like 'xchange-*' } |
                 Select-Object -ExpandProperty Name)
     if ($before.Count -gt 0) {
-        Write-Host ("  note: " + $before.Count + " fury-* pipe(s) already present, ignoring: " + ($before -join ', '))
+        Write-Host ("  note: " + $before.Count + " xchange-* pipe(s) already present, ignoring: " + ($before -join ', '))
     }
 
     $agent = Start-Process -FilePath $agentExe -ArgumentList 'serve' -PassThru `
@@ -166,11 +166,11 @@ try {
     for ($i = 0; $i -lt 100; $i++) {
         Start-Sleep -Milliseconds 200
         $pipe = Get-ChildItem \\.\pipe\ -ErrorAction SilentlyContinue |
-                Where-Object { $_.Name -like 'fury-*' -and $before -notcontains $_.Name } |
+                Where-Object { $_.Name -like 'xchange-*' -and $before -notcontains $_.Name } |
                 Select-Object -First 1
         if ($pipe) { break }
     }
-    Claim ($null -ne $pipe) "a NEW named pipe called fury-* exists -- one this run created, not one already on the machine"
+    Claim ($null -ne $pipe) "a NEW named pipe called xchange-* exists -- one this run created, not one already on the machine"
     if (-not $pipe) { throw "the agent never listened -- see $home_\err.log" }
 
     $pipePath = "\\.\pipe\" + $pipe.Name
@@ -186,7 +186,7 @@ try {
     # nobody rediscovers it: it goes through the FileSystem provider, which does
     # not open \\.\pipe\..., and reports
     #
-    #     Cannot find path '...\\.\pipe\fury-xxxxxxxx' because it does not exist
+    #     Cannot find path '...\\.\pipe\xchange-xxxxxxxx' because it does not exist
     #
     # about a pipe that plainly does exist and that this script listed four lines
     # earlier. Measured 16.08.2026 on the first Windows run of this file; the
@@ -330,7 +330,7 @@ try {
     # -----------------------------------------------------------------------
     # $ErrorActionPreference is Stop for this whole file, and that turns a native
     # command's stderr into a thrown NativeCommandError the moment it is merged
-    # with 2>&1. `fury-agent doctor` prints its banner ("fury-agent 0.0.1") on
+    # with 2>&1. `xchange-agent doctor` prints its banner ("xchange-agent 0.0.1") on
     # stderr, so this line aborted the script on output that was not an error at
     # all -- measured 16.08.2026, and it stopped the run before the section that
     # matters most, the one with no macOS equivalent.
@@ -355,7 +355,7 @@ try {
     }
     $haveCore = ($core -notmatch 'no core installed' -and $core.Trim().Length -gt 0)
     if (-not $haveCore) {
-        Skip "no core installed -- run 'fury-agent install-core <path>' and run this again"
+        Skip "no core installed -- run 'xchange-agent install-core <path>' and run this again"
         Skip "  (this is the section that checks handle inheritance, which is the"
         Skip "   one thing in the port with no macOS equivalent to fall back on)"
     } else {
@@ -369,7 +369,7 @@ try {
         # descriptor and an inherited HANDLE are different mechanisms and only
         # one of them had ever been executed.
         #
-        # `fury-agent launch` rather than a stored profile: the bare CLI takes a
+        # `xchange-agent launch` rather than a stored profile: the bare CLI takes a
         # persona file and a proxy and needs no database, no vault and no shell.
         # Fewer moving parts between the claim and the thing it is about.
         $persona = Join-Path $repo 'shared\personas\windows-11-rtx4060-1920x1080.json'

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright 2026 Bogdan Shapovalov and the Fury authors
+// Copyright 2026 Bogdan Shapovalov and the XChange authors
 
 //! The local automation API.
 //!
@@ -71,7 +71,7 @@ pub fn token() -> anyhow::Result<String> {
     std::fs::write(&path, &token)?;
     // The whole authorisation story, in one file — so it is restricted to this
     // user explicitly rather than left to inherit whatever the directory had.
-    fury_platform::perms::owner_only_file(&path)?;
+    xchange_platform::perms::owner_only_file(&path)?;
     Ok(token)
 }
 
@@ -329,6 +329,6 @@ mod tests {
         assert!(ok("localhost:35000"));
         assert!(ok("127.0.0.1"));
         assert!(!ok("api.attacker.example:35000"));
-        assert!(!ok("fury.local:35000"));
+        assert!(!ok("xchange.local:35000"));
     }
 }

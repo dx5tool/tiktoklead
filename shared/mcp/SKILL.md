@@ -1,36 +1,36 @@
 ---
-name: fury
-description: Drive Fury, the antidetect browser, on this machine. Open and close browser profiles, warm them up, go to sites, read pages, click and type inside a profile. Use when the person talks about Fury profiles, accounts, warming, or doing something on a site "in profile X".
+name: xchange
+description: Drive XChange, the antidetect browser, on this machine. Open and close browser profiles, warm them up, go to sites, read pages, click and type inside a profile. Use when the person talks about XChange profiles, accounts, warming, or doing something on a site "in profile X".
 ---
 
-# Fury
+# XChange
 
-Fury keeps browser profiles. Each profile is a separate browser with its own fingerprint, cookies and proxy, usually holding one account on some platform. The person runs Fury on this machine. You drive it through the `fury_*` tools.
+XChange keeps browser profiles. Each profile is a separate browser with its own fingerprint, cookies and proxy, usually holding one account on some platform. The person runs XChange on this machine. You drive it through the `xchange_*` tools.
 
 ## How to work
 
-1. **Find the profile first.** Call `fury_list_profiles`; filter with `tag`, `project` or `query` when the person names a group ("the warm ones", "the DE profiles"). Refer to profiles by the `name` the person sees; pass the `id` or the exact name to other tools.
-2. **Open it.** `fury_start_profile` opens a real browser window on the person's screen, through the profile's proxy. Only profiles you opened this way can be driven: one opened from the Fury window has no automation port. If a page tool says so, close it with `fury_stop_profile` and start it again.
-3. **Look before you act.** `fury_read_page` returns the text and a numbered list of links, buttons and fields. Use those numbers with `fury_click` and `fury_type`. After a click or a submit the page changes: read it again before using numbers from the old read. Use `fury_screenshot` when the layout matters or the text is not enough.
-4. **Close what you opened** with `fury_stop_profile` when the task is done, unless the person wants to keep working in it. The profile keeps its cookies.
+1. **Find the profile first.** Call `xchange_list_profiles`; filter with `tag`, `project` or `query` when the person names a group ("the warm ones", "the DE profiles"). Refer to profiles by the `name` the person sees; pass the `id` or the exact name to other tools.
+2. **Open it.** `xchange_start_profile` opens a real browser window on the person's screen, through the profile's proxy. Only profiles you opened this way can be driven: one opened from the XChange window has no automation port. If a page tool says so, close it with `xchange_stop_profile` and start it again.
+3. **Look before you act.** `xchange_read_page` returns the text and a numbered list of links, buttons and fields. Use those numbers with `xchange_click` and `xchange_type`. After a click or a submit the page changes: read it again before using numbers from the old read. Use `xchange_screenshot` when the layout matters or the text is not enough.
+4. **Close what you opened** with `xchange_stop_profile` when the task is done, unless the person wants to keep working in it. The profile keeps its cookies.
 
 For several profiles, work through them one at a time: open, do the task, close, next. Opening many at once makes the machine slow.
 
 ## Creating and changing profiles
 
-`fury_create_profiles` makes one profile or a batch ("Shop {n}", up to 50). Each gets its own fingerprint seed and, unless the person names a persona, its own machine picked by how common it is; pass `os` to keep them on the person's OS. `fury_list_personas` shows the machines. Give every account its own proxy: save proxies with `fury_add_proxies` (any common format, one per line) or pass `proxy_line`, then `fury_update_profile` to assign them. Profiles sharing one exit are linked by it, so say so if the person asks for a batch on one proxy.
+`xchange_create_profiles` makes one profile or a batch ("Shop {n}", up to 50). Each gets its own fingerprint seed and, unless the person names a persona, its own machine picked by how common it is; pass `os` to keep them on the person's OS. `xchange_list_personas` shows the machines. Give every account its own proxy: save proxies with `xchange_add_proxies` (any common format, one per line) or pass `proxy_line`, then `xchange_update_profile` to assign them. Profiles sharing one exit are linked by it, so say so if the person asks for a batch on one proxy.
 
-`fury_update_profile` changes the name, tags, stage, proxy or start pages; it never touches the fingerprint. Changing the proxy of a profile that already holds an account moves that account to another address: ask first.
+`xchange_update_profile` changes the name, tags, stage, proxy or start pages; it never touches the fingerprint. Changing the proxy of a profile that already holds an account moves that account to another address: ask first.
 
-`fury_move_to_trash` moves a profile to Fury's Trash, from which it can be restored. Ask before using it. Nothing here erases a profile for good.
+`xchange_move_to_trash` moves a profile to XChange's Trash, from which it can be restored. Ask before using it. Nothing here erases a profile for good.
 
-New profiles are created on this machine. To share one with a team, the person sends it to the server from the Fury window.
+New profiles are created on this machine. To share one with a team, the person sends it to the server from the XChange window.
 
 ## Warming
 
-`fury_warm_up` visits ordinary sites in each profile with human-like pauses so it collects normal cookies before it is used for an account. It runs in the background and closes each profile at the end by default. Check progress with `fury_warm_status`. Use Fury's default site list unless the person gives one.
+`xchange_warm_up` visits ordinary sites in each profile with human-like pauses so it collects normal cookies before it is used for an account. It runs in the background and closes each profile at the end by default. Check progress with `xchange_warm_status`. Use XChange's default site list unless the person gives one.
 
-For warming over days, `fury_farm_plan` makes a schedule: each day, for the number of days given, every profile opens a few of the sites at random times within the hours (the profile's own timezone) and closes again. Sessions run while Fury's agent runs; a day the computer was off is skipped, not made up. `fury_farm_status` shows days done, sites read and the next session. A profile can be in one plan at a time; plans are paused or removed from the Fury window.
+For warming over days, `xchange_farm_plan` makes a schedule: each day, for the number of days given, every profile opens a few of the sites at random times within the hours (the profile's own timezone) and closes again. Sessions run while XChange's agent runs; a day the computer was off is skipped, not made up. `xchange_farm_status` shows days done, sites read and the next session. A profile can be in one plan at a time; plans are paused or removed from the XChange window.
 
 ## Rules
 
@@ -38,6 +38,6 @@ For warming over days, `fury_farm_plan` makes a schedule: each day, for the numb
 - **Act like the person would.** No rapid-fire clicking, no opening dozens of pages a minute. If a site shows a captcha, a login challenge or a ban notice, stop and tell the person; do not try to get around it.
 - **Ask before anything irreversible** on a site: sending a message, posting, buying, deleting, changing account settings. Reading and navigating need no confirmation.
 - **Logins are the person's.** If a site asks for a password or a code, ask the person to type it in the open window themselves.
-- Team profiles (on a Fury team server) are not available here yet; only profiles on this machine are.
+- Team profiles (on an XChange team server) are not available here yet; only profiles on this machine are.
 - The fingerprint (persona, seed) of an existing profile is not changed from here: a profile whose machine changes overnight is the anomaly platforms look for.
-- Errors come back as text: read them. "this profile has no proxy" means the person has to add one in Fury, or tick "Let this profile open without a proxy" on the profile's Proxy tab if it holds no account.
+- Errors come back as text: read them. "this profile has no proxy" means the person has to add one in XChange, or tick "Let this profile open without a proxy" on the profile's Proxy tab if it holds no account.

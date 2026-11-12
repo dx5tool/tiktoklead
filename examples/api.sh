@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: AGPL-3.0-or-later
-# Copyright 2026 Bogdan Shapovalov and the Fury authors
+# Copyright 2026 Bogdan Shapovalov and the XChange authors
 #
 # The whole automation API, in curl.
 #
@@ -8,7 +8,7 @@
 # opened from a script, and every other example here is the same six calls with
 # a library wrapped around them.
 #
-#   FURY_API_PORT=35000 fury-agent serve     # in another terminal
+#   FURY_API_PORT=35000 xchange-agent serve     # in another terminal
 #   ./api.sh                                 # what have I got
 #   ./api.sh <profile-id>                    # start it, look at it, stop it
 
@@ -19,12 +19,12 @@ base="http://127.0.0.1:$port/v1"
 
 # The token is read, never written down. It authorises every logged-in profile
 # on this machine, and a script is the thing that gets pasted into an issue.
-home="${FURY_HOME:-$HOME/Library/Application Support/Fury}"
+home="${FURY_HOME:-$HOME/Library/Application Support/XChange}"
 token_file="$home/api-token"
 if [ ! -f "$token_file" ]; then
   echo "!! no $token_file" >&2
   echo "   The agent creates it the first time it serves the API:" >&2
-  echo "   FURY_API_PORT=$port fury-agent serve" >&2
+  echo "   FURY_API_PORT=$port xchange-agent serve" >&2
   exit 1
 fi
 token=$(tr -d '[:space:]' < "$token_file")
@@ -42,7 +42,7 @@ api() {
 echo "== status"
 if ! status=$(api GET /status 2>&1); then
   echo "!! could not reach the agent on port $port" >&2
-  echo "   Start it with: FURY_API_PORT=$port fury-agent serve" >&2
+  echo "   Start it with: FURY_API_PORT=$port xchange-agent serve" >&2
   exit 1
 fi
 echo "$status" | python3 -m json.tool

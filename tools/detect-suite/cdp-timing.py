@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: AGPL-3.0-or-later
-# Copyright 2026 Bogdan Shapovalov and the Fury authors
+# Copyright 2026 Bogdan Shapovalov and the XChange authors
 """How much slower is console.debug when something is driving the browser?
 
     ./cdp-timing.py <path-to-browser>
@@ -10,7 +10,7 @@ series has recorded this as "about thirteen times" since it was first seen; this
 splits it into the two parts it is actually made of, which changes what can be
 done about it.
 
-Measured 04.08.2026 on Fury 150, microseconds per call, median of seven runs of
+Measured 04.08.2026 on XChange 150, microseconds per call, median of seven runs of
 four hundred:
 
                           "hello"   50-key obj   800-key obj
@@ -37,7 +37,7 @@ works is not opening CDP: it is off unless asked for, and a team server can
 refuse it per role.
 
 Real Chrome behaves the same way, measured the same way. This detects a driven
-browser, not Fury.
+browser, not XChange.
 """
 
 import asyncio, http.server, json, os, socketserver, subprocess, sys, threading, time

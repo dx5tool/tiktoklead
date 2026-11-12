@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright 2026 Bogdan Shapovalov and the Fury authors
+// Copyright 2026 Bogdan Shapovalov and the XChange authors
 
 //! Copying a browser from one directory to another.
 //!
@@ -123,7 +123,7 @@ mod tests {
     use super::*;
 
     fn scratch(name: &str) -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!("fury-tree-{}-{name}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("xchange-tree-{}-{name}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir
@@ -134,19 +134,19 @@ mod tests {
     fn a_clone_keeps_links_and_modes_and_refuses_an_existing_target() {
         use std::os::unix::fs::PermissionsExt;
         let root = scratch("clone");
-        let src = root.join("Fury.app/Contents");
+        let src = root.join("XChange.app/Contents");
         std::fs::create_dir_all(src.join("MacOS")).unwrap();
-        std::fs::write(src.join("MacOS/Fury"), b"#!").unwrap();
-        std::fs::set_permissions(src.join("MacOS/Fury"), std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::fs::write(src.join("MacOS/XChange"), b"#!").unwrap();
+        std::fs::set_permissions(src.join("MacOS/XChange"), std::fs::Permissions::from_mode(0o755)).unwrap();
         std::os::unix::fs::symlink("MacOS", src.join("Current")).unwrap();
 
         let dst = root.join("Named.app");
-        clone_tree(&root.join("Fury.app"), &dst).unwrap();
-        let exe = dst.join("Contents/MacOS/Fury");
+        clone_tree(&root.join("XChange.app"), &dst).unwrap();
+        let exe = dst.join("Contents/MacOS/XChange");
         assert_eq!(std::fs::read(&exe).unwrap(), b"#!");
         assert_eq!(std::fs::metadata(&exe).unwrap().permissions().mode() & 0o777, 0o755);
         assert!(std::fs::symlink_metadata(dst.join("Contents/Current")).unwrap().file_type().is_symlink());
-        assert!(clone_tree(&root.join("Fury.app"), &dst).is_err(), "an existing target is refused");
+        assert!(clone_tree(&root.join("XChange.app"), &dst).is_err(), "an existing target is refused");
         std::fs::remove_dir_all(&root).unwrap();
     }
 
@@ -187,16 +187,16 @@ mod tests {
     #[test]
     fn a_bundle_keeps_its_symlinks() {
         let root = scratch("bundle");
-        let src = root.join("Fury.app");
+        let src = root.join("XChange.app");
         std::fs::create_dir_all(src.join("Versions/150")).unwrap();
-        std::fs::write(src.join("Versions/150/Fury"), b"macho").unwrap();
+        std::fs::write(src.join("Versions/150/XChange"), b"macho").unwrap();
         std::os::unix::fs::symlink("150", src.join("Versions/Current")).unwrap();
 
         let into = root.join("out");
         std::fs::create_dir_all(&into).unwrap();
         copy_tree(&src, &into).unwrap();
 
-        let link = into.join("Fury.app/Versions/Current");
+        let link = into.join("XChange.app/Versions/Current");
         assert!(
             std::fs::symlink_metadata(&link).unwrap().file_type().is_symlink(),
             "the link was followed — a flattened bundle does not launch"

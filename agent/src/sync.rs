@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright 2026 Bogdan Shapovalov and the Fury authors
+// Copyright 2026 Bogdan Shapovalov and the XChange authors
 
 //! Talking to a team server about bundles and locks.
 //!
@@ -35,7 +35,7 @@ const TRANSFER_HINT: &str = "moving this profile's data to or from the team serv
     limits large transfers -- a proxy such as Cloudflare's (set the record to DNS only), \
     an antivirus, or a very slow link. See docs/14-team-server.md";
 
-/// A refusal that came from Cloudflare rather than from the Fury server says so.
+/// A refusal that came from Cloudflare rather than from the XChange server says so.
 fn refused_by(res: &reqwest::Response) -> &'static str {
     let cf = res
         .headers()
@@ -43,7 +43,7 @@ fn refused_by(res: &reqwest::Response) -> &'static str {
         .and_then(|v| v.to_str().ok())
         .is_some_and(|v| v.eq_ignore_ascii_case("cloudflare"));
     if cf {
-        " -- answered by Cloudflare's proxy, not by the Fury server; set the record to DNS only (docs/14)"
+        " -- answered by Cloudflare's proxy, not by the XChange server; set the record to DNS only (docs/14)"
     } else {
         ""
     }
@@ -121,9 +121,9 @@ impl Server {
             anyhow::bail!("the server refused the bundle ({}){}", res.status(), refused_by(&res));
         }
 
-        let wrapped = header(&res, "x-fury-wrapped-key")
+        let wrapped = header(&res, "x-xchange-wrapped-key")
             .ok_or_else(|| anyhow::anyhow!("the server sent a bundle with no key"))?;
-        let version: i32 = header(&res, "x-fury-version")
+        let version: i32 = header(&res, "x-xchange-version")
             .and_then(|v| v.parse().ok())
             .unwrap_or(0);
         let bytes = res.bytes().await.context(TRANSFER_HINT)?.to_vec();
@@ -148,16 +148,16 @@ impl Server {
         let mut req = Self::client()?
             .post(format!("{}/v1/profiles/{profile_id}/bundle", self.url))
             .bearer_auth(&self.token)
-            .header("x-fury-sha256", sha256)
-            .header("x-fury-wrapped-key", wrapped_key)
-            .header("x-fury-base-version", base_version.to_string())
-            .header("x-fury-lock-token", lock_token);
+            .header("x-xchange-sha256", sha256)
+            .header("x-xchange-wrapped-key", wrapped_key)
+            .header("x-xchange-base-version", base_version.to_string())
+            .header("x-xchange-lock-token", lock_token);
         // Which organisation key the bundle's key came from. A server whose
         // key was replaced while this browser ran refuses the bundle with 409,
         // which leaves the work here as an unsent session -- better than a
         // version on the server nobody holding the new key can open.
         if let Some(g) = key_generation {
-            req = req.header("x-fury-key-generation", g.to_string());
+            req = req.header("x-xchange-key-generation", g.to_string());
         }
         let res = req
             .body(bytes.to_vec())

@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright 2026 Bogdan Shapovalov and the Fury authors
+// Copyright 2026 Bogdan Shapovalov and the XChange authors
 
 //! "Only this user, nobody else" — on two systems that mean different things by
 //! it.
 //!
-//! Fury keeps live cookie jars, a bearer token for its own HTTP API, and the
+//! XChange keeps live cookie jars, a bearer token for its own HTTP API, and the
 //! sealed vault under one directory. On Unix that is `chmod 0700` and the story
 //! ends; the mode is on the inode, the kernel enforces it, and a wrong answer
 //! is visible in `ls -l`.
@@ -272,7 +272,7 @@ mod win {
             // shell then refused as a stranger's, and the operator saw
             //
             //     Agent Connection failed: something other than this user's
-            //     agent is holding the Fury pipe
+            //     agent is holding the XChange pipe
             //
             // about the agent it had itself just started. Reported 09.09.2026.
             // Naming the owner makes it the same SID however the process was
@@ -391,7 +391,7 @@ mod win {
     /// Hangs up unless the thing just opened belongs to us.
     ///
     /// The squatting check from `ipc`. A pipe name is machine-wide and
-    /// guessable, so another account can create `\\.\pipe\fury-…` before the
+    /// guessable, so another account can create `\\.\pipe\xchange-…` before the
     /// agent starts and answer the shell's questions. The owner of a kernel
     /// object is set at creation from the creator's token and cannot be forged
     /// by a caller who is not us, so comparing it to our own SID settles it.
@@ -459,7 +459,7 @@ mod win {
             return Err(io::Error::new(
                 io::ErrorKind::PermissionDenied,
                 format!(
-                    "something other than this user's agent is holding the Fury pipe \
+                    "something other than this user's agent is holding the XChange pipe \
                      (it belongs to {held_by}) — refusing to talk to it"
                 ),
             ));
@@ -489,7 +489,7 @@ mod tests {
     fn a_restricted_file_is_still_readable_by_us() {
         // The check that matters on both platforms and the one a wrong DACL
         // fails: locking a file down must not lock US out of it.
-        let dir = std::env::temp_dir().join(format!("fury-perms-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("xchange-perms-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         owner_only_dir(&dir).unwrap();
 
@@ -508,7 +508,7 @@ mod tests {
     #[test]
     fn and_nobody_else_can_read_it() {
         use std::os::unix::fs::PermissionsExt;
-        let dir = std::env::temp_dir().join(format!("fury-perms2-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("xchange-perms2-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let file = dir.join("token");
         std::fs::write(&file, b"secret").unwrap();

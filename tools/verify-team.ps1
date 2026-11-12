@@ -1,12 +1,12 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-# Copyright 2026 Bogdan Shapovalov and the Fury authors
+# Copyright 2026 Bogdan Shapovalov and the XChange authors
 #
 # Does a stranger see my profile, my proxy and my credentials?
 #
 #     powershell -ExecutionPolicy Bypass -File tools\verify-team.ps1
 #
 # The question an operator asks before trusting a shared server, answered
-# against a running fury-server and a real PostgreSQL rather than by reading
+# against a running xchange-server and a real PostgreSQL rather than by reading
 # handlers. Written 16.08.2026, the first time this project's database paths had
 # ever been executed: until that day there was no psql and no docker on any
 # machine it was developed on, so every SQL statement here was compiled and

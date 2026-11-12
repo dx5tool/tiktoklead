@@ -1,6 +1,6 @@
 # detect-suite
 
-The measuring instrument. Everything else in Fury is judged by what this reports.
+The measuring instrument. Everything else in XChange is judged by what this reports.
 
 Built **before** the first Chromium patch on purpose: writing patches first and
 checking later is how a team spends six months on code that does not work.
@@ -14,7 +14,7 @@ See [docs/07](../../docs/07-detection-baseline.md) for the release gate this fee
 | `probe.html` | Open in any browser under test. Runs the probe, shows pass/fail on the critical checks, saves the dump |
 | `collector.py` | Serves `probe.html` and accepts dumps POSTed back into `baselines/` |
 | `capture-chrome.sh` | Captures a baseline with no clicking: launches a browser on a throwaway profile pointed at `probe.html?auto=<name>` |
-| `src/main.rs` | `fury-detect` — diff two dumps, or gate a single one |
+| `src/main.rs` | `xchange-detect` — diff two dumps, or gate a single one |
 | `src/classify.rs` | Decides whether a given difference matters, and in which mode |
 
 ## The one idea worth understanding
@@ -23,7 +23,7 @@ A naive comparison of two fingerprint dumps reports 400 differences and tells yo
 nothing. The question is always *what kind* of difference it is:
 
 - **Value** differences — canvas hash, GPU string, user agent, font list.
-  Between real Chrome and Fury these **should** differ. That is the spoofing working.
+  Between real Chrome and XChange these **should** differ. That is the spoofing working.
 - **Behavioural** differences — an API that exists in one and not the other, a
   getter that stopped being native, a codec that stopped being supported, a
   stability flag that flipped, cross-context consistency breaking.
@@ -36,12 +36,12 @@ Hence two modes:
 # Same browser, two runs. Nothing may differ — instability is worse than no
 # spoofing, because a site that reads a value twice sees one identity on
 # changing hardware.
-fury-detect diff --mode identity run-a.json run-b.json
+xchange-detect diff --mode identity run-a.json run-b.json
 ```
 
 ```bash
-# Real Chrome vs Fury. Values may differ, behaviour may not.
-fury-detect diff --mode spoof baselines/chrome-151-macos-arm.json candidate.json
+# Real Chrome vs XChange. Values may differ, behaviour may not.
+xchange-detect diff --mode spoof baselines/chrome-151-macos-arm.json candidate.json
 ```
 
 ## Capturing a baseline
@@ -60,7 +60,7 @@ It starts the collector if needed, launches the browser on a **throwaway
 profile** — a reference baseline must describe a clean browser, not one shaped by
 whatever extensions the operator installed — waits for the dump, and closes it.
 
-Manual, for browsers you cannot launch with flags (AdsPower profiles, Fury
+Manual, for browsers you cannot launch with flags (AdsPower profiles, XChange
 profiles): start the collector and open the auto URL inside the profile.
 
 ```bash
@@ -87,7 +87,7 @@ whoever captured it.
 Some failures need no baseline because they are internal contradictions:
 
 ```bash
-fury-detect gate candidate.json
+xchange-detect gate candidate.json
 ```
 
 Exits non-zero on failure, so it drops straight into CI.
@@ -152,7 +152,7 @@ either name as its own, so the same works inside a profile. On the hosted copy
 rather than faked from a same-origin frame.
 
 The frame cannot be read from the parent, so it reads itself:
-`probe.html?fury-frame=<nonce>` posts `readFromWindow(window)` up, and the
+`probe.html?xchange-frame=<nonce>` posts `readFromWindow(window)` up, and the
 parent accepts the answer only with that nonce and only from that origin. That
 it is a separate process is not assumed: over CDP, `Target.getTargets` lists
 the frame as a target of type `iframe`, which it never does for the three
@@ -169,10 +169,10 @@ expose a debugging port.
 The catalogue has fourteen machines. Fourteen is a thin crowd, and adding one is
 the single most useful thing somebody with a different computer can do.
 
-Run the probe in an ORDINARY browser on your machine — Chrome, not Fury — then:
+Run the probe in an ORDINARY browser on your machine — Chrome, not XChange — then:
 
 ```bash
-cargo run -p fury-detect -- persona baselines/your-capture.json > persona.json
+cargo run -p xchange-detect -- persona baselines/your-capture.json > persona.json
 ```
 
 It reads the capture, builds a persona, and refuses rather than guesses: no

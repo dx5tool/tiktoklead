@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright 2026 Bogdan Shapovalov and the Fury authors
+// Copyright 2026 Bogdan Shapovalov and the XChange authors
 
 //! Resolving what a user may do, against the database.
 //!
@@ -11,7 +11,7 @@
 //!    the UI can hide what is unavailable — but the UI hiding a button is
 //!    presentation, never enforcement.
 
-use fury_shared::rbac::{effective, OrgRole, Perm, PermSet};
+use xchange_shared::rbac::{effective, OrgRole, Perm, PermSet};
 use uuid::Uuid;
 
 #[derive(Debug, thiserror::Error)]
@@ -145,7 +145,7 @@ pub async fn holds_somewhere(
     role: OrgRole,
     perm: Perm,
 ) -> Result<bool, GuardError> {
-    if fury_shared::rbac::has_implicit_project_access(role) {
+    if xchange_shared::rbac::has_implicit_project_access(role) {
         return Ok(true);
     }
     let grants: Vec<i64> = sqlx::query_scalar(
@@ -202,7 +202,7 @@ pub async fn may_change_proxy(
     let Some(created_by) = created_by else {
         return Ok(None);
     };
-    let implicit = fury_shared::rbac::has_implicit_project_access(role);
+    let implicit = xchange_shared::rbac::has_implicit_project_access(role);
     let mine = created_by == Some(user_id);
     // Asked only when it decides something: it is a query.
     let may_add = !implicit && mine && may_add_proxies(db, user_id, org_id, role).await?;

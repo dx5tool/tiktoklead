@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: AGPL-3.0-or-later
-# Copyright 2026 Bogdan Shapovalov and the Fury authors
+# Copyright 2026 Bogdan Shapovalov and the XChange authors
 
 #
 # Copy the server's source to a box and run the installer. Run from a laptop.
@@ -27,17 +27,17 @@ SSH=(ssh -o StrictHostKeyChecking=accept-new)
 [ -n "$KEY" ] && SSH+=(-i "$KEY")
 
 echo "==> preparing $TARGET"
-"${SSH[@]}" "$TARGET" 'mkdir -p /opt/fury/src'
+"${SSH[@]}" "$TARGET" 'mkdir -p /opt/xchange/src'
 
 echo "==> copying source"
 rsync -az --delete \
     -e "$(printf '%q ' "${SSH[@]}")" \
     --exclude 'target/' \
     ./server ./shared-rs ./shared ./deploy \
-    "$TARGET:/opt/fury/src/"
+    "$TARGET:/opt/xchange/src/"
 
 echo "==> installing"
 # -t so apt and rustup have a terminal; without it rustup writes progress bars
 # into a pipe and some apt prompts hang forever rather than defaulting.
 "${SSH[@]}" -t "$TARGET" \
-    "chmod +x /opt/fury/src/deploy/server-install.sh && HOSTNAME='$HOSTNAME' ALIASES='${ALIASES:-}' FURY_BUILD_FROM_SOURCE=1 /opt/fury/src/deploy/server-install.sh"
+    "chmod +x /opt/xchange/src/deploy/server-install.sh && HOSTNAME='$HOSTNAME' ALIASES='${ALIASES:-}' FURY_BUILD_FROM_SOURCE=1 /opt/xchange/src/deploy/server-install.sh"

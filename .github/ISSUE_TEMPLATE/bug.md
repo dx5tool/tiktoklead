@@ -12,11 +12,11 @@ labels: bug
 
 **Version and platform**
 
-- Fury: <!-- Settings → About -->
+- XChange: <!-- Settings → About -->
 - macOS/Linux version:
 - Built from source, or a release?
 
 **Logs**
 
-The agent prints to stdout when run as `cargo run -p fury-agent -- serve`.
+The agent prints to stdout when run as `cargo run -p xchange-agent -- serve`.
 Please check for proxy credentials before pasting.

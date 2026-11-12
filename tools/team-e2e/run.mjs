@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright 2026 Bogdan Shapovalov and the Fury authors
+// Copyright 2026 Bogdan Shapovalov and the XChange authors
 //
 // Two machines, one team profile, a real server, a real browser.
 //
@@ -9,7 +9,7 @@
 // the way the desktop shell drives it, and through the browser's DevTools
 // protocol for what a person would click.
 //
-// Started by tools/team-e2e/run.sh, which brings up PostgreSQL, fury-server and
+// Started by tools/team-e2e/run.sh, which brings up PostgreSQL, xchange-server and
 // two agents with separate FURY_HOMEs. Run directly, it expects:
 //
 //   FURY_E2E_SERVER   http://127.0.0.1:18080 (FURY_OPEN_SIGNUP=1)
@@ -423,7 +423,7 @@ async function main() {
     // dock.rs: the core runs from a copy named after the profile.
     const { execFileSync } = await import("node:child_process");
     const dock = execFileSync("osascript", ["-e", 'tell application "System Events" to get name of every UI element of list 1 of process "Dock"']).toString();
-    claim(dock.split(",").map((x) => x.trim()).includes("e2e team profile"), "the Dock names the profile, not Fury");
+    claim(dock.split(",").map((x) => x.trim()).includes("e2e team profile"), "the Dock names the profile, not XChange");
   }
   await work(a.cdp, "one");
   await setPref(a.cdp, "bookmark_bar.show_on_all_tabs", true);
@@ -547,7 +547,7 @@ async function main() {
     const run = await launch(t, "A");
     run.cdp.close();
     const v0 = await serverVersion(t);
-    const WARM_SITE = process.env.FURY_E2E_WARM_SITE || "https://httpbin.org/cookies/set?fury_warm=1";
+    const WARM_SITE = process.env.FURY_E2E_WARM_SITE || "https://httpbin.org/cookies/set?xchange_warm=1";
     const out = await ipc("A", "warm.start", {
       profile_ids: [t.profileId],
       names: { [t.profileId]: "e2e team profile" },
@@ -575,7 +575,7 @@ async function main() {
     claim(v1 !== v0, "closing after the warm-up pushed the session");
     const b8 = await launch(t, "B");
     const { cookies } = await b8.cdp.send("Storage.getCookies");
-    claim(cookies.some((k) => k.name === "fury_warm"), "B has the cookie the warm-up collected on A");
+    claim(cookies.some((k) => k.name === "xchange_warm"), "B has the cookie the warm-up collected on A");
     await close(t, b8, "agent");
   }
 

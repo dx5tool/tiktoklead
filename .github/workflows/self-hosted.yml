@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-# Copyright 2026 Bogdan Shapovalov and the Fury authors
+# Copyright 2026 Bogdan Shapovalov and the XChange authors
 #
 # The half that needs a browser.
 #
@@ -11,7 +11,7 @@
 # or a box somebody keeps for it. Nothing here fetches or builds Chromium from
 # scratch; the first build is six hours and is a human decision, not a CI one.
 #
-# Set up such a runner with the label `fury-core`, then:
+# Set up such a runner with the label `xchange-core`, then:
 #   core/build/fetch.sh          once
 #   core/build/apply.sh          per revision
 #   core/build/link-icons.sh
@@ -31,7 +31,7 @@ on:
 jobs:
   verify:
     name: patches do what they claim
-    runs-on: [self-hosted, fury-core]
+    runs-on: [self-hosted, xchange-core]
     steps:
       - uses: actions/checkout@v4
 
@@ -61,7 +61,7 @@ jobs:
 
       # The headline number: the same values from the main frame, a dedicated
       # Worker, a SharedWorker, a ServiceWorker, an AudioWorklet and three kinds
-      # of iframe. For real Chrome it is zero, and for Fury it must also be zero.
+      # of iframe. For real Chrome it is zero, and for XChange it must also be zero.
       - name: cross-context consistency and the release gate
         run: |
           set -euo pipefail

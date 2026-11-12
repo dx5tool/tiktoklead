@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright 2026 Bogdan Shapovalov and the Fury authors
+// Copyright 2026 Bogdan Shapovalov and the XChange authors
 
 //! HTTP handlers.
 //!
@@ -19,11 +19,11 @@ use axum::extract::{Path, Query, State};
 use axum::http::HeaderMap;
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use fury_shared::api::{
+use xchange_shared::api::{
     AcquireLockResponse, GrantRequest, LockInfo, ProfileSummary, ProjectSummary, ProxySummary,
 };
-use fury_shared::overrides::MachineOverrides;
-use fury_shared::rbac::{effective, LaunchRestrictions, Perm, PermSet};
+use xchange_shared::overrides::MachineOverrides;
+use xchange_shared::rbac::{effective, LaunchRestrictions, Perm, PermSet};
 use serde::Deserialize;
 use serde_json::json;
 use uuid::Uuid;
@@ -105,6 +105,10 @@ pub fn routes() -> Router<Arc<AppState>> {
         .route(
             "/v1/profiles/{profile_id}",
             axum::routing::patch(edit_profile).delete(delete_profile),
+        )
+        .route(
+            "/v1/profiles/{profile_id}/notes",
+            axum::routing::patch(edit_profile_notes),
         )
         .route(
             "/v1/projects/{project_id}/profiles",
@@ -194,7 +198,7 @@ async fn login(
     .fetch_optional(&state.db)
     .await?;
     let org_id = org.as_ref().map(|(o, _)| *o);
-    let role = org.as_ref().and_then(|(_, r)| auth::parse_role(r)).unwrap_or(fury_shared::rbac::OrgRole::Member);
+    let role = org.as_ref().and_then(|(_, r)| auth::parse_role(r)).unwrap_or(xchange_shared::rbac::OrgRole::Member);
     let policy = match org_id {
         Some(o) => {
             let mut conn = state.db.acquire().await?;
@@ -551,7 +555,7 @@ pub struct SignupRequest {
 ///
 /// The only way onto a server used to be a code issued from its shell, which is
 /// right for a team someone runs and wrong for a product someone downloads: a
-/// person who installs Fury and wants their profiles on a server had nowhere to
+/// person who installs XChange and wants their profiles on a server had nowhere to
 /// go. This is that path.
 ///
 /// Every sign-up creates its OWN organisation, with the caller as owner. That is
@@ -827,7 +831,7 @@ async fn complete_enrollment(
         if !proven {
             return Err(ApiError::BadRequest(
                 "this server confirms the invited address by email first. If the app did not ask for \
-                 a code from a letter, update Fury to 0.3.12 or later"
+                 a code from a letter, update XChange to 0.3.12 or later"
                     .into(),
             ));
         }
@@ -998,37 +1002,46 @@ async fn list_projects(
     // Resolved in SQL rather than by filtering in Rust: a project the caller
     // cannot see must never be loaded, so that a bug in the mapping code cannot
     // leak one.
-    let rows: Vec<(Uuid, String, String, Option<String>, i64, Option<i64>)> = sqlx::query_as(
-        r#"
-        SELECT p.id, p.name, p.description, p.color,
+    let rows: Vec<(Uuid, String, String, Option<String>, i32, i64, String, Option<i64>)> =
+        sqlx::query_as(
+            r#"
+        SELECT p.id, p.name, p.description, p.color, p.sort_weight,
                (SELECT count(*) FROM profiles f
                  WHERE f.project_id = p.id AND f.deleted_at IS NULL),
+               COALESCE(u.email::text, ''),
                g.permissions
         FROM projects p
         JOIN org_members m ON m.org_id = p.org_id AND m.user_id = $1
+        LEFT JOIN users u ON u.id = p.created_by
         LEFT JOIN project_grants g
                ON g.project_id = p.id AND g.user_id = $1
               AND (g.expires_at IS NULL OR g.expires_at > now())
         WHERE p.deleted_at IS NULL
           AND ($2 OR g.permissions IS NOT NULL)
-        ORDER BY p.name
+        ORDER BY p.sort_weight, p.name
         "#,
-    )
-    .bind(caller.user_id)
-    .bind(fury_shared::rbac::has_implicit_project_access(caller.role))
-    .fetch_all(db.as_mut())
-    .await?;
+        )
+        .bind(caller.user_id)
+        .bind(xchange_shared::rbac::has_implicit_project_access(caller.role))
+        .fetch_all(db.as_mut())
+        .await?;
 
     Ok(Json(
         rows.into_iter()
-            .map(|(id, name, description, color, profile_count, grant)| ProjectSummary {
-                id,
-                name,
-                description,
-                color,
-                profile_count,
-                permissions: effective(caller.role, grant.map(PermSet)).to_vec(),
-            })
+            .map(
+                |(id, name, description, color, sort_weight, profile_count, creator, grant)| {
+                    ProjectSummary {
+                        id,
+                        name,
+                        description,
+                        color,
+                        sort_weight,
+                        creator,
+                        profile_count,
+                        permissions: effective(caller.role, grant.map(PermSet)).to_vec(),
+                    }
+                },
+            )
             .collect(),
     ))
 }
@@ -1037,9 +1050,12 @@ async fn list_projects(
 pub struct ProjectRequest {
     name: String,
     #[serde(default)]
-    description: String,
+    description: Option<String>,
     #[serde(default)]
     color: Option<String>,
+    /// Absent keeps the stored weight on a rename, and means 0 on a create.
+    #[serde(default)]
+    sort_weight: Option<i32>,
 }
 
 /// Make a project.
@@ -1055,7 +1071,7 @@ async fn create_project(
     // handler needs both in the same expression constantly.
     let caller = db.caller;
 
-    use fury_shared::rbac::OrgRole;
+    use xchange_shared::rbac::OrgRole;
     if !matches!(caller.role, OrgRole::Owner | OrgRole::Admin) {
         return Err(ApiError::Denied(Perm::ManageAccess));
     }
@@ -1063,17 +1079,24 @@ async fn create_project(
     if name.is_empty() {
         return Err(ApiError::BadRequest("a project needs a name".into()));
     }
+    if let Some(weight) = req.sort_weight {
+        if weight < 0 {
+            return Err(ApiError::BadRequest("sort weight cannot be negative".into()));
+        }
+    }
+    let description = req.description.unwrap_or_default();
 
     let id = Uuid::now_v7();
     sqlx::query(
-        "INSERT INTO projects (id, org_id, name, description, color, created_by) \
-         VALUES ($1, $2, $3, $4, $5, $6)",
+        "INSERT INTO projects (id, org_id, name, description, color, sort_weight, created_by) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7)",
     )
     .bind(id)
     .bind(caller.org_id)
     .bind(name)
-    .bind(&req.description)
+    .bind(&description)
     .bind(&req.color)
+    .bind(req.sort_weight.unwrap_or(0))
     .bind(caller.user_id)
     .execute(db.as_mut())
     .await?;
@@ -1096,14 +1119,21 @@ async fn rename_project(
     if name.is_empty() {
         return Err(ApiError::BadRequest("a project needs a name".into()));
     }
+    if let Some(weight) = req.sort_weight {
+        if weight < 0 {
+            return Err(ApiError::BadRequest("sort weight cannot be negative".into()));
+        }
+    }
 
     sqlx::query(
-        "UPDATE projects SET name = $1, description = $2, color = $3 \
-         WHERE id = $4 AND org_id = $5 AND deleted_at IS NULL",
+        "UPDATE projects SET name = $1, description = COALESCE($2, description), \
+         color = COALESCE($3, color), sort_weight = COALESCE($4, sort_weight) \
+         WHERE id = $5 AND org_id = $6 AND deleted_at IS NULL",
     )
     .bind(name)
     .bind(&req.description)
     .bind(&req.color)
+    .bind(req.sort_weight)
     .bind(project_id)
     .bind(caller.org_id)
     .execute(db.as_mut())
@@ -1131,7 +1161,7 @@ async fn delete_project(
     // handler needs both in the same expression constantly.
     let caller = db.caller;
 
-    use fury_shared::rbac::OrgRole;
+    use xchange_shared::rbac::OrgRole;
     if !matches!(caller.role, OrgRole::Owner | OrgRole::Admin) {
         return Err(ApiError::Denied(Perm::ManageAccess));
     }
@@ -1425,7 +1455,7 @@ async fn list_all_profiles(
          ORDER BY p.name",
     )
     .bind(caller.user_id)
-    .bind(fury_shared::rbac::has_implicit_project_access(caller.role))
+    .bind(xchange_shared::rbac::has_implicit_project_access(caller.role))
     .fetch_all(db.as_mut())
     .await?;
 
@@ -1541,7 +1571,7 @@ async fn grant_access(
         }
         None => PermSet::from_iter(req.permissions.iter().copied()),
     };
-    let capped = requested.intersect(fury_shared::rbac::role_ceiling(role));
+    let capped = requested.intersect(xchange_shared::rbac::role_ceiling(role));
 
     // $5::timestamptz, not $5. The expiry arrives as an RFC 3339 string — the
     // same shape this API hands out — and Postgres will not coerce text into a
@@ -1609,15 +1639,15 @@ struct DomainListUpsert {
 /// server was built with, then the organisation's own (0016), which may not
 /// reuse a built-in id. A stored persona that no longer parses -- a schema
 /// change since it was added -- is left out rather than failing every lookup.
-pub(crate) async fn org_catalogue(db: &mut sqlx::PgConnection, org_id: Uuid) -> ApiResult<Vec<fury_shared::Persona>> {
-    let mut catalogue = fury_shared::catalogue::all();
+pub(crate) async fn org_catalogue(db: &mut sqlx::PgConnection, org_id: Uuid) -> ApiResult<Vec<xchange_shared::Persona>> {
+    let mut catalogue = xchange_shared::catalogue::all();
     let rows: Vec<(String, serde_json::Value)> =
         sqlx::query_as("SELECT id, persona FROM org_personas WHERE org_id = $1 ORDER BY id")
             .bind(org_id)
             .fetch_all(&mut *db)
             .await?;
     for (id, value) in rows {
-        match serde_json::from_value::<fury_shared::Persona>(value) {
+        match serde_json::from_value::<xchange_shared::Persona>(value) {
             Ok(p) if p.id == id && !catalogue.iter().any(|b| b.id == id) => catalogue.push(p),
             Ok(_) => {}
             Err(e) => tracing::warn!(persona = %id, error = %e, "an organisation persona no longer parses"),
@@ -1660,13 +1690,13 @@ async fn add_org_persona(mut db: auth::Db, Json(req): Json<OrgPersonaRequest>) -
     if !rbac_guard::holds_somewhere(db.as_mut(), caller.user_id, caller.org_id, caller.role, Perm::CreateProfile).await? {
         return Err(ApiError::Denied(Perm::CreateProfile));
     }
-    let persona: fury_shared::Persona = serde_json::from_value(req.persona.clone())
+    let persona: xchange_shared::Persona = serde_json::from_value(req.persona.clone())
         .map_err(|e| ApiError::BadRequest(format!("this is not a persona: {e}")))?;
     let id = persona.id.clone();
     if id.is_empty() || id.len() > 100 || !id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_') {
         return Err(ApiError::BadRequest("a persona id is letters, digits, - and _, up to 100".into()));
     }
-    if fury_shared::catalogue::all().iter().any(|b| b.id == id) {
+    if xchange_shared::catalogue::all().iter().any(|b| b.id == id) {
         return Err(ApiError::BadRequest(format!("{id:?} is already in the built-in catalogue")));
     }
     if let Err(errs) = persona.validate() {
@@ -1683,7 +1713,7 @@ async fn add_org_persona(mut db: auth::Db, Json(req): Json<OrgPersonaRequest>) -
             .await?;
     if let Some(author) = existing {
         let mine = author == Some(caller.user_id);
-        if !mine && !fury_shared::rbac::has_implicit_project_access(caller.role) {
+        if !mine && !xchange_shared::rbac::has_implicit_project_access(caller.role) {
             return Err(ApiError::Refused("persona_not_yours"));
         }
     }
@@ -1712,7 +1742,7 @@ async fn delete_org_persona(mut db: auth::Db, Path(id): Path<String>) -> ApiResu
             .fetch_optional(db.as_mut())
             .await?;
     let Some(author) = author else { return Err(ApiError::NotFound) };
-    if author != Some(caller.user_id) && !fury_shared::rbac::has_implicit_project_access(caller.role) {
+    if author != Some(caller.user_id) && !xchange_shared::rbac::has_implicit_project_access(caller.role) {
         return Err(ApiError::Refused("persona_not_yours"));
     }
     let used: i64 = sqlx::query_scalar(
@@ -1746,7 +1776,7 @@ async fn list_domain_lists(mut db: auth::Db) -> ApiResult<Json<serde_json::Value
     Ok(Json(json!(rows
         .into_iter()
         .map(|(id, name, body, updated_at)| {
-            let parsed = fury_shared::domains::summarise(&body);
+            let parsed = xchange_shared::domains::summarise(&body);
             json!({ "id": id, "name": name, "body": body, "updated_at": updated_at,
                     "domains": parsed.entries, "allow_only": parsed.allow_only, "local": parsed.local })
         })
@@ -1755,14 +1785,14 @@ async fn list_domain_lists(mut db: auth::Db) -> ApiResult<Json<serde_json::Value
 
 async fn upsert_domain_list(mut db: auth::Db, Json(req): Json<DomainListUpsert>) -> ApiResult<Json<serde_json::Value>> {
     let caller = db.caller;
-    if !matches!(caller.role, fury_shared::rbac::OrgRole::Owner | fury_shared::rbac::OrgRole::Admin) {
+    if !matches!(caller.role, xchange_shared::rbac::OrgRole::Owner | xchange_shared::rbac::OrgRole::Admin) {
         return Err(ApiError::Denied(Perm::ManageAccess));
     }
     let name = req.name.trim();
     if name.is_empty() || name.len() > 64 {
         return Err(ApiError::BadRequest("a list needs a name of up to 64 characters".into()));
     }
-    let domains = fury_shared::domains::summarise(&req.body).entries;
+    let domains = xchange_shared::domains::summarise(&req.body).entries;
     if domains == 0 {
         return Err(ApiError::BadRequest("the list names no domains — check the format: a hosts file, an Adblock list, or one domain per line".into()));
     }
@@ -1788,7 +1818,7 @@ async fn upsert_domain_list(mut db: auth::Db, Json(req): Json<DomainListUpsert>)
 
 async fn delete_domain_list(mut db: auth::Db, Path(id): Path<Uuid>) -> ApiResult<Json<serde_json::Value>> {
     let caller = db.caller;
-    if !matches!(caller.role, fury_shared::rbac::OrgRole::Owner | fury_shared::rbac::OrgRole::Admin) {
+    if !matches!(caller.role, xchange_shared::rbac::OrgRole::Owner | xchange_shared::rbac::OrgRole::Admin) {
         return Err(ApiError::Denied(Perm::ManageAccess));
     }
     let n = sqlx::query("DELETE FROM org_domain_lists WHERE id = $1 AND org_id = $2")
@@ -1850,7 +1880,7 @@ async fn list_access_roles(mut db: auth::Db) -> ApiResult<Json<serde_json::Value
 
 async fn upsert_access_role(mut db: auth::Db, Json(req): Json<AccessRoleUpsert>) -> ApiResult<Json<serde_json::Value>> {
     let caller = db.caller;
-    if !matches!(caller.role, fury_shared::rbac::OrgRole::Owner | fury_shared::rbac::OrgRole::Admin) {
+    if !matches!(caller.role, xchange_shared::rbac::OrgRole::Owner | xchange_shared::rbac::OrgRole::Admin) {
         return Err(ApiError::Denied(Perm::ManageAccess));
     }
     let name = req.name.trim();
@@ -1896,7 +1926,7 @@ async fn upsert_access_role(mut db: auth::Db, Json(req): Json<AccessRoleUpsert>)
 
 async fn delete_access_role(mut db: auth::Db, Path(id): Path<Uuid>) -> ApiResult<Json<serde_json::Value>> {
     let caller = db.caller;
-    if !matches!(caller.role, fury_shared::rbac::OrgRole::Owner | fury_shared::rbac::OrgRole::Admin) {
+    if !matches!(caller.role, xchange_shared::rbac::OrgRole::Owner | xchange_shared::rbac::OrgRole::Admin) {
         return Err(ApiError::Denied(Perm::ManageAccess));
     }
     // The grants on it keep the boxes they have and lose the link (ON DELETE
@@ -1942,7 +1972,7 @@ pub(crate) async fn relink(
     let mut n = 0;
     for (project_id, user_id, org_role, bits) in rows {
         let Some(org_role) = auth::parse_role(&org_role) else { continue };
-        let capped = PermSet(bits).intersect(fury_shared::rbac::role_ceiling(org_role));
+        let capped = PermSet(bits).intersect(xchange_shared::rbac::role_ceiling(org_role));
         n += sqlx::query("UPDATE project_grants SET permissions = $3 WHERE project_id = $1 AND user_id = $2")
             .bind(project_id)
             .bind(user_id)
@@ -2225,7 +2255,7 @@ async fn list_audit(
 ) -> ApiResult<Json<Vec<AuditEntry>>> {
     let caller = db.caller;
 
-    use fury_shared::rbac::OrgRole;
+    use xchange_shared::rbac::OrgRole;
     if !matches!(caller.role, OrgRole::Owner | OrgRole::Admin) {
         return Err(ApiError::Denied(Perm::ManageAccess));
     }
@@ -2333,7 +2363,7 @@ async fn list_proxies(
 
     // Who may change which, by the rule edit_proxy and delete_proxy enforce,
     // so the list can say it instead of the Save button.
-    let implicit = fury_shared::rbac::has_implicit_project_access(caller.role);
+    let implicit = xchange_shared::rbac::has_implicit_project_access(caller.role);
     let may_add = !implicit
         && rbac_guard::may_add_proxies(db.as_mut(), caller.user_id, caller.org_id, caller.role).await?;
 
@@ -2371,8 +2401,8 @@ async fn list_proxies(
 /// are. The agent checks again at launch; this is so nobody stores one.
 fn check_overrides(
     overrides: &MachineOverrides,
-    persona: &fury_shared::Persona,
-    catalogue: &[fury_shared::Persona],
+    persona: &xchange_shared::Persona,
+    catalogue: &[xchange_shared::Persona],
 ) -> ApiResult<()> {
     overrides.apply(persona, catalogue).map(|_| ()).map_err(|errs| {
         ApiError::BadRequest(format!(
@@ -2437,7 +2467,7 @@ async fn create_profile(
     if req.name.trim().is_empty() {
         return Err(ApiError::BadRequest("a profile needs a name".into()));
     }
-    let seed = fury_shared::persona::seed::from_hex(&req.fp_seed).ok_or_else(|| {
+    let seed = xchange_shared::persona::seed::from_hex(&req.fp_seed).ok_or_else(|| {
         ApiError::BadRequest("fp_seed must be sixteen hex characters".into())
     })?;
     // An empty timezone or language list is now a decision rather than an
@@ -2455,7 +2485,13 @@ async fn create_profile(
             req.persona_id
         )));
     };
-    check_overrides(&req.overrides, persona, &catalogue)?;
+    // A profile created from now on starts with Real canvas and WebRTC Base on
+    // IP. An older client that sends no overrides at all lands here too; one
+    // that sends an explicit choice, including Noise or Off, is taken as
+    // written.
+    let mut overrides = req.overrides.clone();
+    overrides.apply_new_profile_defaults();
+    check_overrides(&overrides, persona, &catalogue)?;
 
     // The proxy has to be one of ours, and it has to be usable: a profile
     // pointing at a proxy whose credentials were never sealed is exactly the
@@ -2488,14 +2524,14 @@ async fn create_profile(
     .bind(&req.notes)
     .bind(&req.tags)
     .bind(&req.persona_id)
-    .bind(fury_shared::persona::seed::to_bytes(seed).as_slice())
+    .bind(xchange_shared::persona::seed::to_bytes(seed).as_slice())
     .bind(Some(req.timezone.trim()).filter(|t| !t.is_empty()))
     .bind(&req.languages)
     .bind(req.proxy_id)
     .bind(&req.start_urls)
     .bind(caller.user_id)
     .bind(req.status.trim())
-    .bind(sqlx::types::Json(&req.overrides))
+    .bind(sqlx::types::Json(&overrides))
     .execute(db.as_mut())
     .await?;
 
@@ -2655,7 +2691,7 @@ async fn clone_profile(
         .bind(&source.notes)
         .bind(&source.tags)
         .bind(&source.persona_id)
-        .bind(fury_shared::persona::seed::to_bytes(seed).as_slice())
+        .bind(xchange_shared::persona::seed::to_bytes(seed).as_slice())
         .bind(source.timezone.as_deref())
         .bind(&source.languages)
         .bind(source.proxy_id)
@@ -3008,6 +3044,58 @@ async fn edit_profile(
     Ok(Json(json!({ "ok": true })))
 }
 
+#[derive(Deserialize)]
+struct NotesRequest {
+    #[serde(default)]
+    notes: String,
+}
+
+/// Replace the note beside a profile, and nothing else.
+///
+/// The full edit endpoint is the wrong tool for this: it expects the name,
+/// proxy and machine too, so a note typed into the table would carry whatever
+/// those held at listing time and could undo a change made since. This touches
+/// the one column and leaves the disguise alone.
+async fn edit_profile_notes(
+    mut db: auth::Db,
+    Path(profile_id): Path<Uuid>,
+    Json(req): Json<NotesRequest>,
+) -> ApiResult<Json<serde_json::Value>> {
+    // Copied out so that reading it does not borrow the connection: a
+    // handler needs both in the same expression constantly.
+    let caller = db.caller;
+
+    let perms = rbac_guard::permissions_for_profile(db.as_mut(), caller.user_id, profile_id).await?;
+    if perms == PermSet::NONE {
+        return Err(ApiError::NotFound);
+    }
+    if !perms.has(Perm::EditProfile) {
+        return Err(ApiError::Denied(Perm::EditProfile));
+    }
+
+    let updated = sqlx::query(
+        "UPDATE profiles SET notes = $1 WHERE id = $2 AND org_id = $3 AND deleted_at IS NULL",
+    )
+    .bind(&req.notes)
+    .bind(profile_id)
+    .bind(caller.org_id)
+    .execute(db.as_mut())
+    .await?;
+    if updated.rows_affected() == 0 {
+        return Err(ApiError::NotFound);
+    }
+
+    audit(
+        db.as_mut(),
+        &caller,
+        "profile.notes",
+        Some(profile_id),
+        json!({ "chars": req.notes.chars().count() }),
+    )
+    .await?;
+    Ok(Json(json!({ "ok": true })))
+}
+
 /// Send a profile to the trash.
 ///
 /// Soft, always. A profile holds a warmed account, and the difference between
@@ -3165,7 +3253,7 @@ async fn list_trash(
             rfc3339("f.deleted_at"),
         ))
         .bind(caller.user_id)
-        .bind(fury_shared::rbac::has_implicit_project_access(caller.role))
+        .bind(xchange_shared::rbac::has_implicit_project_access(caller.role))
         .fetch_all(db.as_mut())
         .await?;
 
@@ -3340,7 +3428,7 @@ async fn create_invitation(
 ) -> ApiResult<Json<serde_json::Value>> {
     let caller = db.caller;
 
-    use fury_shared::rbac::OrgRole;
+    use xchange_shared::rbac::OrgRole;
     if !matches!(caller.role, OrgRole::Owner | OrgRole::Admin) {
         return Err(ApiError::Denied(Perm::ManageAccess));
     }
@@ -3415,7 +3503,7 @@ async fn hand_over_key(
 ) -> ApiResult<Json<serde_json::Value>> {
     let caller = db.caller;
 
-    use fury_shared::rbac::OrgRole;
+    use xchange_shared::rbac::OrgRole;
     if !matches!(caller.role, OrgRole::Owner | OrgRole::Admin) {
         return Err(ApiError::Denied(Perm::ManageAccess));
     }
@@ -3490,7 +3578,7 @@ async fn set_member_role(
 ) -> ApiResult<Json<serde_json::Value>> {
     let caller = db.caller;
 
-    use fury_shared::rbac::OrgRole;
+    use xchange_shared::rbac::OrgRole;
     if !matches!(caller.role, OrgRole::Owner | OrgRole::Admin) {
         return Err(ApiError::Denied(Perm::ManageAccess));
     }
@@ -3569,7 +3657,7 @@ async fn rotation_material(
     // handler needs both in the same expression constantly.
     let caller = db.caller;
 
-    use fury_shared::rbac::OrgRole;
+    use xchange_shared::rbac::OrgRole;
     if !matches!(caller.role, OrgRole::Owner | OrgRole::Admin) {
         return Err(ApiError::Denied(Perm::ManageAccess));
     }
@@ -3679,7 +3767,7 @@ pub(crate) async fn rotation_bundles(
          WHERE p.org_id = $1 AND position($2::bytea IN b.wrapped_dek) = 1",
     )
     .bind(org_id)
-    .bind(fury_shared::keys::SHARED_BUNDLE_PREFIX.as_bytes())
+    .bind(xchange_shared::keys::SHARED_BUNDLE_PREFIX.as_bytes())
     .fetch_all(db)
     .await
 }
@@ -3744,7 +3832,7 @@ pub struct RotateRequest {
     /// rather than silently left out, so that "this client could not" and
     /// "this client did not know to" stay two different things: the first is
     /// left as it is, the second refuses the rotation. They are already lost
-    /// to the old key -- an earlier rotation by a Fury that did not carry them
+    /// to the old key -- an earlier rotation by an XChange that did not carry them
     /// over -- and refusing would make one such profile block removing anyone
     /// for good.
     #[serde(default)]
@@ -3805,8 +3893,8 @@ pub struct RotatedProxy {
 /// Whether `caller` may remove a member whose role is `target`. The same
 /// line set_member_role draws: the owner is out of reach, and an admin
 /// manages managers and members, not other admins.
-fn may_remove(caller: fury_shared::rbac::OrgRole, target: fury_shared::rbac::OrgRole) -> ApiResult<()> {
-    use fury_shared::rbac::OrgRole;
+fn may_remove(caller: xchange_shared::rbac::OrgRole, target: xchange_shared::rbac::OrgRole) -> ApiResult<()> {
+    use xchange_shared::rbac::OrgRole;
     match (caller, target) {
         (_, OrgRole::Owner) => Err(ApiError::BadRequest("the owner cannot be removed from the organisation".into())),
         (OrgRole::Owner, _) => Ok(()),
@@ -3819,7 +3907,7 @@ fn may_remove(caller: fury_shared::rbac::OrgRole, target: fury_shared::rbac::Org
 #[cfg(test)]
 mod may_remove_tests {
     use super::may_remove;
-    use fury_shared::rbac::OrgRole::*;
+    use xchange_shared::rbac::OrgRole::*;
 
     #[test]
     fn nobody_removes_the_owner_and_an_admin_stays_below_admin() {
@@ -3845,7 +3933,7 @@ async fn rotate_org_key(
     // handler needs both in the same expression constantly.
     let caller = db.caller;
 
-    use fury_shared::rbac::OrgRole;
+    use xchange_shared::rbac::OrgRole;
     if !matches!(caller.role, OrgRole::Owner | OrgRole::Admin) {
         return Err(ApiError::Denied(Perm::ManageAccess));
     }
@@ -3985,12 +4073,12 @@ async fn rotate_org_key(
     // rather than be left under a key nobody will hold.
     let unreadable: std::collections::HashSet<Uuid> = req.unreadable.iter().copied().collect();
     // Said once for all four. The likely cause of a gap is not a bug but a
-    // Fury from before 0.3.20, which rotates members and proxies and knows
+    // XChange from before 0.3.20, which rotates members and proxies and knows
     // nothing else -- and finishing its rotation is what broke profiles.
     let missing = |what: &str, id: Uuid| {
         ApiError::BadRequest(format!(
             "this rotation leaves {what} {id} under the old key, where nobody could open it \
-             again. Update Fury on this machine and remove the member again"
+             again. Update XChange on this machine and remove the member again"
         ))
     };
 
@@ -4025,7 +4113,7 @@ async fn rotate_org_key(
         return Err(missing("bundle", *id));
     }
     for b in &req.bundles {
-        if !b.wrapped_dek.starts_with(fury_shared::keys::SHARED_BUNDLE_PREFIX) || b.wrapped_dek.len() < 60 {
+        if !b.wrapped_dek.starts_with(xchange_shared::keys::SHARED_BUNDLE_PREFIX) || b.wrapped_dek.len() < 60 {
             return Err(ApiError::BadRequest("that is not a wrapped bundle key".into()));
         }
         sqlx::query(
@@ -4265,7 +4353,7 @@ pub(crate) async fn domain_lists_for(
     db: &mut sqlx::PgConnection,
     caller: Uuid,
     profile_id: Uuid,
-) -> ApiResult<Vec<fury_shared::api::DomainListText>> {
+) -> ApiResult<Vec<xchange_shared::api::DomainListText>> {
     let rows: Vec<(String, String)> = sqlx::query_as(
         "SELECT l.name, l.body FROM project_grants g \
          JOIN profiles f ON f.project_id = g.project_id \
@@ -4277,10 +4365,10 @@ pub(crate) async fn domain_lists_for(
     .bind(caller)
     .fetch_all(&mut *db)
     .await?;
-    Ok(rows.into_iter().map(|(name, body)| fury_shared::api::DomainListText { name, body }).collect())
+    Ok(rows.into_iter().map(|(name, body)| xchange_shared::api::DomainListText { name, body }).collect())
 }
 
-async fn launch_spec(db: &mut sqlx::PgConnection, profile_id: Uuid) -> ApiResult<fury_shared::api::LaunchSpec> {
+async fn launch_spec(db: &mut sqlx::PgConnection, profile_id: Uuid) -> ApiResult<xchange_shared::api::LaunchSpec> {
     #[derive(sqlx::FromRow)]
     struct Row {
         name: String,
@@ -4344,8 +4432,8 @@ async fn launch_spec(db: &mut sqlx::PgConnection, profile_id: Uuid) -> ApiResult
     let timezone = row.timezone;
     let languages = (!row.languages.is_empty()).then_some(row.languages);
 
-    let fp_seed = fury_shared::persona::seed::from_bytes(&row.fp_seed)
-        .map(fury_shared::persona::seed::to_hex)
+    let fp_seed = xchange_shared::persona::seed::from_bytes(&row.fp_seed)
+        .map(xchange_shared::persona::seed::to_hex)
         .ok_or_else(|| {
             ApiError::Internal(anyhow::anyhow!(
                 "profile {profile_id} has a {}-byte seed; it must be 8",
@@ -4353,7 +4441,7 @@ async fn launch_spec(db: &mut sqlx::PgConnection, profile_id: Uuid) -> ApiResult
             ))
         })?;
 
-    Ok(fury_shared::api::LaunchSpec {
+    Ok(xchange_shared::api::LaunchSpec {
         profile_id,
         name: row.name,
         persona_id: row.persona_id,
@@ -4369,7 +4457,7 @@ async fn launch_spec(db: &mut sqlx::PgConnection, profile_id: Uuid) -> ApiResult
             .wrapped_cookie_key
             .map(|v| v.iter().map(|b| format!("{b:02x}")).collect()),
         key_generation: row.key_generation,
-        proxy: fury_shared::api::SealedProxy {
+        proxy: xchange_shared::api::SealedProxy {
             id: px_id,
             kind,
             host,
@@ -4592,7 +4680,7 @@ async fn delete_credential(
 pub fn bundle_root() -> std::path::PathBuf {
     std::env::var("FURY_BUNDLE_DIR")
         .map(std::path::PathBuf::from)
-        .unwrap_or_else(|_| std::path::PathBuf::from("/var/lib/fury/bundles"))
+        .unwrap_or_else(|_| std::path::PathBuf::from("/var/lib/xchange/bundles"))
 }
 
 /// Checked once, at startup.
@@ -4773,17 +4861,17 @@ async fn upload_bundle(
         headers.get(name).and_then(|v| v.to_str().ok()).map(str::to_string)
     };
 
-    let wrapped_key = header("x-fury-wrapped-key")
-        .ok_or_else(|| ApiError::BadRequest("missing x-fury-wrapped-key".into()))?;
-    let sha256 = header("x-fury-sha256")
-        .ok_or_else(|| ApiError::BadRequest("missing x-fury-sha256".into()))?;
-    let base_version: i32 = header("x-fury-base-version")
+    let wrapped_key = header("x-xchange-wrapped-key")
+        .ok_or_else(|| ApiError::BadRequest("missing x-xchange-wrapped-key".into()))?;
+    let sha256 = header("x-xchange-sha256")
+        .ok_or_else(|| ApiError::BadRequest("missing x-xchange-sha256".into()))?;
+    let base_version: i32 = header("x-xchange-base-version")
         .and_then(|v| v.parse().ok())
-        .ok_or_else(|| ApiError::BadRequest("missing x-fury-base-version".into()))?;
+        .ok_or_else(|| ApiError::BadRequest("missing x-xchange-base-version".into()))?;
     // The organisation key generation the bundle's key was derived from, as
     // the shell checked it at launch. Absent from an agent older than the
     // check, which is let through as before.
-    let key_generation: Option<i32> = header("x-fury-key-generation").and_then(|v| v.parse().ok());
+    let key_generation: Option<i32> = header("x-xchange-key-generation").and_then(|v| v.parse().ok());
 
     // Holding the lock is what authorises an upload — the permission only says
     // this person may work on the profile at all.
@@ -4795,8 +4883,8 @@ async fn upload_bundle(
     // Her cookies are still on her disk, which is a recovery, not an outcome.
     // The token rather than the user id, so that a second machine signed in as
     // the same person cannot upload over the machine actually running it.
-    let lock_token = header("x-fury-lock-token")
-        .ok_or_else(|| ApiError::BadRequest("missing x-fury-lock-token".into()))?;
+    let lock_token = header("x-xchange-lock-token")
+        .ok_or_else(|| ApiError::BadRequest("missing x-xchange-lock-token".into()))?;
     let holds_lock: bool = sqlx::query_scalar(
         "SELECT EXISTS(SELECT 1 FROM profile_locks \
          WHERE profile_id = $1 AND token_hash = $2 AND expires_at > now())",
@@ -5060,7 +5148,7 @@ async fn download_bundle(
         .is_some_and(|v| v.split(',').any(|t| t.trim() == etag));
     if held {
         let mut response = axum::http::StatusCode::NOT_MODIFIED.into_response();
-        response.headers_mut().insert("x-fury-version", version.to_string().parse().unwrap());
+        response.headers_mut().insert("x-xchange-version", version.to_string().parse().unwrap());
         response.headers_mut().insert(axum::http::header::ETAG, etag.parse().unwrap());
         return Ok(response);
     }
@@ -5082,10 +5170,10 @@ async fn download_bundle(
 
     let mut response = bytes.into_response();
     let headers = response.headers_mut();
-    headers.insert("x-fury-version", version.to_string().parse().unwrap());
+    headers.insert("x-xchange-version", version.to_string().parse().unwrap());
     headers.insert(axum::http::header::ETAG, etag.parse().unwrap());
     headers.insert(
-        "x-fury-wrapped-key",
+        "x-xchange-wrapped-key",
         String::from_utf8_lossy(&wrapped).parse().unwrap(),
     );
     Ok(response)
@@ -5221,7 +5309,7 @@ mod tests {
     }
 
     fn scratch(name: &str) -> std::path::PathBuf {
-        let d = std::env::temp_dir().join(format!("fury-server-{}-{name}", std::process::id()));
+        let d = std::env::temp_dir().join(format!("xchange-server-{}-{name}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
         d

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: AGPL-3.0-or-later
-# Copyright 2026 Bogdan Shapovalov and the Fury authors
+# Copyright 2026 Bogdan Shapovalov and the XChange authors
 #
 # Put the landing page on the server that already serves the team API.
 #
@@ -11,7 +11,7 @@
 # and the page prints the commit it was built from — so it would say so, in
 # public, at the bottom of the page.
 #
-# WHERE IT LANDS. /var/www/fury on the host, served by Caddy from its own
+# WHERE IT LANDS. /var/www/xchange on the host, served by Caddy from its own
 # file, /etc/caddy/conf.d/landing.caddy, which this script rewrites every
 # time. Not the Caddyfile: that one belongs to deploy/server-install.sh, which
 # rewrites it on every server update, and on 01.10.2026 took a block this
@@ -24,8 +24,8 @@ set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 target="${1:-root@204.168.178.23}"
-key="${FURY_SSH_KEY:-$HOME/.ssh/fury_server}"
-root="/var/www/fury"
+key="${FURY_SSH_KEY:-$HOME/.ssh/xchange_server}"
+root="/var/www/xchange"
 
 echo "==> building"
 python3 "$here/build.py"
@@ -50,8 +50,8 @@ cat > /etc/caddy/conf.d/landing.caddy <<'BLOCK'
 # The landing page, written by site/deploy.sh. Static files, no proxy: it must
 # not be able to reach the API by accident, and the API block answers on its
 # own name.
-furybrowser.dev, www.furybrowser.dev, site.204-168-178-23.sslip.io {
-    root * /var/www/fury
+xchange.dev, www.xchange.dev, site.204-168-178-23.sslip.io {
+    root * /var/www/xchange
     file_server
     encode gzip zstd
 
@@ -73,4 +73,4 @@ REMOTE
 
 echo
 echo "live:  https://site.204-168-178-23.sslip.io/"
-echo "       https://furybrowser.dev/"
+echo "       https://xchange.dev/"

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright 2026 Bogdan Shapovalov and the Fury authors
+// Copyright 2026 Bogdan Shapovalov and the XChange authors
 
 //! Talking to the local agent.
 //!
@@ -47,6 +47,12 @@ pub enum AgentError {
 pub struct LocalProject {
     pub id: String,
     pub name: String,
+    /// Lower sorts first; equal weights by name.
+    #[serde(default)]
+    pub sort_weight: i64,
+    /// The device that made it; empty on rows from before the column.
+    #[serde(default)]
+    pub creator: String,
     pub profile_count: i64,
 }
 
@@ -110,7 +116,7 @@ pub struct LocalProfile {
     #[serde(default)]
     pub languages: Option<Vec<String>>,
     #[serde(default)]
-    pub overrides: fury_shared::overrides::MachineOverrides,
+    pub overrides: xchange_shared::overrides::MachineOverrides,
     /// Domain lists the relay applies. The first UI for them (12.09.2026)
     /// showed every box unchecked because this field was not carried here.
     #[serde(default)]
@@ -122,16 +128,16 @@ pub struct LocalProfile {
 
 /// Where the agent is, and where its data lives.
 ///
-/// Both come from `fury_platform::dirs`, which the agent also calls. That is
+/// Both come from `xchange_platform::dirs`, which the agent also calls. That is
 /// not tidiness: the shell and the agent find each other by computing the same
 /// address from the same inputs and there is no discovery step, so a copy of
 /// this logic in each program is a copy that can drift into a shell reporting
 /// "the agent is not running" against an agent that is.
 ///
 /// It had already drifted. This file's copy had no Windows branch at all.
-pub use fury_platform::dirs::ipc_endpoint;
+pub use xchange_platform::dirs::ipc_endpoint;
 #[cfg(test)]
-use fury_platform::dirs::{data_dir, short_tag};
+use xchange_platform::dirs::{data_dir, short_tag};
 
 /// How long to wait for the agent's answer to one method.
 ///
@@ -147,11 +153,23 @@ use fury_platform::dirs::{data_dir, short_tag};
 fn answer_within(method: &str) -> Duration {
     match method {
         "profile.launch" => Duration::from_secs(360),
+        // A login launches the profile (CDP endpoint wait included), checks the
+        // site, writes cookies, types a username and password with human
+        // timing, and waits for the site to answer. The browser stays open on
+        // purpose; the wait here only has to outlast the work, not the window.
+        "profile.login" => Duration::from_secs(300),
         // Stopping a team profile uploads it, under the same five-minute bound
         // the agent gives the download. Thirty seconds answered "the agent
         // did not answer" for a large profile on a slow link while the upload
         // went on.
         "profile.stop" => Duration::from_secs(360),
+        // A profile can be gigabytes, and a zip is written at disk speed.
+        // Thirty seconds answered "the agent did not answer" for a cookie
+        // export long ago; this one copies the whole profile.
+        "profiles.export" => Duration::from_secs(3600),
+        // Unpacking a zip and writing several profiles to disk is the same
+        // kind of wait, and the caller should not lose an import to a clock.
+        "profiles.import" => Duration::from_secs(3600),
         _ => Duration::from_secs(30),
     }
 }
@@ -159,7 +177,7 @@ fn answer_within(method: &str) -> Duration {
 /// One request, one response.
 pub async fn call<T: DeserializeOwned>(method: &str, params: Value) -> Result<T, AgentError> {
     let endpoint = ipc_endpoint();
-    let stream = match fury_platform::Stream::connect(&endpoint).await {
+    let stream = match xchange_platform::Stream::connect(&endpoint).await {
         Ok(s) => s,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound
             || e.kind() == std::io::ErrorKind::ConnectionRefused =>
@@ -205,6 +223,13 @@ pub async fn call<T: DeserializeOwned>(method: &str, params: Value) -> Result<T,
     serde_json::from_value(ok.clone()).map_err(|e| AgentError::Protocol(e.to_string()))
 }
 
+/// Serialises the spawn paths in [`ensure_running`], so concurrent callers on a
+/// cold start produce one agent rather than several racing for one pipe.
+fn start_lock() -> &'static tokio::sync::Mutex<()> {
+    static LOCK: std::sync::OnceLock<tokio::sync::Mutex<()>> = std::sync::OnceLock::new();
+    LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
+}
+
 /// Starts the agent if nothing answers.
 ///
 /// The alternative — telling the operator to open a terminal — would make the
@@ -212,7 +237,7 @@ pub async fn call<T: DeserializeOwned>(method: &str, params: Value) -> Result<T,
 /// keeps holding locks and relays after this window closes, which is the whole
 /// reason it is a separate process.
 pub async fn ensure_running() -> Result<(), AgentError> {
-    if fury_platform::Stream::connect(&ipc_endpoint()).await.is_ok() {
+    if xchange_platform::Stream::connect(&ipc_endpoint()).await.is_ok() {
         if !retire_other_version().await {
             return Ok(());
         }
@@ -221,6 +246,16 @@ pub async fn ensure_running() -> Result<(), AgentError> {
     // one may be the old bundle on its way out. See update::installing.
     if crate::update::installing() {
         return Err(AgentError::NotRunning);
+    }
+
+    // One starter. The window asks for the agent from several commands at once
+    // on a cold start — shell_state, profiles, personas — and each used to see
+    // no listener and spawn its own copy. Two agents then race for the same
+    // named pipe; one wins and the other exits, which wastes seconds of the
+    // start-up window and leaves an error in the log for no reason.
+    let _starting = start_lock().lock().await;
+    if xchange_platform::Stream::connect(&ipc_endpoint()).await.is_ok() {
+        return Ok(());
     }
 
     let binary = agent_binary().ok_or(AgentError::NotRunning)?;
@@ -235,7 +270,7 @@ pub async fn ensure_running() -> Result<(), AgentError> {
     // path, no content, no obvious way to understand it, and closing it kills
     // the agent every profile depends on.
     //
-    // The cause is that fury-agent is a console-subsystem binary -- correct, it
+    // The cause is that xchange-agent is a console-subsystem binary -- correct, it
     // is also a CLI -- and Windows gives a console to any console binary a GUI
     // process starts unless told otherwise. Redirecting the three standard
     // streams to null, which this already did, does not prevent the window: the
@@ -259,10 +294,15 @@ pub async fn ensure_running() -> Result<(), AgentError> {
     cmd.spawn()?;
 
     // The socket appears a moment after the process does. Poll rather than
-    // sleep once: on a cold start the database has to be created first.
-    for _ in 0..40 {
+    // sleep once: on a cold start the database has to be opened and the
+    // vault key read first. Four seconds was measured too short on a debug
+    // build, where those cost about eight before the pipe exists — the window
+    // said the agent was not running while it was, and the next poll started a
+    // second one. Twenty seconds is the bound; a healthy start returns as soon
+    // as the pipe answers.
+    for _ in 0..200 {
         tokio::time::sleep(Duration::from_millis(100)).await;
-        if fury_platform::Stream::connect(&ipc_endpoint()).await.is_ok() {
+        if xchange_platform::Stream::connect(&ipc_endpoint()).await.is_ok() {
             return Ok(());
         }
     }
@@ -299,7 +339,7 @@ async fn retire_other_version() -> bool {
     }
     for _ in 0..30 {
         tokio::time::sleep(Duration::from_millis(100)).await;
-        if fury_platform::Stream::connect(&ipc_endpoint()).await.is_err() {
+        if xchange_platform::Stream::connect(&ipc_endpoint()).await.is_err() {
             return true;
         }
     }
@@ -316,7 +356,7 @@ pub(crate) fn agent_binary() -> Option<PathBuf> {
     let beside = std::env::current_exe()
         .ok()?
         .parent()?
-        .join(if cfg!(windows) { "fury-agent.exe" } else { "fury-agent" });
+        .join(if cfg!(windows) { "xchange-agent.exe" } else { "xchange-agent" });
     beside.exists().then_some(beside)
 }
 
@@ -331,7 +371,7 @@ mod tests {
         // hand-kept copies were, and what this replaced.
         assert_eq!(
             ipc_endpoint().to_string(),
-            fury_platform::ipc::endpoint(&short_tag(&data_dir())).to_string()
+            xchange_platform::ipc::endpoint(&short_tag(&data_dir())).to_string()
         );
     }
 }

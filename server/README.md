@@ -1,12 +1,12 @@
-# fury-server
+# xchange-server
 
 Self-hosted coordination backend. Deliberately dumb: it stores ciphertext and
 metadata, resolves permissions, and streams bundles to and from `FURY_BUNDLE_DIR`
 on its own disk — there is no object storage and no presigned URL. It cannot
 decrypt a profile bundle, which is what makes running it on a cheap VPS
 acceptable. Standing one up for a team is [docs/13](../docs/13-self-hosting.md);
-the first user is invited from the shell (`fury-server invite`, or
-`docker compose exec server fury-server invite …` under compose), because an
+the first user is invited from the shell (`xchange-server invite`, or
+`docker compose exec server xchange-server invite …` under compose), because an
 empty server has nobody to press the button.
 
 ## Running it locally
@@ -15,11 +15,11 @@ No Docker needed. Any PostgreSQL 16+ will do; these are the exact steps used to
 verify the API:
 
 ```bash
-initdb -D /tmp/furypg -U fury --auth=trust
+initdb -D /tmp/xchangepg -U xchange --auth=trust
 ```
 
 ```bash
-pg_ctl -D /tmp/furypg -o "-p 55432 -k /tmp/fpg -c listen_addresses=127.0.0.1" start
+pg_ctl -D /tmp/xchangepg -o "-p 55432 -k /tmp/fpg -c listen_addresses=127.0.0.1" start
 ```
 
 The socket directory has to be short — a Unix socket path is capped at 103
@@ -27,11 +27,11 @@ bytes, and a long temp path fails with "could not create any Unix-domain
 sockets", which reads like a permissions problem and is not.
 
 ```bash
-createdb -h 127.0.0.1 -p 55432 -U fury fury
+createdb -h 127.0.0.1 -p 55432 -U xchange xchange
 ```
 
 ```bash
-DATABASE_URL=postgres://fury@127.0.0.1:55432/fury BIND=127.0.0.1:8901 cargo run -p fury-server
+DATABASE_URL=postgres://xchange@127.0.0.1:55432/xchange BIND=127.0.0.1:8901 cargo run -p xchange-server
 ```
 
 **Let the server run the migrations.** Applying them by hand with `psql` leaves

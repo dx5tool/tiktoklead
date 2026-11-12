@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright 2026 Bogdan Shapovalov and the Fury authors
+// Copyright 2026 Bogdan Shapovalov and the XChange authors
 
 //! Handing one profile to one person, across organisations.
 //!
@@ -46,7 +46,7 @@ use crate::api::audit;
 use crate::error::{ApiError, ApiResult};
 use crate::auth;
 use crate::rbac_guard;
-use fury_shared::rbac::{Perm, PermSet};
+use xchange_shared::rbac::{Perm, PermSet};
 
 /// Somebody to share with, found by their whole address.
 #[derive(Deserialize)]

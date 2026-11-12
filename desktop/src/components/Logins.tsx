@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright 2026 Bogdan Shapovalov and the Fury authors
+// Copyright 2026 Bogdan Shapovalov and the XChange authors
 //
 // The logins that belong to a profile, and the two-factor codes for them.
 //
@@ -14,9 +14,11 @@
 // that timing is measurable from the page. It is shown; a person pastes it.
 
 import { useEffect, useRef, useState } from "react";
+import { Cookie } from "lucide-react";
 
-import { api, type Credential, type TotpCode } from "../api";
+import { api, type Credential, type Origin, type TotpCode } from "../api";
 import { useI18n } from "../i18n";
+import { IconButton } from "./Icon";
 
 function blank(profileId: string): Credential {
   return {
@@ -27,11 +29,12 @@ function blank(profileId: string): Credential {
     username: null,
     password: null,
     totp: null,
+    cookie: null,
     notes: "",
   };
 }
 
-export function Logins({ profileId }: { profileId: string }) {
+export function Logins({ profileId, origin }: { profileId: string; origin: Origin }) {
   const { t, say } = useI18n();
   const [rows, setRows] = useState<Credential[]>([]);
   const [editing, setEditing] = useState<Credential | null>(null);
@@ -40,7 +43,7 @@ export function Logins({ profileId }: { profileId: string }) {
 
   const load = async () => {
     try {
-      setRows(await api.credentials(profileId));
+      setRows(await api.credentials(profileId, origin));
       setError(null);
     } catch (e) {
       setError(say(e));
@@ -50,12 +53,12 @@ export function Logins({ profileId }: { profileId: string }) {
   useEffect(() => {
     void load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [profileId]);
+  }, [profileId, origin]);
 
   const save = async (c: Credential) => {
     setBusy(true);
     try {
-      await api.saveCredential(c);
+      await api.saveCredential(c, origin);
       setEditing(null);
       await load();
     } catch (e) {
@@ -79,7 +82,8 @@ export function Logins({ profileId }: { profileId: string }) {
 
       {error && (
         <div className="notice" role="status">
-          {error}
+          <IconButton icon="close" label={t("app.dismiss")} onClick={() => setError(null)} />
+          <span className="noticeText">{error}</span>
           <button className="ghost" onClick={() => setError(null)}>
             {t("app.dismiss")}
           </button>
@@ -94,7 +98,7 @@ export function Logins({ profileId }: { profileId: string }) {
           credential={c}
           onEdit={() => setEditing(c)}
           onDelete={async () => {
-            await api.deleteCredential(c.id, profileId);
+            await api.deleteCredential(c.id, profileId, origin);
             await load();
           }}
         />
@@ -143,6 +147,15 @@ function LoginRow({
         {credential.password && (
           <button className="ghost" onClick={() => setShown(!shown)}>
             {shown ? t("cred.hide") : t("cred.show")}
+          </button>
+        )}
+        {!credential.unreadable && credential.cookie && (
+          <button
+            className="ghost"
+            title={t("cred.copyCookie")}
+            onClick={() => void navigator.clipboard.writeText(credential.cookie ?? "")}
+          >
+            <Cookie size={13} />
           </button>
         )}
         {credential.unreadable ? (
@@ -276,6 +289,18 @@ function LoginForm({
         {/* Says both shapes because people have both: the string beside the QR
             code, and the link behind it. */}
         <span className="muted">{t("cred.totpHint")}</span>
+      </label>
+      <label>
+        {t("cred.cookie")}
+        <textarea
+          rows={2}
+          value={draft.cookie ?? ""}
+          onChange={(e) => set("cookie", e.target.value)}
+          placeholder="SPC_F=…; SPC_EC=…"
+          spellCheck={false}
+          style={{ fontFamily: "var(--mono)", fontSize: 12 }}
+        />
+        <span className="muted">{t("cred.cookieHint")}</span>
       </label>
       <div className="rowEnd">
         <button type="button" className="ghost" onClick={onCancel}>

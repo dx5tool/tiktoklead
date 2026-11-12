@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright 2026 Bogdan Shapovalov and the Fury authors
+// Copyright 2026 Bogdan Shapovalov and the XChange authors
 
 //! The persona catalogue.
 //!
@@ -488,7 +488,7 @@ pub fn host_os() -> Option<&'static str> {
 /// `pick_weighted` among the machines that run `os`, which is what a profile
 /// made on this computer should get: `pick_weighted_on(roll, host_os())`.
 ///
-/// A machine of another OS is not hidden by Fury's patches. Measured on
+/// A machine of another OS is not hidden by XChange's patches. Measured on
 /// demo.fingerprint.com on 24.10.2026: a Windows profile on a Mac and a macOS
 /// profile on Windows were both flagged (tampering 0.99, anti-detect browser,
 /// anomaly 1) with any screen, while the same profiles on their own OS passed.

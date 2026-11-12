@@ -47,7 +47,7 @@ out_dir="${OUT_DIR:-$src/out/macos-arm64.noindex}"
 identity=""
 adhoc=0
 notarize=0
-keychain_profile="${FURY_NOTARY_PROFILE:-fury-notary}"
+keychain_profile="${FURY_NOTARY_PROFILE:-xchange-notary}"
 # Or an App Store Connect API key, used directly. The stored profile vanished
 # from the keychain after a reboot on 09.10.2026 while a release was half
 # signed; the key it was made from still worked. Set all three to use it:
@@ -74,7 +74,7 @@ usage: sign-core.sh [--identity NAME | --adhoc] [--notarize] [--out DIR]
 
 Store the notary credentials once, in the keychain, not in this script:
 
-  xcrun notarytool store-credentials fury-notary \
+  xcrun notarytool store-credentials xchange-notary \
       --apple-id you@example.com \
       --team-id TEAMID \
       --password <app-specific-password>
@@ -206,7 +206,7 @@ args=(
   --output "$staged"
   --identity "$identity"
   # The .dmg the pipeline can build is Chrome's, with Chrome's background image
-  # and Chrome's layout. Fury ships a tarball instead (package.sh), so the
+  # and Chrome's layout. XChange ships a tarball instead (package.sh), so the
   # packaging step is skipped and only the signed bundle is taken.
   --disable-packaging
 )

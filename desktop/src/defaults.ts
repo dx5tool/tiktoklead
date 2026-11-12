@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright 2026 Bogdan Shapovalov and the Fury authors
+// Copyright 2026 Bogdan Shapovalov and the XChange authors
 
 /** The server offered to somebody who has not got one.
  *
- *  Fury is self-hosted and the first screen said so, with two buttons that both
+ *  XChange is self-hosted and the first screen said so, with two buttons that both
  *  needed an address: connect to a server, or make an account on one. A person
  *  with neither read that as "so where do I get a server?" -- which is a fair
  *  question and had no answer in the application.
@@ -34,7 +34,7 @@
  *  installs that saved it keep working; new installs get the domain. If the
  *  server ever moves, this is the only line in the desktop to change.
  */
-export const DEFAULT_SERVER = "srv.furybrowser.dev";
+export const DEFAULT_SERVER = "srv.xchange.dev";
 
 /** Servers this project runs, under every name they answer to. Their owners
  *  are not the people using them, so a "your server is behind" notice is not

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright 2026 Bogdan Shapovalov and the Fury authors
+// Copyright 2026 Bogdan Shapovalov and the XChange authors
 
 import { IconButton } from "./Icon";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -296,7 +296,7 @@ export function ExtensionsView({ profiles }: { profiles: Profile[] }) {
       {error && <div className="notice warnBar">{error}</div>}
 
       <h2 className="sectionTitle">{t("exv.catalogue")}</h2>
-      <p className="hint" style={{ maxWidth: 720 }}>{t("exv.catalogueHint")}</p>
+      <p className="hint ellipsis" title={t("exv.catalogueHint")}>{t("exv.catalogueHint")}</p>
       {catalogue.length > 0 && (
         <table className="grid" style={{ marginBottom: "var(--s-4)" }}>
           <tbody>

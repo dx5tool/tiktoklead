@@ -1,15 +1,15 @@
 [package]
-name = "fury-agent"
+name = "xchange-agent"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
 [dependencies]
-fury-shared = { path = "../shared-rs" }
+xchange-shared = { path = "../shared-rs" }
 # Named pipes, DACLs and the config carrier. Its own crate so that
 # `cargo check --target x86_64-pc-windows-msvc` runs on a Mac, which it cannot
 # do for this one — see platform-rs/src/lib.rs.
-fury-platform = { path = "../platform-rs" }
+xchange-platform = { path = "../platform-rs" }
 anyhow.workspace = true
 thiserror.workspace = true
 serde.workspace = true
@@ -47,6 +47,9 @@ sqlx = { version = "0.8", default-features = false, features = [
 ] }
 tar = "0.4"
 flate2 = "1"
+# Zip thường cho bản export của người dùng — không phải bundle niêm phong.
+# `deflate-flate2` để không kéo zlib-rs/zopfli: flate2 đã có trong graph.
+zip = { version = "4", default-features = false, features = ["deflate-flate2"] }
 # The .xz half of a core archive is decoded here rather than by whatever tar
 # the machine happens to have -- see unpack() in install_core.rs. Pure Rust on
 # purpose: the C liblzma would be faster and would put a C toolchain between
@@ -92,6 +95,18 @@ futures-util = { version = "0.3.33", default-features = false, features = ["sink
 # Windows, which has no /usr/share/zoneinfo, gets the same answer. See farm.rs.
 chrono = { version = "0.4.45", default-features = false, features = ["clock", "std"] }
 chrono-tz = "0.10.4"
+# The jar itself, without the browser: a local profile on Windows encrypts its
+# cookies with AES-256-GCM (cookie_store.rs). Pure Rust, like the rest of the
+# crypto in this crate.
+aes-gcm = "0.10"
+
+# DPAPI, to unwrap the key the browser stores in `Local State`. Windows only:
+# on macOS the equivalent key lives in the Keychain and this path is not used.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Security_Cryptography",
+] }
 
 [dev-dependencies]
 # `start_paused`, for the relay's handshake timeout. The bound is eight seconds

@@ -30,6 +30,6 @@ one is taking responsibility for somebody else's service.
    `summary.ru`, `category` (`blocking` · `cookies` · `auth` · `appearance` ·
    `tools`), `homepage`, `licence`, `added_by` (your GitHub handle),
    `added_on`.
-3. `cargo test -p fury-shared extensions` — the catalogue is parsed and checked
+3. `cargo test -p xchange-shared extensions` — the catalogue is parsed and checked
    in CI: ids well-formed and unique, both summaries present, category known.
 4. Open a pull request. The PR template has a section for it.

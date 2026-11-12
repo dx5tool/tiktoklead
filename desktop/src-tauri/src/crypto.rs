@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright 2026 Bogdan Shapovalov and the Fury authors
+// Copyright 2026 Bogdan Shapovalov and the XChange authors
 
 //! Where the password becomes keys.
 //!
-//! Thin: the primitives live in `fury_shared::keys`, so the agent and the shell
+//! Thin: the primitives live in `xchange_shared::keys`, so the agent and the shell
 //! cannot drift into two incompatible notions of what a wrapped key is. What
 //! this file adds is the base64 boundary with the server and the rule about
 //! where the results are allowed to live.
@@ -14,7 +14,7 @@
 //! the ORK opens every proxy credential in the organisation. The webview asks
 //! for *effects* — decrypt this proxy, seal this bundle — and gets results.
 
-use fury_shared::keys;
+use xchange_shared::keys;
 
 use base64::Engine;
 
@@ -151,7 +151,7 @@ pub fn open_proxy_credentials(
     org_key: &[u8; 32],
     credentials_enc: &[u8],
     wrapped_dek: &[u8],
-) -> anyhow::Result<fury_shared::api::ProxyCredentials> {
+) -> anyhow::Result<xchange_shared::api::ProxyCredentials> {
     let dek = key32("the proxy data key", keys::unwrap(org_key, wrapped_dek)?)?;
     let plain = keys::unwrap(&dek, credentials_enc)?;
     Ok(serde_json::from_slice(&plain)?)
@@ -161,7 +161,7 @@ pub fn open_proxy_credentials(
 #[allow(dead_code)] // Reached once the team-mode proxy form lands.
 pub fn seal_proxy_credentials(
     org_key: &[u8; 32],
-    credentials: &fury_shared::api::ProxyCredentials,
+    credentials: &xchange_shared::api::ProxyCredentials,
 ) -> anyhow::Result<(Vec<u8>, Vec<u8>)> {
     // A fresh data key per proxy, so two proxies sharing a password do not
     // produce related ciphertext, and revoking one reveals nothing about
@@ -203,7 +203,7 @@ pub fn open_credential(
 
 /// The key the agent is given for one profile's bundle.
 ///
-/// Not the organisation key. See `fury_shared::keys::subkey`.
+/// Not the organisation key. See `xchange_shared::keys::subkey`.
 pub fn profile_key(org_key: &[u8; 32], profile_id: &str) -> [u8; 32] {
     keys::subkey(org_key, "fury-profile-v1", profile_id)
 }
@@ -398,8 +398,8 @@ mod tests {
 
     #[test]
     fn proxy_credentials_survive_the_round_trip_and_travel_sealed() {
-        let ork = fury_shared::keys::new_org_key();
-        let creds = fury_shared::api::ProxyCredentials {
+        let ork = xchange_shared::keys::new_org_key();
+        let creds = xchange_shared::api::ProxyCredentials {
             username: Some("bob".into()),
             password: Some("s3cr3t-proxy-password".into()),
         };
@@ -418,7 +418,7 @@ mod tests {
 
         // Another organisation gets nothing.
         assert!(open_proxy_credentials(
-            &fury_shared::keys::new_org_key(),
+            &xchange_shared::keys::new_org_key(),
             &credentials_enc,
             &wrapped_dek
         )
@@ -427,9 +427,9 @@ mod tests {
 
     #[test]
     fn rotating_moves_a_data_key_without_touching_what_it_protects() {
-        let old = fury_shared::keys::new_org_key();
-        let new = fury_shared::keys::new_org_key();
-        let creds = fury_shared::api::ProxyCredentials {
+        let old = xchange_shared::keys::new_org_key();
+        let new = xchange_shared::keys::new_org_key();
+        let creds = xchange_shared::api::ProxyCredentials {
             username: Some("bob".into()),
             password: Some("s3cr3t".into()),
         };
@@ -451,7 +451,7 @@ mod tests {
 
     #[test]
     fn one_profiles_key_does_not_open_another() {
-        let ork = fury_shared::keys::new_org_key();
+        let ork = xchange_shared::keys::new_org_key();
         assert_ne!(profile_key(&ork, "profile-a"), profile_key(&ork, "profile-b"));
         assert_ne!(profile_key(&ork, "profile-a"), ork);
     }
@@ -512,7 +512,7 @@ mod credential_tests {
         // implementation rather than by running this one and writing down what
         // it said, which would assert only that the code has not changed.
         let totp =
-            fury_shared::totp::Totp::parse(back.get("totp").unwrap().as_str().unwrap()).unwrap();
+            xchange_shared::totp::Totp::parse(back.get("totp").unwrap().as_str().unwrap()).unwrap();
         assert_eq!(totp.code_at(59), "996554");
         assert_eq!(totp.code_at(1234567890), "742275");
 

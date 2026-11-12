@@ -1,17 +1,17 @@
-# FURY ANTIDETECT BROWSER — SIMPRINT UI REDESIGN
+# XCHANGE ANTIDETECT BROWSER — SIMPRINT UI REDESIGN
 > **Tài liệu Handoff & Kiến Trúc Dự Án dành cho AI LLM / Developer tiếp quản**  
 > *Phiên bản: v0.4.20 | Nhánh: `custom/simprint-ui` | Cập nhật gần nhất: 04/11/2026*
 >
-> Đã merge upstream Fury `v0.4.20`: Farm schedule, WireGuard, Team/server, core `0.4.14` và các fix bảo mật đã có trong source. Giao diện Simprint được giữ nguyên.
+> Đã merge upstream XChange `v0.4.20`: Farm schedule, WireGuard, Team/server, core `0.4.14` và các fix bảo mật đã có trong source. Giao diện Simprint được giữ nguyên.
 
 ---
 
 ## 1. TỔNG QUAN DỰ ÁN
 
-### 1.1. Fury Antidetect Browser là gì?
-Fury (gốc: [furyteamtop/fury-antidetect-browser](https://github.com/furyteamtop/fury-antidetect-browser)) là trình duyệt chống phát hiện danh tính (Antidetect Browser) mã nguồn mở cấp độ doanh nghiệp dành cho đội ngũ (teams) và cá nhân:
+### 1.1. XChange Antidetect Browser là gì?
+XChange (gốc: [dx5tool/fury-nomaster](https://github.com/dx5tool/fury-nomaster)) là trình duyệt chống phát hiện danh tính (Antidetect Browser) mã nguồn mở cấp độ doanh nghiệp dành cho đội ngũ (teams) và cá nhân:
 - **Tầng Chromium C++ (`core/`)**: Bản vá sâu vào Chromium Core để can thiệp giả lập vân tay trình duyệt phần cứng: Canvas spoofing, WebGL vendor/renderer, AudioContext latency, Client Rects, User-Agent, Navigator, Fonts, v.v. (không dùng extension injection để tránh bị phát hiện).
-- **Tầng Daemon Rust (`agent/`)**: Daemon tiến trình `fury-agent` chạy ngầm quản lý profiles, proxy routing (HTTP/SOCKS5/WireGuard), cookie jar, profile lock heartbeat và thực hiện CLI automation.
+- **Tầng Daemon Rust (`agent/`)**: Daemon tiến trình `xchange-agent` chạy ngầm quản lý profiles, proxy routing (HTTP/SOCKS5/WireGuard), cookie jar, profile lock heartbeat và thực hiện CLI automation.
 - **Tầng Desktop Shell (`desktop/`)**: Ứng dụng desktop xây dựng trên **Tauri v2 + React 19 + TypeScript + Vite**.
 
 ### 1.2. Mục tiêu nhánh `custom/simprint-ui`
@@ -27,21 +27,21 @@ Bất kỳ AI LLM hoặc Developer nào chỉnh sửa dự án này **BẮT BU�
    - **Tuyệt đối KHÔNG sửa đổi** các thư mục C++ Core (`core/`), Rust Agent (`agent/`), Rust Server (`server/`), và `shared-rs/`.
    - Mọi cơ chế chống phát hiện danh tính đều nằm ở C++ và Rust. Sửa đổi bừa bãi sẽ làm rò rỉ fingerprint hoặc hỏng cơ chế sandbox của Chromium.
 2. **`desktop/src/api.ts` LÀ ANCHOR BẤT BIẾN (IMMUTABLE)**:
-   - **Tuyệt đối KHÔNG thay đổi** chữ ký hàm, interfaces, types hoặc RPC methods trong file này. File này giao tiếp trực tiếp qua Tauri IPC tới `fury-agent`. Bất kỳ thay đổi tham số nào đều có thể dẫn đến lộ lọt thông tin qua CLI hoặc crash daemon.
-3. **KIẾN TRÚC "RUỘT FURY - VỎ SIMPRINT" (ZERO-CONFLICT UPSTREAM UPDATE)**:
+   - **Tuyệt đối KHÔNG thay đổi** chữ ký hàm, interfaces, types hoặc RPC methods trong file này. File này giao tiếp trực tiếp qua Tauri IPC tới `xchange-agent`. Bất kỳ thay đổi tham số nào đều có thể dẫn đến lộ lọt thông tin qua CLI hoặc crash daemon.
+3. **KIẾN TRÚC "RUỘT XCHANGE - VỎ SIMPRINT" (ZERO-CONFLICT UPSTREAM UPDATE)**:
    - Toàn bộ giao diện Simprint được cô lập hoàn toàn trong:
      - `desktop/src/components/simprint/`
      - `desktop/src/theme/simprint-tokens.css`
-   - File điều phối `desktop/src/App.tsx` chỉ đóng vai trò ghép nối state của Fury vào các views Simprint. Khi upstream Fury ra bản phát hành mới (0.3.10, 0.4.0...), việc `git rebase upstream/main` sẽ tự động thành công (Zero Conflict).
+   - File điều phối `desktop/src/App.tsx` chỉ đóng vai trò ghép nối state của XChange vào các views Simprint. Khi upstream XChange ra bản phát hành mới (0.3.10, 0.4.0...), việc `git rebase upstream/main` sẽ tự động thành công (Zero Conflict).
 
 ---
 
 ## 3. KIẾN TRÚC HỆ THỐNG & CẤU TRÚC THƯ MỤC
 
 ```
-E:/SOURCE_CODE/FURY/
+E:/SOURCE_CODE/XCHANGE/
 ├── core/                         # [BẤT BIẾN] Mã nguồn patch Chromium C++
-├── agent/                        # [BẤT BIẾN] Daemon Rust fury-agent
+├── agent/                        # [BẤT BIẾN] Daemon Rust xchange-agent
 ├── server/                       # [BẤT BIẾN] Backend sync team server
 ├── shared-rs/                    # [BẤT BIẾN] Thư viện Rust dùng chung
 ├── UPSTREAM_UPDATE.md            # Tài liệu hướng dẫn cập nhật từ repo gốc
@@ -52,17 +52,17 @@ E:/SOURCE_CODE/FURY/
     ├── vite.config.ts            # Cấu hình Vite + Tailwind v4 plugin + proxy /v1
     │
     ├── src-tauri/                # Tầng Tauri v2 Backend
-    │   ├── Cargo.toml            # Cấu hình Rust crate fury-desktop
-    │   ├── tauri.conf.json       # "decorations": false (Frameless), externalBin: fury-agent
+    │   ├── Cargo.toml            # Cấu hình Rust crate xchange-desktop
+    │   ├── tauri.conf.json       # "decorations": false (Frameless), externalBin: xchange-agent
     │   ├── capabilities/
     │   │   └── default.json      # Khai báo quyền Tauri ACL (drag, minimize, maximize, close)
     │   └── binaries/             # Thư mục chứa Sidecar Binary (được .gitignore)
-    │       └── fury-agent-x86_64-pc-windows-msvc.exe
+    │       └── xchange-agent-x86_64-pc-windows-msvc.exe
     │
     └── src/                      # Frontend React 19 + TypeScript
         ├── api.ts                # [BẤT BIẾN] API client IPC giao tiếp daemon
         ├── styles.css            # Styles toàn cục (.app flex-col, Tailwind v4, tokens)
-        ├── App.tsx               # Orchestrator chính: điều phối data Fury vào view Simprint
+        ├── App.tsx               # Orchestrator chính: điều phối data XChange vào view Simprint
         │
         ├── theme/
         │   └── simprint-tokens.css # Hệ thống màu Cyberpunk Slate, Glassmorphism, Modal, Terminal
@@ -101,17 +101,17 @@ E:/SOURCE_CODE/FURY/
 - **Nút Toggle**: Nằm cạnh logo trên thanh tiêu đề (`PanelLeftClose` / `PanelLeft`).
 - **Trạng thái Mở rộng (Expanded - 256px)**: Đầy đủ nhãn, cây thư mục Local/Team kèm context menu chuột phải, nút `+ New Profile` gradient.
 - **Trạng thái Thu gọn (Collapsed - 64px)**: Co lại thành thanh icon tinh gọn căn giữa, nút `+ New Profile` icon vuông, tooltip chú thích khi hover.
-- **Lưu trạng thái**: Tự động lưu `fury.sidebar_collapsed` vào `localStorage`.
-- **Loại bỏ trùng lặp**: Đã xóa hoàn toàn khối logo thừa "FURY STUDIO" dưới sidebar để tránh trùng với thanh tiêu đề.
+- **Lưu trạng thái**: Tự động lưu `xchange.sidebar_collapsed` vào `localStorage`.
+- **Loại bỏ trùng lặp**: Đã xóa hoàn toàn khối logo thừa "XCHANGE STUDIO" dưới sidebar để tránh trùng với thanh tiêu đề.
 
 ### 4.3. Thanh Tìm Kiếm & Công Cụ Có Phạm Vi (Scoped Profile Toolbar) — `SimprintHeader.tsx`
 - **Chỉ hiển thị tại trang Profiles**: Ô tìm kiếm `Search by name... (Ctrl K)`, `Open (0)`, `Several profiles...`, `Import CSV`, `GoLogin Import`, `Refresh` chỉ render khi `view === "profiles"` hoặc `"sharedWithMe"`.
 - **Tự động ẩn trên các trang khác**: Khi chuyển sang `Proxies`, `Extensions`, `AI assistants`, `Users`, `Trash`, thanh tìm kiếm profile tự động ẩn để giữ giao diện sạch sẽ.
 
 ### 4.4. Chế Độ Xem Kép: Dạng Bảng & Dạng Thẻ (Table vs Grid View)
-- Chuyển đổi linh hoạt thông qua nút segmented toggle trên Header, lưu tùy chọn vào `localStorage.getItem("fury.view_mode")`:
+- Chuyển đổi linh hoạt thông qua nút segmented toggle trên Header, lưu tùy chọn vào `localStorage.getItem("xchange.view_mode")`:
   - **Table View (`SimprintProfileTable.tsx`)**: Giữ nguyên Virtual Windowing (`WINDOW_FROM = 150`, `BUFFER = 20`) để cuộn mượt mà hàng ngàn profile mà không tràn DOM. Nút Launch/Stop với spinner `Loader2`.
-  - **Grid View (`SimprintProfileGrid.tsx`)**: Hiển thị dạng thẻ Card Cyberpunk 1-4 cột responsive, hiển thị thông số giả lập Chrome/Fury Core, khối proxy thu nhỏ, tag con nhộng.
+  - **Grid View (`SimprintProfileGrid.tsx`)**: Hiển thị dạng thẻ Card Cyberpunk 1-4 cột responsive, hiển thị thông số giả lập Chrome/XChange Core, khối proxy thu nhỏ, tag con nhộng.
 
 ### 4.5. Thanh Dock Thao Tác Hàng Loạt (Floating Bulk Dock) — `SimprintBulkBar.tsx`
 - Tự động trượt lên ở đáy màn hình khi chọn từ 1 profile trở lên:
@@ -134,7 +134,7 @@ E:/SOURCE_CODE/FURY/
 | **Sửa giao diện UI** | Mọi file trong `desktop/src/` (TSX, CSS, theme tokens, icon, text) | **Chỉ cần Hot-Reload** (`run-app.bat` hoặc `npm run dev`). Phản hồi trong **~50ms**. | ❌ **KHÔNG CẦN**. Vite HMR tự động đẩy code mới vào app đang chạy. |
 | **Thêm thư viện React** | Thêm packages frontend trong `desktop/package.json` | Chạy `npm install` rồi chạy `run-app.bat`. | ❌ **KHÔNG CẦN**. |
 | **Sửa tầng Rust/Tauri** | Sửa file trong `desktop/src-tauri/` (commands, permissions, icons) | **Bắt buộc Rebuild**: Chạy `run-app.bat rebuild` hoặc `npm run app`. | ✅ **BẮT BUỘC CẦN**. Cần MSVC C++ & Windows 11 SDK. |
-| **Sửa Daemon/Core** | Sửa file trong `agent/`, `server/`, `shared-rs/` | **Bắt buộc Rebuild**: Chạy `cargo build -p fury-agent`. | ✅ **BẮT BUỘC CẦN**. |
+| **Sửa Daemon/Core** | Sửa file trong `agent/`, `server/`, `shared-rs/` | **Bắt buộc Rebuild**: Chạy `cargo build -p xchange-agent`. | ✅ **BẮT BUỘC CẦN**. |
 | **Sau khi `cargo clean`** | Xóa sạch thư mục `target/` hoặc clone máy mới | **Bắt buộc Rebuild**: Biên dịch lại toàn bộ Rust binaries từ con số 0. | ✅ **BẮT BUỘC CẦN**. |
 
 ### 5.2. Yêu cầu môi trường
@@ -159,7 +159,7 @@ npm run build
 
 ## 6. QUY TRÌNH ĐỒNG BỘ UPSTREAM (ZERO-CONFLICT UPDATE)
 
-Khi tác giả Fury ra bản cập nhật mới (ví dụ v0.3.10):
+Khi tác giả XChange ra bản cập nhật mới (ví dụ v0.3.10):
 ```bash
 # 1. Lấy mã nguồn mới nhất từ upstream
 git fetch upstream

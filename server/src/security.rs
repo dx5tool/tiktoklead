@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright 2026 Bogdan Shapovalov and the Fury authors
+// Copyright 2026 Bogdan Shapovalov and the XChange authors
 
 //! Team security: the organisation's sign-in policy, the second factor, the
 //! login journal, and sessions as things an owner can see and end.
@@ -38,7 +38,7 @@ use crate::api::{audit, rfc3339};
 use crate::auth::{self, Db};
 use crate::error::{ApiError, ApiResult};
 use crate::AppState;
-use fury_shared::rbac::{OrgRole, Perm};
+use xchange_shared::rbac::{OrgRole, Perm};
 
 // ---------------------------------------------------------------------------
 // policy
@@ -428,11 +428,11 @@ fn code_matches(secret: &[u8], code: &str) -> bool {
     if code.len() != 6 || !code.bytes().all(|b| b.is_ascii_digit()) {
         return false;
     }
-    let totp = fury_shared::totp::Totp {
+    let totp = xchange_shared::totp::Totp {
         secret: secret.to_vec(),
         digits: 6,
         period: 30,
-        algorithm: fury_shared::totp::Algorithm::Sha1,
+        algorithm: xchange_shared::totp::Algorithm::Sha1,
         label: None,
         issuer: None,
     };
@@ -551,13 +551,13 @@ pub async fn totp_setup(mut db: Db) -> ApiResult<Json<serde_json::Value>> {
         .bind(caller.user_id)
         .fetch_one(db.as_mut())
         .await?;
-    let totp = fury_shared::totp::Totp {
+    let totp = xchange_shared::totp::Totp {
         secret: secret.to_vec(),
         digits: 6,
         period: 30,
-        algorithm: fury_shared::totp::Algorithm::Sha1,
+        algorithm: xchange_shared::totp::Algorithm::Sha1,
         label: Some(email.0.clone()),
-        issuer: Some("Fury".into()),
+        issuer: Some("XChange".into()),
     };
     Ok(Json(json!({ "uri": totp.to_uri(), "secret": base32(&secret) })))
 }
@@ -900,9 +900,9 @@ mod tests {
     #[test]
     fn a_code_matches_its_window_and_nothing_else() {
         let secret = [7u8; 20];
-        let totp = fury_shared::totp::Totp {
+        let totp = xchange_shared::totp::Totp {
             secret: secret.to_vec(), digits: 6, period: 30,
-            algorithm: fury_shared::totp::Algorithm::Sha1, label: None, issuer: None,
+            algorithm: xchange_shared::totp::Algorithm::Sha1, label: None, issuer: None,
         };
         let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
         assert!(code_matches(&secret, &totp.code_at(now)));

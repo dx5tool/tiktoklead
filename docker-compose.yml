@@ -18,27 +18,27 @@ services:
     image: postgres:16-alpine
     restart: unless-stopped
     environment:
-      POSTGRES_USER: fury
+      POSTGRES_USER: xchange
       POSTGRES_PASSWORD: ${FURY_DB_PASSWORD:?set FURY_DB_PASSWORD in .env}
-      POSTGRES_DB: fury
+      POSTGRES_DB: xchange
     volumes:
-      - fury-db:/var/lib/postgresql/data
+      - xchange-db:/var/lib/postgresql/data
     healthcheck:
       # The server applies migrations on boot, so it must not start against a
       # database that is still initialising.
-      test: ["CMD-SHELL", "pg_isready -U fury -d fury"]
+      test: ["CMD-SHELL", "pg_isready -U xchange -d xchange"]
       interval: 3s
       timeout: 3s
       retries: 20
 
   server:
-    image: ghcr.io/furyteamtop/fury-server:${FURY_VERSION:-latest}
+    image: ghcr.io/xchange/xchange-server:${FURY_VERSION:-latest}
     restart: unless-stopped
     depends_on:
       db:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgres://fury:${FURY_DB_PASSWORD}@db:5432/fury
+      DATABASE_URL: postgres://xchange:${FURY_DB_PASSWORD}@db:5432/xchange
       BIND: 0.0.0.0:8901
       # Mail for confirming invited addresses (docs/13). Empty: off.
       FURY_SMTP_URL: ${FURY_SMTP_URL:-}
@@ -49,10 +49,10 @@ services:
       - "127.0.0.1:8901:8901"
     # The profiles themselves. Without a volume they lived in the container and
     # went with it at the first rebuild, leaving a database that lists versions
-    # whose bytes are gone. Back this up together with fury-db (docs/14).
+    # whose bytes are gone. Back this up together with xchange-db (docs/14).
     volumes:
-      - fury-bundles:/var/lib/fury/bundles
+      - xchange-bundles:/var/lib/xchange/bundles
 
 volumes:
-  fury-db:
-  fury-bundles:
+  xchange-db:
+  xchange-bundles:

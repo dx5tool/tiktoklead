@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright 2026 Bogdan Shapovalov and the Fury authors
+// Copyright 2026 Bogdan Shapovalov and the XChange authors
 
 //! Device personas, and deriving a core config from one.
 //!
@@ -194,7 +194,7 @@ pub struct PersonaGpu {
     /// has its own extensions (EXT_color_buffer_float, OES_draw_buffers_indexed)
     /// and drops the ones WebGL2 made core. With one list for both, the core
     /// answered a WebGL2 context with the 18 names the two happened to share
-    /// (ctx-fury baseline, Windows persona); a real Chrome on the same machine
+    /// (ctx-xchange baseline, Windows persona); a real Chrome on the same machine
     /// lists 32.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub webgl1_extensions: Vec<String>,
@@ -295,7 +295,7 @@ pub struct ProfileContext {
     /// this copy exists so the config is a faithful record of what the profile
     /// claims rather than a partial one.
     ///
-    /// Measured: tools/detect-suite/baselines/final.json is a Fury capture with
+    /// Measured: tools/detect-suite/baselines/final.json is an XChange capture with
     /// `navigator.languages = en-US,en`, a Windows persona and America/New_York
     /// — reporting `locale.locale = ru` and formatting numbers `123 456,789`,
     /// because the core inherited the developer's Mac locale. Timezone and
@@ -653,7 +653,7 @@ impl Persona {
         // says so with `cdp`, and that is a different decision.
         config["automation"] = serde_json::json!({ "hideTraces": true });
 
-        // Not a persona property — a consequence of how Fury reaches the
+        // Not a persona property — a consequence of how XChange reaches the
         // network, and true for every profile because every profile goes
         // through the relay.
         //
@@ -672,6 +672,10 @@ impl Persona {
         // it is a config key and not a constant in the core.
         config["webrtc"] = serde_json::json!({
             "ipHandlingPolicy": "disable_non_proxied_udp",
+            // `off` gathers nothing, which is what every profile has done since
+            // patch 0070. The other modes are per-profile overrides
+            // (overrides::WebRtcOverride) and are applied after derivation.
+            "mode": "off",
         });
 
         // A desktop on mains, which is what the browser will report to every

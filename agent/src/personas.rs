@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright 2026 Bogdan Shapovalov and the Fury authors
+// Copyright 2026 Bogdan Shapovalov and the XChange authors
 
 //! The persona catalogue.
 //!
@@ -12,7 +12,7 @@
 //! `FURY_PERSONAS` points at a directory of extra `.json` files for anyone
 //! building their own — they are added to the built-ins, never replace them.
 
-use fury_shared::persona::Persona;
+use xchange_shared::persona::Persona;
 use serde::Serialize;
 
 
@@ -36,7 +36,7 @@ pub struct PersonaSummary {
 }
 
 pub fn catalogue() -> Vec<PersonaSummary> {
-    let builtin: Vec<String> = fury_shared::catalogue::all().into_iter().map(|p| p.id).collect();
+    let builtin: Vec<String> = xchange_shared::catalogue::all().into_iter().map(|p| p.id).collect();
     let mut personas = all();
     // Commonest first. Sorting here rather than in the table keeps the table
     // grouped by family, which is how it is read and edited.
@@ -58,7 +58,7 @@ pub fn catalogue() -> Vec<PersonaSummary> {
 pub fn all() -> Vec<Persona> {
     // The catalogue lives in the shared crate, where a test refuses to build if
     // any entry describes a machine that cannot exist.
-    let mut out: Vec<Persona> = fury_shared::catalogue::all();
+    let mut out: Vec<Persona> = xchange_shared::catalogue::all();
 
     // Two places add to it, never replace it: the folder a capture is kept in
     // when "Use on this computer" is pressed, and FURY_PERSONAS for anyone

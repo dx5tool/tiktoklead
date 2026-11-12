@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright 2026 Bogdan Shapovalov and the Fury authors
+// Copyright 2026 Bogdan Shapovalov and the XChange authors
 
 import { useI18n } from "../i18n";
 
@@ -14,7 +14,7 @@ export function Brand({ version }: { version?: string }) {
   const { t } = useI18n();
   return (
     <>
-      <h1>Fury</h1>
+      <h1>XChange</h1>
       {version && <p className="loginVersion">{t("auth.version", { version })}</p>}
     </>
   );

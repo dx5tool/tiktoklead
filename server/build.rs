@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright 2026 Bogdan Shapovalov and the Fury authors
+// Copyright 2026 Bogdan Shapovalov and the XChange authors
 
 //! Rebuild when a migration is added or edited.
 //!
@@ -9,7 +9,7 @@
 //! copies the migration, builds nothing, restarts, and runs the old set.
 //!
 //! It happened, on the first server this was deployed to. The file was in
-//! /opt/fury/src/server/migrations, the binary was fresh by every timestamp
+//! /opt/xchange/src/server/migrations, the binary was fresh by every timestamp
 //! cargo looks at, and the schema was one migration behind with no error
 //! anywhere: `_sqlx_migrations` simply stopped at 6. Nothing in the build, the
 //! service log or the deploy output said so, because from every one of their

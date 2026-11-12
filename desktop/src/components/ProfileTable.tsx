@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright 2026 Bogdan Shapovalov and the Fury authors
+// Copyright 2026 Bogdan Shapovalov and the XChange authors
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useI18n } from "../i18n";
@@ -7,6 +7,7 @@ import { Icon, IconButton } from "./Icon";
 import type { Me, Profile } from "../api";
 import { platformOf } from "../platform";
 import { assess } from "../consistency";
+import { isProviderProxy } from "../providerProxy";
 import { isSuggested, statusHue } from "../status";
 
 /** Every row's controls follow the permissions the SERVER resolved. Hiding a
@@ -216,7 +217,8 @@ export function ProfileTable({
           // Open with the reason: the contradiction is the ban, not the
           // fingerprint, and a warning that scrolls past is not a guard.
           const shared = sharing?.get(p.id) ?? 0;
-          const verdict = assess(p, personas ?? null, shared);
+          const providerBacked = isProviderProxy(p.proxy);
+          const verdict = assess(p, personas ?? null, shared, providerBacked);
           const verdictText = verdict.notes.map((n) => t(n.key, n.vars)).join(" · ");
 
           return (
@@ -309,7 +311,7 @@ export function ProfileTable({
                       {!canReveal && ` · ${t("row.masked")}`}
                       {/* How many profiles a site sees from this exit (docs/12 C).
                           Said from two; coloured from three. */}
-                      {shared >= 2 && (
+                      {!providerBacked && shared >= 2 && (
                         <span className={shared >= 3 ? "warn" : undefined}> · {t("row.sharedExit", { n: shared })}</span>
                       )}
                     </div>

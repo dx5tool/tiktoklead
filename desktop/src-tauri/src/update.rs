@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright 2026 Bogdan Shapovalov and the Fury authors
+// Copyright 2026 Bogdan Shapovalov and the XChange authors
 
 //! Is there a newer version, and installing it.
 //!
@@ -9,7 +9,7 @@
 //! tauri.conf.json, and only then replaces the application. Installing an
 //! update is running code the person did not choose, so the signature is the
 //! whole point: the private key lives on the release machine
-//! (~/.private_keys/fury-updater.key) and nothing that reaches GitHub, the
+//! (~/.private_keys/xchange-updater.key) and nothing that reaches GitHub, the
 //! network or this process can make an unsigned build install.
 //!
 //! What a person sees: one button. If profiles are open it says to close them
@@ -36,7 +36,7 @@ use tauri_plugin_updater::UpdaterExt;
 // Fork: `plugins.updater.endpoints` in tauri.conf.json is the installer feed,
 // and this is the version-check feed. Both are placeholders until the Simprint
 // fork publishes its own builds; replace both together.
-const RELEASES: &str = "https://api.github.com/repos/simprint-placeholder/fury-simprint/releases?per_page=5";
+const RELEASES: &str = "https://api.github.com/repos/dx5tool/fury-nomaster/releases?per_page=5";
 
 #[derive(Serialize)]
 pub struct UpdateCheck {
@@ -121,7 +121,7 @@ pub async fn check_update(state: tauri::State<'_, crate::commands::AppState>) ->
         .get(RELEASES)
         // GitHub refuses anonymous requests without one, and a version in it
         // makes a support question answerable from the server's own logs.
-        .header("User-Agent", format!("Fury/{}", current()))
+        .header("User-Agent", format!("XChange/{}", current()))
         .header("Accept", "application/vnd.github+json")
         .send()
         .await;
@@ -400,7 +400,7 @@ async fn install(app: &tauri::AppHandle) -> Result<(), crate::commands::ApiErr> 
         Ok(_) => {
             for _ in 0..30 {
                 tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-                if fury_platform::Stream::connect(&crate::agent::ipc_endpoint()).await.is_err() {
+                if xchange_platform::Stream::connect(&crate::agent::ipc_endpoint()).await.is_err() {
                     break;
                 }
             }

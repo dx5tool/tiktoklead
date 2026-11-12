@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright 2026 Bogdan Shapovalov and the Fury authors
+// Copyright 2026 Bogdan Shapovalov and the XChange authors
 
-//! `fury-agent mcp`: Fury as an MCP server, for Claude Desktop, Cursor, Claude
+//! `xchange-agent mcp`: XChange as an MCP server, for Claude Desktop, Cursor, Claude
 //! Code and any other client that speaks the Model Context Protocol.
 //!
 //! It is this binary rather than a script because a script needs an
-//! interpreter, and the Python one that came before it (tools/mcp/fury-mcp.py,
+//! interpreter, and the Python one that came before it (tools/mcp/xchange-mcp.py,
 //! removed in 0.2.18) also needed the local HTTP API switched on with an
 //! environment variable no ordinary install sets. So it worked for whoever
 //! wrote it. A tester looking for MCP "like AdsPower has" found the paragraph
@@ -37,7 +37,7 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 const PROTOCOLS: &[&str] = &["2025-06-18", "2025-03-26", "2024-11-05"];
 
 /// The skill, delivered by the server itself: clients put `instructions` from
-/// the handshake in front of the model, so it knows how Fury works without the
+/// the handshake in front of the model, so it knows how XChange works without the
 /// person installing anything else. The same text ships as SKILL.md from the
 /// desktop for clients that read skills from disk.
 pub const SKILL: &str = include_str!("../../shared/mcp/SKILL.md");
@@ -64,17 +64,17 @@ struct Tool {
 }
 
 fn profile_arg() -> Value {
-    json!({ "type": "string", "description": "Profile id, or its exact name as shown in Fury" })
+    json!({ "type": "string", "description": "Profile id, or its exact name as shown in XChange" })
 }
 
 const TOOLS: &[Tool] = &[
     Tool {
-        name: "fury_status",
-        description: "Fury's version, whether the browser is installed, and which profiles are open.",
+        name: "xchange_status",
+        description: "XChange's version, whether the browser is installed, and which profiles are open.",
         schema: || json!({ "type": "object", "properties": {} }),
     },
     Tool {
-        name: "fury_list_profiles",
+        name: "xchange_list_profiles",
         description: "The profiles on this machine: id, name, tags, stage, project, proxy and whether each is open. \
                       Filter by text, tag or project; with none, everything.",
         schema: || json!({ "type": "object", "properties": {
@@ -85,12 +85,12 @@ const TOOLS: &[Tool] = &[
         }}),
     },
     Tool {
-        name: "fury_list_proxies",
+        name: "xchange_list_proxies",
         description: "Saved proxies: name, type, host, port, last seen country and IP. Passwords are never returned.",
         schema: || json!({ "type": "object", "properties": {} }),
     },
     Tool {
-        name: "fury_list_personas",
+        name: "xchange_list_personas",
         description: "The machines a profile can be: id, OS, GPU, screen, and how common each is among real users. \
                       Prefer common ones; the OS should usually match the person's own computer.",
         schema: || json!({ "type": "object", "properties": {
@@ -98,7 +98,7 @@ const TOOLS: &[Tool] = &[
         }}),
     },
     Tool {
-        name: "fury_create_profiles",
+        name: "xchange_create_profiles",
         description: "Create one profile or a batch on this machine. Each gets its own fingerprint seed. \
                       Without a persona, machines are spread by how common they are (or restricted to `os`). \
                       Give each account its own proxy: profiles sharing one exit are linked by it.",
@@ -106,16 +106,16 @@ const TOOLS: &[Tool] = &[
             "name": { "type": "string", "description": "Name, or a pattern with {n} for a batch, e.g. \"Shop {n}\"" },
             "count": { "type": "integer", "description": "How many, 1-50 (default 1)" },
             "tags": { "type": "array", "items": { "type": "string" } },
-            "proxy": { "type": "string", "description": "A saved proxy's id or name (fury_list_proxies)" },
+            "proxy": { "type": "string", "description": "A saved proxy's id or name (xchange_list_proxies)" },
             "proxy_line": { "type": "string", "description": "Or a proxy as a line, e.g. socks5://user:pass@host:port; it is saved first" },
-            "persona": { "type": "string", "description": "Persona id from fury_list_personas" },
+            "persona": { "type": "string", "description": "Persona id from xchange_list_personas" },
             "os": { "type": "string", "description": "Or just the OS: windows, macos" },
             "start_urls": { "type": "array", "items": { "type": "string" } },
             "stage": { "type": "string", "description": "The account's stage, e.g. warming" },
         }, "required": ["name"] }),
     },
     Tool {
-        name: "fury_update_profile",
+        name: "xchange_update_profile",
         description: "Change a profile on this machine: name, tags, stage, proxy, start pages. \
                       Only the fields given change. The fingerprint is never changed here.",
         schema: || json!({ "type": "object", "properties": {
@@ -128,7 +128,7 @@ const TOOLS: &[Tool] = &[
         }, "required": ["profile"] }),
     },
     Tool {
-        name: "fury_add_proxies",
+        name: "xchange_add_proxies",
         description: "Save proxies from text, one per line, in any common format (host:port:user:pass, \
                       user:pass@host:port, scheme://...). Returns what was saved and which lines were not understood.",
         schema: || json!({ "type": "object", "properties": {
@@ -137,24 +137,24 @@ const TOOLS: &[Tool] = &[
         }, "required": ["lines"] }),
     },
     Tool {
-        name: "fury_move_to_trash",
-        description: "Move a profile to Fury's Trash. It can be restored from there; nothing is erased. \
+        name: "xchange_move_to_trash",
+        description: "Move a profile to XChange's Trash. It can be restored from there; nothing is erased. \
                       Ask the person before doing this.",
         schema: || json!({ "type": "object", "properties": { "profile": profile_arg() }, "required": ["profile"] }),
     },
     Tool {
-        name: "fury_start_profile",
+        name: "xchange_start_profile",
         description: "Open a profile's browser window, through its proxy, ready to be driven with the page tools. \
                       A visible window opens on the person's screen.",
         schema: || json!({ "type": "object", "properties": { "profile": profile_arg() }, "required": ["profile"] }),
     },
     Tool {
-        name: "fury_stop_profile",
+        name: "xchange_stop_profile",
         description: "Close a profile's browser. Cookies and history are kept in the profile.",
         schema: || json!({ "type": "object", "properties": { "profile": profile_arg() }, "required": ["profile"] }),
     },
     Tool {
-        name: "fury_open_url",
+        name: "xchange_open_url",
         description: "Go to an address in an open profile's current tab and wait for it to load.",
         schema: || json!({ "type": "object", "properties": {
             "profile": profile_arg(),
@@ -162,58 +162,58 @@ const TOOLS: &[Tool] = &[
         }, "required": ["profile", "url"] }),
     },
     Tool {
-        name: "fury_read_page",
+        name: "xchange_read_page",
         description: "The current page of an open profile: address, title, visible text, and a numbered list of \
-                      links, buttons and fields. Use the numbers with fury_click and fury_type.",
+                      links, buttons and fields. Use the numbers with xchange_click and xchange_type.",
         schema: || json!({ "type": "object", "properties": {
             "profile": profile_arg(),
             "max_chars": { "type": "integer", "description": "Text to return, default 8000, at most 100000" },
         }, "required": ["profile"] }),
     },
     Tool {
-        name: "fury_click",
-        description: "Click element N from the last fury_read_page, as a mouse click at its position.",
+        name: "xchange_click",
+        description: "Click element N from the last xchange_read_page, as a mouse click at its position.",
         schema: || json!({ "type": "object", "properties": {
             "profile": profile_arg(),
-            "element": { "type": "integer", "description": "The number from fury_read_page" },
+            "element": { "type": "integer", "description": "The number from xchange_read_page" },
         }, "required": ["profile", "element"] }),
     },
     Tool {
-        name: "fury_type",
+        name: "xchange_type",
         description: "Type text into element N (it is clicked first), or into whatever has focus. \
                       submit presses Enter afterwards.",
         schema: || json!({ "type": "object", "properties": {
             "profile": profile_arg(),
             "text": { "type": "string" },
-            "element": { "type": "integer", "description": "The number from fury_read_page" },
+            "element": { "type": "integer", "description": "The number from xchange_read_page" },
             "submit": { "type": "boolean" },
         }, "required": ["profile", "text"] }),
     },
     Tool {
-        name: "fury_screenshot",
+        name: "xchange_screenshot",
         description: "A picture of what an open profile's tab shows now.",
         schema: || json!({ "type": "object", "properties": { "profile": profile_arg() }, "required": ["profile"] }),
     },
     Tool {
-        name: "fury_warm_up",
+        name: "xchange_warm_up",
         description: "Warm profiles: open each, visit sites with human-like pauses and scrolling so it collects \
-                      ordinary cookies, optionally close it after. Runs in the background; see fury_warm_status.",
+                      ordinary cookies, optionally close it after. Runs in the background; see xchange_warm_status.",
         schema: || json!({ "type": "object", "properties": {
             "profiles": { "type": "array", "items": { "type": "string" }, "description": "Ids or exact names" },
-            "urls": { "type": "array", "items": { "type": "string" }, "description": "Sites to visit; default is Fury's list" },
+            "urls": { "type": "array", "items": { "type": "string" }, "description": "Sites to visit; default is XChange's list" },
             "close_after": { "type": "boolean", "description": "Close each profile when done (default true)" },
         }, "required": ["profiles"] }),
     },
     Tool {
-        name: "fury_warm_status",
+        name: "xchange_warm_status",
         description: "Progress of warm-ups: which site each profile is on, cookies collected, finished or failed.",
         schema: || json!({ "type": "object", "properties": {} }),
     },
     Tool {
-        name: "fury_farm_plan",
+        name: "xchange_farm_plan",
         description: "Farm profiles on a schedule: every day for a number of days, each opens a few of the sites at \
                       random times within the given hours (in the profile's own timezone), reads them like a warm-up \
-                      and closes. Runs while Fury's agent runs; see fury_farm_status.",
+                      and closes. Runs while XChange's agent runs; see xchange_farm_status.",
         schema: || json!({ "type": "object", "properties": {
             "profiles": { "type": "array", "items": { "type": "string" }, "description": "Ids or exact names" },
             "days": { "type": "integer", "description": "How many days (1-90)" },
@@ -221,12 +221,12 @@ const TOOLS: &[Tool] = &[
             "sites_max": { "type": "integer", "description": "Most sites a day (default 12)" },
             "hour_from": { "type": "integer", "description": "Earliest local hour (default 10)" },
             "hour_to": { "type": "integer", "description": "Local hour to stop by (default 22)" },
-            "urls": { "type": "array", "items": { "type": "string" }, "description": "Sites to draw from; default is Fury's list" },
+            "urls": { "type": "array", "items": { "type": "string" }, "description": "Sites to draw from; default is XChange's list" },
             "name": { "type": "string", "description": "A name for the plan" },
         }, "required": ["profiles", "days"] }),
     },
     Tool {
-        name: "fury_farm_status",
+        name: "xchange_farm_status",
         description: "Farming plans: for each profile, days done of days, sites read, cookies, when the next session is, \
                       and the last error.",
         schema: || json!({ "type": "object", "properties": {} }),
@@ -274,7 +274,7 @@ pub async fn handle(backend: &Backend, msg: Value) -> Option<Value> {
             ok(json!({
                 "protocolVersion": version,
                 "capabilities": { "tools": {} },
-                "serverInfo": { "name": "fury", "title": "Fury", "version": env!("CARGO_PKG_VERSION") },
+                "serverInfo": { "name": "xchange", "title": "XChange", "version": env!("CARGO_PKG_VERSION") },
                 "instructions": instructions(),
             }))
         }
@@ -313,7 +313,7 @@ fn s<'a>(args: &'a Value, key: &str) -> Option<&'a str> {
 
 async fn call_tool(backend: &Backend, name: &str, args: &Value) -> anyhow::Result<Vec<Value>> {
     match name {
-        "fury_status" => {
+        "xchange_status" => {
             let st = backend("status", json!({})).await?;
             Ok(text(&json!({
                 "version": st.get("version"),
@@ -322,7 +322,7 @@ async fn call_tool(backend: &Backend, name: &str, args: &Value) -> anyhow::Resul
                 "open_profiles": st.get("running"),
             })))
         }
-        "fury_list_profiles" => {
+        "xchange_list_profiles" => {
             let all = backend("profiles.list", json!({})).await?;
             let rows: Vec<Value> = all
                 .as_array()
@@ -330,12 +330,12 @@ async fn call_tool(backend: &Backend, name: &str, args: &Value) -> anyhow::Resul
                 .unwrap_or_default();
             Ok(text(&json!({ "count": rows.len(), "profiles": rows })))
         }
-        "fury_list_proxies" => {
+        "xchange_list_proxies" => {
             let all = backend("proxies.list", json!({})).await?;
             let rows: Vec<Value> = all.as_array().map(|a| a.iter().map(proxy_summary).collect()).unwrap_or_default();
             Ok(text(&json!({ "count": rows.len(), "proxies": rows })))
         }
-        "fury_list_personas" => {
+        "xchange_list_personas" => {
             let all = backend("personas.list", json!({})).await?;
             let want = s(args, "os").map(os_word);
             let rows: Vec<Value> = all
@@ -349,12 +349,12 @@ async fn call_tool(backend: &Backend, name: &str, args: &Value) -> anyhow::Resul
                 .unwrap_or_default();
             Ok(text(&json!({ "count": rows.len(), "personas": rows })))
         }
-        "fury_create_profiles" => {
+        "xchange_create_profiles" => {
             let count = args.get("count").and_then(Value::as_u64).unwrap_or(1);
             // Fifty, not the five hundred the window allows: a model that
             // misread "5" as "500" should not get to fill the list.
             if !(1..=50).contains(&count) {
-                anyhow::bail!("count must be 1-50 here; for more, create them in the Fury window");
+                anyhow::bail!("count must be 1-50 here; for more, create them in the XChange window");
             }
             let name = s(args, "name").ok_or_else(|| anyhow::anyhow!("name is required"))?;
             let proxy_id: Option<String> = match (s(args, "proxy"), s(args, "proxy_line")) {
@@ -402,13 +402,13 @@ async fn call_tool(backend: &Backend, name: &str, args: &Value) -> anyhow::Resul
             }
             let mut out = json!({ "created": created, "failed": failed });
             if proxy_id.is_none() {
-                out["note"] = json!("No proxy: these profiles will not open until one is set (fury_update_profile).");
+                out["note"] = json!("No proxy: these profiles will not open until one is set (xchange_update_profile).");
             } else if count > 1 {
                 out["note"] = json!("All of them share one proxy. Give each account its own exit before using them.");
             }
             Ok(text(&out))
         }
-        "fury_update_profile" => {
+        "xchange_update_profile" => {
             let (id, _) = resolve(backend, args).await?;
             let all = backend("profiles.list", json!({})).await?;
             let mut p = all
@@ -416,7 +416,7 @@ async fn call_tool(backend: &Backend, name: &str, args: &Value) -> anyhow::Resul
                 .and_then(|a| a.iter().find(|p| p.get("id").and_then(Value::as_str) == Some(&id)).cloned())
                 .ok_or_else(|| anyhow::anyhow!("that profile is not on this machine"))?;
             if p.get("running").and_then(Value::as_bool) == Some(true) {
-                anyhow::bail!("the profile is open; close it first (fury_stop_profile)");
+                anyhow::bail!("the profile is open; close it first (xchange_stop_profile)");
             }
             if let Some(n) = s(args, "name") { p["name"] = json!(n); }
             if let Some(t) = args.get("tags").filter(|v| v.is_array()) { p["tags"] = t.clone(); }
@@ -429,17 +429,17 @@ async fn call_tool(backend: &Backend, name: &str, args: &Value) -> anyhow::Resul
             backend("profiles.upsert", p).await?;
             Ok(text(&json!({ "updated": id })))
         }
-        "fury_add_proxies" => {
+        "xchange_add_proxies" => {
             let lines = s(args, "lines").ok_or_else(|| anyhow::anyhow!("lines is required"))?;
             let r = backend("proxies.importMany", json!({ "text": lines, "name_prefix": s(args, "name_prefix").unwrap_or_default() })).await?;
             Ok(text(&r))
         }
-        "fury_move_to_trash" => {
+        "xchange_move_to_trash" => {
             let (id, name) = resolve(backend, args).await?;
             backend("profiles.delete", json!({ "id": id })).await?;
-            Ok(text(&json!({ "moved_to_trash": name, "id": id, "restore": "Fury → Trash → Restore" })))
+            Ok(text(&json!({ "moved_to_trash": name, "id": id, "restore": "XChange → Trash → Restore" })))
         }
-        "fury_start_profile" => {
+        "xchange_start_profile" => {
             let (id, name) = resolve(backend, args).await?;
             let r = backend("profile.launch", json!({ "id": id, "cdp": true })).await?;
             if r.get("ws_endpoint").is_none() {
@@ -450,17 +450,17 @@ async fn call_tool(backend: &Backend, name: &str, args: &Value) -> anyhow::Resul
             }
             Ok(text(&json!({ "opened": name, "id": id, "page_tools": true })))
         }
-        "fury_stop_profile" => {
+        "xchange_stop_profile" => {
             let (id, name) = resolve(backend, args).await?;
             backend("profile.stop", json!({ "id": id })).await?;
             Ok(text(&json!({ "closed": name, "id": id })))
         }
-        "fury_open_url" => {
+        "xchange_open_url" => {
             let (id, _) = resolve(backend, args).await?;
             let url = s(args, "url").ok_or_else(|| anyhow::anyhow!("url is required"))?;
             Ok(text(&backend("page.navigate", json!({ "id": id, "url": url })).await?))
         }
-        "fury_read_page" => {
+        "xchange_read_page" => {
             let (id, _) = resolve(backend, args).await?;
             let mut p = json!({ "id": id });
             if let Some(n) = args.get("max_chars").and_then(Value::as_u64) {
@@ -468,12 +468,12 @@ async fn call_tool(backend: &Backend, name: &str, args: &Value) -> anyhow::Resul
             }
             Ok(text(&backend("page.read", p).await?))
         }
-        "fury_click" => {
+        "xchange_click" => {
             let (id, _) = resolve(backend, args).await?;
             let n = args.get("element").and_then(Value::as_u64).ok_or_else(|| anyhow::anyhow!("element is required"))?;
             Ok(text(&backend("page.click", json!({ "id": id, "element": n })).await?))
         }
-        "fury_type" => {
+        "xchange_type" => {
             let (id, _) = resolve(backend, args).await?;
             let mut p = json!({
                 "id": id,
@@ -485,7 +485,7 @@ async fn call_tool(backend: &Backend, name: &str, args: &Value) -> anyhow::Resul
             }
             Ok(text(&backend("page.type", p).await?))
         }
-        "fury_screenshot" => {
+        "xchange_screenshot" => {
             let (id, _) = resolve(backend, args).await?;
             let mut r = backend("page.screenshot", json!({ "id": id })).await?;
             let image = r.as_object_mut().and_then(|o| o.remove("image")).unwrap_or(Value::Null);
@@ -495,7 +495,7 @@ async fn call_tool(backend: &Backend, name: &str, args: &Value) -> anyhow::Resul
             }
             Ok(content)
         }
-        "fury_warm_up" => {
+        "xchange_warm_up" => {
             let names: Vec<String> = args
                 .get("profiles")
                 .and_then(Value::as_array)
@@ -523,8 +523,8 @@ async fn call_tool(backend: &Backend, name: &str, args: &Value) -> anyhow::Resul
             });
             Ok(text(&backend("warm.start", json!({ "profile_ids": ids, "plan": plan })).await?))
         }
-        "fury_warm_status" => Ok(text(&backend("warm.status", json!({})).await?)),
-        "fury_farm_plan" => {
+        "xchange_warm_status" => Ok(text(&backend("warm.status", json!({})).await?)),
+        "xchange_farm_plan" => {
             let names: Vec<String> = args
                 .get("profiles")
                 .and_then(Value::as_array)
@@ -559,7 +559,7 @@ async fn call_tool(backend: &Backend, name: &str, args: &Value) -> anyhow::Resul
             });
             Ok(text(&backend("farm.create", json!({ "spec": spec, "targets": targets })).await?))
         }
-        "fury_farm_status" => Ok(text(&farm_summary(&backend("farm.list", json!({})).await?))),
+        "xchange_farm_status" => Ok(text(&farm_summary(&backend("farm.list", json!({})).await?))),
         other => anyhow::bail!("no tool {other:?}"),
     }
 }
@@ -619,7 +619,7 @@ async fn proxy_ref(backend: &Backend, want: &str) -> anyhow::Result<String> {
     let by_name: Vec<&Value> = all.iter().filter(|p| field(p, "name").eq_ignore_ascii_case(want)).collect();
     match by_name.as_slice() {
         [one] => Ok(field(one, "id")),
-        [] => anyhow::bail!("no saved proxy {want:?}; fury_list_proxies shows them, fury_add_proxies saves new ones"),
+        [] => anyhow::bail!("no saved proxy {want:?}; xchange_list_proxies shows them, xchange_add_proxies saves new ones"),
         _ => anyhow::bail!("{} proxies are called {want:?}; use the id", by_name.len()),
     }
 }
@@ -653,7 +653,7 @@ async fn pick_persona(backend: &Backend, os: Option<&str>) -> anyhow::Result<Str
         })
         .unwrap_or_default();
     if pool.is_empty() {
-        anyhow::bail!("no persona for {:?}; fury_list_personas shows what there is", os.unwrap_or_default());
+        anyhow::bail!("no persona for {:?}; xchange_list_personas shows what there is", os.unwrap_or_default());
     }
     let total: f64 = pool.iter().map(|(_, w)| w).sum();
     let mut x = rand::random::<f64>() * total;
@@ -732,7 +732,7 @@ fn proxy_summary(x: &Value) -> Value {
 async fn resolve(backend: &Backend, args: &Value) -> anyhow::Result<(String, String)> {
     let want = s(args, "profile")
         .or_else(|| s(args, "id"))
-        .ok_or_else(|| anyhow::anyhow!("profile is required: an id or a name from fury_list_profiles"))?;
+        .ok_or_else(|| anyhow::anyhow!("profile is required: an id or a name from xchange_list_profiles"))?;
     let all = backend("profiles.list", json!({})).await?;
     let all = all.as_array().cloned().unwrap_or_default();
     let name_of = |p: &Value| p.get("name").and_then(Value::as_str).unwrap_or_default().to_string();
@@ -742,26 +742,26 @@ async fn resolve(backend: &Backend, args: &Value) -> anyhow::Result<(String, Str
     let matches: Vec<&Value> = all.iter().filter(|p| name_of(p).eq_ignore_ascii_case(want)).collect();
     match matches.as_slice() {
         [one] => Ok((one.get("id").and_then(Value::as_str).unwrap_or_default().to_string(), name_of(one))),
-        [] => anyhow::bail!("no profile {want:?} on this machine; fury_list_profiles shows the ones there are"),
-        _ => anyhow::bail!("{} profiles are called {want:?}; use the id from fury_list_profiles", matches.len()),
+        [] => anyhow::bail!("no profile {want:?} on this machine; xchange_list_profiles shows the ones there are"),
+        _ => anyhow::bail!("{} profiles are called {want:?}; use the id from xchange_list_profiles", matches.len()),
     }
 }
 
 /// One request to the running agent over its socket, starting it first if
-/// nothing answers -- Fury does not have to be open for the assistant to work.
+/// nothing answers -- XChange does not have to be open for the assistant to work.
 async fn agent_call(method: &'static str, params: Value) -> anyhow::Result<Value> {
     let endpoint = crate::paths::ipc_endpoint();
-    let stream = match fury_platform::Stream::connect(&endpoint).await {
+    let stream = match xchange_platform::Stream::connect(&endpoint).await {
         Ok(s) => s,
         Err(_) => {
             start_agent()?;
             let mut tries = 0;
             loop {
                 tokio::time::sleep(Duration::from_millis(150)).await;
-                match fury_platform::Stream::connect(&endpoint).await {
+                match xchange_platform::Stream::connect(&endpoint).await {
                     Ok(s) => break s,
                     Err(_) if tries < 60 => tries += 1,
-                    Err(e) => anyhow::bail!("Fury's agent did not start: {e}. Open the Fury app once and try again"),
+                    Err(e) => anyhow::bail!("XChange's agent did not start: {e}. Open the XChange app once and try again"),
                 }
             }
         }
@@ -777,7 +777,7 @@ async fn agent_call(method: &'static str, params: Value) -> anyhow::Result<Value
     let within = if method == "profile.launch" || method.starts_with("page.") { 120 } else { 30 };
     tokio::time::timeout(Duration::from_secs(within), BufReader::new(read).read_line(&mut line))
         .await
-        .map_err(|_| anyhow::anyhow!("Fury's agent did not answer {method}"))??;
+        .map_err(|_| anyhow::anyhow!("XChange's agent did not answer {method}"))??;
     let r: Value = serde_json::from_str(&line)?;
     if let Some(e) = r.get("err").and_then(Value::as_str) {
         anyhow::bail!("{e}");
@@ -843,7 +843,7 @@ mod tests {
                                     "params": { "protocolVersion": "2025-03-26" } })).await.unwrap();
         assert_eq!(r["result"]["protocolVersion"], "2025-03-26");
         let skill = r["result"]["instructions"].as_str().unwrap();
-        assert!(skill.contains("fury_read_page") && skill.starts_with("# Fury"), "{skill}");
+        assert!(skill.contains("xchange_read_page") && skill.starts_with("# XChange"), "{skill}");
         let r = handle(&*b, json!({ "jsonrpc": "2.0", "id": 2, "method": "initialize",
                                     "params": { "protocolVersion": "1999-01-01" } })).await.unwrap();
         assert_eq!(r["result"]["protocolVersion"], PROTOCOLS[0]);
@@ -862,7 +862,7 @@ mod tests {
     #[tokio::test]
     async fn no_password_and_no_notes_leave_through_a_list() {
         let b = fake();
-        for tool in ["fury_list_profiles", "fury_list_proxies"] {
+        for tool in ["xchange_list_profiles", "xchange_list_proxies"] {
             let r = call(&*b, tool, json!({})).await.to_string();
             assert!(!r.contains("hunter2"), "{tool}: {r}");
             assert!(!r.contains("secret"), "{tool}: {r}");
@@ -872,26 +872,26 @@ mod tests {
     #[tokio::test]
     async fn profiles_filter_by_tag_and_text() {
         let b = fake();
-        let r = call(&*b, "fury_list_profiles", json!({ "tag": "WARM" })).await;
+        let r = call(&*b, "xchange_list_profiles", json!({ "tag": "WARM" })).await;
         assert!(r.to_string().contains("Shop DE") && !r.to_string().contains("Shop FR"));
-        let r = call(&*b, "fury_list_profiles", json!({ "query": "de.exit" })).await;
+        let r = call(&*b, "xchange_list_profiles", json!({ "query": "de.exit" })).await;
         assert!(r.to_string().contains("\\\"count\\\": 1"), "{r}");
     }
 
     #[tokio::test]
     async fn a_profile_is_found_by_name_and_opened_with_the_port() {
         let b = fake();
-        let r = call(&*b, "fury_start_profile", json!({ "profile": "shop de" })).await;
+        let r = call(&*b, "xchange_start_profile", json!({ "profile": "shop de" })).await;
         assert_eq!(r["isError"], false, "{r}");
         assert!(r.to_string().contains("p1"));
-        let r = call(&*b, "fury_start_profile", json!({ "profile": "nobody" })).await;
+        let r = call(&*b, "xchange_start_profile", json!({ "profile": "nobody" })).await;
         assert_eq!(r["isError"], true);
     }
 
     #[tokio::test]
     async fn a_screenshot_is_an_image() {
         let b = fake();
-        let r = call(&*b, "fury_screenshot", json!({ "profile": "p2" })).await;
+        let r = call(&*b, "xchange_screenshot", json!({ "profile": "p2" })).await;
         let content = r["content"].as_array().unwrap();
         assert_eq!(content[1]["type"], "image");
         assert_eq!(content[1]["mimeType"], "image/jpeg");

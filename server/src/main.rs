@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright 2026 Bogdan Shapovalov and the Fury authors
+// Copyright 2026 Bogdan Shapovalov and the XChange authors
 
-//! Fury server — the self-hosted coordination backend.
+//! XChange server — the self-hosted coordination backend.
 //!
 //! Deliberately dumb. It does not generate fingerprints, does not check proxies,
 //! and cannot decrypt a bundle: it stores ciphertext plus metadata, resolves
@@ -111,7 +111,7 @@ async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "fury_server=info,tower_http=info".into()),
+                .unwrap_or_else(|_| "xchange_server=info,tower_http=info".into()),
         )
         .init();
 
@@ -124,10 +124,10 @@ async fn main() -> anyhow::Result<()> {
         // What a prebuilt binary is checked with before it is published, and
         // what an operator runs to see which one they have.
         Some("--version") | Some("version") => {
-            println!("fury-server {}", env!("CARGO_PKG_VERSION"));
+            println!("xchange-server {}", env!("CARGO_PKG_VERSION"));
             return Ok(());
         }
-        Some(other) => anyhow::bail!("unknown command: {other}\n\nusage:\n  fury-server\n  fury-server --version\n  fury-server invite --email you@example.com --org \"My team\""),
+        Some(other) => anyhow::bail!("unknown command: {other}\n\nusage:\n  xchange-server\n  xchange-server --version\n  xchange-server invite --email you@example.com --org \"My team\""),
         None => {}
     }
 
@@ -186,7 +186,7 @@ async fn main() -> anyhow::Result<()> {
         .layer(tower_http::trace::TraceLayer::new_for_http())
         .with_state(state);
 
-    tracing::info!(%bind, "fury-server listening");
+    tracing::info!(%bind, "xchange-server listening");
     let listener = tokio::net::TcpListener::bind(bind).await?;
     axum::serve(listener, app).await?;
     Ok(())
@@ -200,7 +200,7 @@ async fn healthz() -> Json<serde_json::Value> {
 /// `invite` command so a self-hoster configures one thing, not two.
 pub async fn connect() -> anyhow::Result<PgPool> {
     let database_url = std::env::var("DATABASE_URL")
-        .unwrap_or_else(|_| "postgres://fury:fury@localhost/fury".to_string());
+        .unwrap_or_else(|_| "postgres://xchange:xchange@localhost/xchange".to_string());
     Ok(PgPoolOptions::new()
         .max_connections(16)
         // Clear the per-request identity before a connection goes back in the

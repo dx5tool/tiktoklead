@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright 2026 Bogdan Shapovalov and the Fury authors
+// Copyright 2026 Bogdan Shapovalov and the XChange authors
 
 //! The channel the desktop shell talks to.
 //!
@@ -10,7 +10,7 @@
 //! named pipe with an explicit DACL on Windows are not.
 //!
 //! Which of the two, and everything that differs between them, is
-//! `fury_platform::ipc` — the transport is deliberately not visible from here,
+//! `xchange_platform::ipc` — the transport is deliberately not visible from here,
 //! so that this file is about the protocol and nothing else.
 //!
 //! The protocol is newline-delimited JSON, one request per line, one response
@@ -208,6 +208,10 @@ struct Running {
     /// starting a second one on the same directory — two Chromiums on one
     /// user-data-dir is how a cookie jar gets corrupted.
     ws_endpoint: Option<String>,
+    /// Launched without a window, for the cookie exchange. A headless browser
+    /// has no window for `ask_to_close` to press, so `stop` shuts it down over
+    /// CDP instead of waiting ten seconds and killing it.
+    headless: bool,
     /// Must be aborted explicitly when the profile closes.
     ///
     /// Dropping a JoinHandle does not stop the task — tokio detaches it — so
@@ -293,28 +297,41 @@ pub fn parse_location(raw: &str) -> Option<(f64, f64)> {
     Some((lat, lng))
 }
 
-/// What to open on this launch.
+/// A profile id to its directory, for the callers that need many at once.
 ///
-/// Start URLs open on the FIRST launch and never again. The browser restores its
-/// previous session (see launcher.rs), and start URLs passed on top of a
-/// restored session are ADDED to it rather than replacing it — so the tenth
-/// launch of a profile opened its start page for the tenth time and the
-/// operator closed nine tabs by hand. Measured: two launches, one extra copy.
+/// `transfer::export_project` takes a synchronous `Fn(&str) -> PathBuf` and
+/// cannot await a database read per profile. Resolving the whole set first keeps
+/// that signature and still asks the row, which is the only correct source once
+/// a profile can live under any root.
+async fn resolve_dirs(
+    store: &crate::store::Store,
+    profiles: &[crate::store::Profile],
+) -> anyhow::Result<std::collections::HashMap<String, std::path::PathBuf>> {
+    let mut out = std::collections::HashMap::new();
+    for p in profiles {
+        out.insert(p.id.clone(), store.profile_dir(&p.id).await?);
+    }
+    Ok(out)
+}
+
+/// Which tabs a launch opens.
 ///
-/// "Has it been opened before" is asked of the directory rather than of a flag
+/// Restored sessions win, and that is read from the directory rather than kept
 /// in the database, for the same reason `running` is: a flag can be wrong after
 /// a crash, or after a bundle is unpacked from a colleague's machine, and the
 /// Sessions directory is the very thing the browser will read a moment later.
-fn start_urls_for(dir: &std::path::Path, configured: &[String], start_page: &str) -> Vec<String> {
+fn start_urls_for(dir: &std::path::Path, configured: &[String]) -> Vec<String> {
     if dir.join("Default").join("Sessions").is_dir() {
         return Vec::new();
     }
     if configured.is_empty() {
-        // Nothing configured means the start page, not a blank tab: the first
-        // thing an operator needs after opening a profile is proof that the
-        // disguise and the exit are working. The address carries this
-        // launch's token — see `Relay::start_url`.
-        return vec![start_page.to_string()];
+        // Nothing configured opens a blank tab. The relay's start page used to
+        // be the default, to prove the disguise and the exit on the first
+        // launch, but a profile with no site configured should not be sent to
+        // one: the operator asked for no page. The relay still serves that page
+        // at this launch's token for anything that asks for it — see
+        // `Relay::start_url` — it is simply not the first tab.
+        return vec!["about:blank".to_string()];
     }
     configured.to_vec()
 }
@@ -437,7 +454,7 @@ impl Agent {
 
     /// Open a local profile with its debugging port and warm it.
     async fn farm_local(&self, s: &crate::farm::Start) -> anyhow::Result<()> {
-        self.launch(&s.profile_id, None, None, None, None, true).await?;
+        self.launch(&s.profile_id, None, None, None, None, true, false).await?;
         let ws = self
             .running
             .lock()
@@ -554,14 +571,14 @@ impl Agent {
         // pipe name is machine-wide, and `Stream::connect` refuses a pipe this
         // user does not own, so a squatted name is reported here as a refusal
         // rather than surfacing later as a shell that cannot talk to anything.
-        if fury_platform::Stream::connect(&endpoint).await.is_ok() {
-            anyhow::bail!("another fury-agent is already running on this machine ({endpoint})");
+        if xchange_platform::Stream::connect(&endpoint).await.is_ok() {
+            anyhow::bail!("another xchange-agent is already running on this machine ({endpoint})");
         }
 
         // The address is the whole authorisation story: anyone who can open it
         // can launch profiles and read proxy credentials. `bind` is what makes
         // it private — 0600 on the socket, an owner-only DACL on the pipe.
-        let mut listener = fury_platform::Listener::bind(&endpoint)?;
+        let mut listener = xchange_platform::Listener::bind(&endpoint)?;
 
         tracing::info!(agent = %endpoint, "agent listening");
 
@@ -571,7 +588,7 @@ impl Agent {
             // tester's agent restarted 39 times in a day this way, 18.10.2026.
             let stream = match listener.accept().await {
                 Ok(s) => s,
-                Err(e) if fury_platform::is_out_of_descriptors(&e) => {
+                Err(e) if xchange_platform::is_out_of_descriptors(&e) => {
                     tracing::warn!(error = %e, "agent socket: out of file descriptors, waiting");
                     tokio::time::sleep(std::time::Duration::from_millis(200)).await;
                     continue;
@@ -589,7 +606,7 @@ impl Agent {
 
     async fn handle_connection(
         self: Arc<Self>,
-        stream: fury_platform::Stream,
+        stream: xchange_platform::Stream,
     ) -> anyhow::Result<()> {
         let (read, mut write) = stream.into_split();
         let mut lines = BufReader::new(read).lines();
@@ -668,7 +685,7 @@ impl Agent {
             // Refused while a profile is open. The agent holds its lock and
             // relays, and the shell asks the person to close them first; this
             // is the same rule, kept here too so no caller can skip it.
-            // `when_idle`: the shell is quitting (macOS kept showing Fury as
+            // `when_idle`: the shell is quitting (macOS kept showing XChange as
             // "running in background" for as long as the agent it started was
             // alive, 10.10.2026). Nothing open: exit now. Profiles open: they
             // keep their agent, which exits once the last of them has closed
@@ -745,13 +762,26 @@ impl Agent {
             "projects.create" => {
                 let name = str_param(&params, "name")?;
                 let notes = params.get("notes").and_then(|v| v.as_str()).unwrap_or("");
-                Ok(json!({ "id": self.store.create_project(&name, notes).await? }))
+                let sort_weight = params.get("sort_weight").and_then(|v| v.as_i64()).unwrap_or(0);
+                if sort_weight < 0 {
+                    anyhow::bail!("sort weight cannot be negative");
+                }
+                let creator = params.get("created_by").and_then(|v| v.as_str()).unwrap_or("");
+                Ok(json!({
+                    "id": self.store.create_project(&name, notes, sort_weight, creator).await?
+                }))
             }
             "projects.rename" => {
                 let id = str_param(&params, "id")?;
                 let name = str_param(&params, "name")?;
-                let notes = params.get("notes").and_then(|v| v.as_str()).unwrap_or("");
-                self.store.rename_project(&id, &name, notes).await?;
+                let notes = params.get("notes").and_then(|v| v.as_str());
+                let sort_weight = params.get("sort_weight").and_then(|v| v.as_i64());
+                if let Some(weight) = sort_weight {
+                    if weight < 0 {
+                        anyhow::bail!("sort weight cannot be negative");
+                    }
+                }
+                self.store.rename_project(&id, &name, notes, sort_weight).await?;
                 Ok(json!({}))
             }
             "projects.delete" => {
@@ -795,6 +825,138 @@ impl Agent {
             "core.downloadStatus" => Ok(serde_json::to_value(&*self.core_download.lock().await)?),
 
             "proxies.list" => Ok(serde_json::to_value(self.store.proxies().await?)?),
+
+            // Where new profiles are made, and where the existing ones are —
+            // two different questions once the root can change. The counts are
+            // what the confirmation dialog needs: "the eight you already have
+            // stay where they are" is only true if it says eight.
+            "storage.get" => {
+                let root = self.store.profile_root().await?;
+                let default_root = paths::data_dir().join("profiles");
+                let in_root = |dir: &std::path::Path, root: &std::path::Path| {
+                    dir.parent() == Some(root)
+                };
+                let mut here = 0usize;
+                let mut elsewhere = 0usize;
+                for p in self.store.profiles(None).await? {
+                    let dir = self.store.profile_dir(&p.id).await?;
+                    if in_root(&dir, &default_root) {
+                        here += 1;
+                    } else {
+                        elsewhere += 1;
+                    }
+                }
+                Ok(json!({
+                    "profile_root": root.as_ref().map(|r| r.display().to_string()),
+                    "default_root": default_root.display().to_string(),
+                    "profiles_here": here,
+                    "profiles_elsewhere": elsewhere,
+                }))
+            }
+
+            // Choosing where new profiles go. Refuses everything that would
+            // produce a profile nobody can find or nobody else can read; the
+            // codes are translated, the sentences are the fallback.
+            "storage.setRoot" => {
+                let raw = str_param(&params, "path")?;
+                let create = params.get("create").and_then(|v| v.as_bool()).unwrap_or(false);
+                let chosen = std::path::PathBuf::from(&raw);
+
+                let refuse = |code: &'static str, message: String| -> anyhow::Error {
+                    Coded { code, message }.into()
+                };
+
+                if !chosen.is_absolute()
+                    || chosen.components().any(|c| matches!(c, std::path::Component::ParentDir))
+                {
+                    return Err(refuse(
+                        "err.rootBadPath",
+                        format!("{raw} is not an absolute path without \"..\""),
+                    ));
+                }
+
+                let data_dir = paths::data_dir();
+                // The data directory itself, and anything above it, holds the
+                // database and the browser: putting profiles "in" either would
+                // mix them into a tree that backup and removal treat as one.
+                if data_dir.starts_with(&chosen) {
+                    return Err(refuse(
+                        "err.rootOverlaps",
+                        format!(
+                            "{raw} contains XChange's own data directory ({}); choose a folder beside it, not around it",
+                            data_dir.display()
+                        ),
+                    ));
+                }
+
+                if !chosen.exists() {
+                    if !create {
+                        return Err(refuse(
+                            "err.rootNotDir",
+                            format!("{raw} does not exist"),
+                        ));
+                    }
+                    std::fs::create_dir_all(&chosen).map_err(|e| {
+                        refuse("err.rootNotWritable", format!("could not create {raw}: {e}"))
+                    })?;
+                } else if !chosen.is_dir() {
+                    return Err(refuse(
+                        "err.rootNotDir",
+                        format!("{raw} is a file, not a folder"),
+                    ));
+                }
+
+                // Writing is what a profile needs; asking by trying beats
+                // guessing from a mode bit that Windows does not have.
+                let probe = chosen.join(".xchange-write-probe");
+                match std::fs::write(&probe, b"probe") {
+                    Ok(()) => {
+                        let _ = std::fs::remove_file(&probe);
+                    }
+                    Err(e) => {
+                        return Err(refuse(
+                            "err.rootNotWritable",
+                            format!("{raw} cannot be written to: {e}"),
+                        ))
+                    }
+                }
+
+                // The cookie jars live here. A filesystem without ACLs — a FAT
+                // stick, a network share mounted without permissions — cannot
+                // be locked down, and `owner_only_dir` would fail silently.
+                // Reported rather than ignored, because the alternative is an
+                // operator who believes it is protected.
+                xchange_platform::perms::owner_only_dir(&chosen).map_err(|e| {
+                    refuse(
+                        "err.rootNoAcl",
+                        format!(
+                            "{raw} cannot be restricted to your account ({e}). \
+                             Use a folder on an NTFS or APFS volume, not a removable \
+                             disk formatted for FAT or exFAT."
+                        ),
+                    )
+                })?;
+
+                self.store.set_profile_root(Some(&chosen)).await?;
+                tracing::info!(root = %chosen.display(), "new profiles will be created under this folder");
+                Ok(json!({ "profile_root": chosen.display().to_string() }))
+            }
+
+            // Puts the default back, which is where `FURY_HOME` points.
+            "storage.resetRoot" => {
+                self.store.set_profile_root(None).await?;
+                Ok(json!({ "profile_root": serde_json::Value::Null }))
+            }
+
+            // Where one profile's data actually is. The shell needs this rather
+            // than computing `data_dir()/profiles/<id>`, which stopped being the
+            // answer the moment a profile could be filed under a chosen root.
+            "profiles.dir" => {
+                let id = str_param(&params, "id")?;
+                let dir = self.store.profile_dir(&id).await?;
+                Ok(json!({ "dir": dir.display().to_string() }))
+            }
+
             // How big is it, and how much of that is throwaway.
             //
             // Profiles reach hundreds of megabytes and until now nothing showed
@@ -802,7 +964,8 @@ impl Agent {
             // and the account with it.
             "profiles.usage" => {
                 let id = str_param(&params, "id")?;
-                let u = crate::usage::measure(&paths::profile_dir(&id))?;
+                let dir = self.store.profile_dir(&id).await?;
+                let u = crate::usage::measure(&dir)?;
                 Ok(serde_json::to_value(u)?)
             }
 
@@ -820,7 +983,7 @@ impl Agent {
                 if self.running.lock().await.contains_key(&id) {
                     anyhow::bail!("close the profile first — Chromium holds its cache open");
                 }
-                let t = crate::usage::trim(&paths::profile_dir(&id))?;
+                let t = crate::usage::trim(&self.store.profile_dir(&id).await?)?;
                 Ok(serde_json::to_value(t)?)
             }
 
@@ -861,7 +1024,7 @@ impl Agent {
 
                 let report = crate::import_browser::import(
                     std::path::Path::new(&source),
-                    &paths::profile_dir(&id).join("Default"),
+                    &self.store.profile_dir(&id).await?.join("Default"),
                 )?;
                 Ok(serde_json::to_value(report)?)
             }
@@ -1106,8 +1269,8 @@ impl Agent {
             }
 
             // What the Extensions section offers by one click. The list is
-            // shared/extensions/catalogue.json, baked into fury-shared.
-            "extensions.catalogue" => Ok(serde_json::to_value(fury_shared::extensions::all())?),
+            // shared/extensions/catalogue.json, baked into xchange-shared.
+            "extensions.catalogue" => Ok(serde_json::to_value(xchange_shared::extensions::all())?),
 
             // Install by Web Store id into many profiles. The package is
             // fetched once per distinct proxy — through that proxy — and the
@@ -1116,7 +1279,7 @@ impl Agent {
             // in `install_many`.
             "extensions.install_from_store" => {
                 let ext_id = str_param(&params, "ext_id")?;
-                if !fury_shared::extensions::is_id(&ext_id) {
+                if !xchange_shared::extensions::is_id(&ext_id) {
                     anyhow::bail!("{ext_id:?} is not an extension id");
                 }
                 let ids: Vec<String> = params
@@ -1251,7 +1414,7 @@ impl Agent {
                 if running.contains_key(&from) {
                     anyhow::bail!("source_open");
                 }
-                let source = paths::profile_dir(&from);
+                let source = self.store.profile_dir(&from).await?;
                 let mut installed = Vec::new();
                 let mut skipped = Vec::new();
                 let mut about: Option<crate::ext::Installed> = None;
@@ -1270,7 +1433,8 @@ impl Agent {
                     let team_held = if self.store.profile(&id).await?.is_some() {
                         None
                     } else {
-                        match crate::unsynced::held(&id) {
+                        let dir = self.store.profile_dir(&id).await?;
+                        match crate::unsynced::held(&dir) {
                             Some(v) => Some(v),
                             None => {
                                 skipped.push(json!({ "id": id, "reason": "not_here" }));
@@ -1278,14 +1442,15 @@ impl Agent {
                             }
                         }
                     };
-                    match crate::ext::copy_with_state(&source, &paths::profile_dir(&id), &ext_id) {
+                    let target = self.store.profile_dir(&id).await?;
+                    match crate::ext::copy_with_state(&source, &target, &ext_id) {
                         Ok(x) => {
                             // An existing marker already names the version this
                             // copy grew from; replacing it would forget a session
                             // that never reached the server.
                             if let Some(v) = team_held {
-                                if crate::unsynced::base(&id).is_none() {
-                                    crate::unsynced::mark(&id, v);
+                                if crate::unsynced::base(&target).is_none() {
+                                    crate::unsynced::mark(&target, &id, v);
                                 }
                             }
                             about.get_or_insert(x);
@@ -1345,7 +1510,7 @@ impl Agent {
 
                 let mut saved = Vec::new();
                 let mut rejected = Vec::new();
-                for (line_no, parsed) in fury_shared::proxy_list::parse_block(&text) {
+                for (line_no, parsed) in xchange_shared::proxy_list::parse_block(&text) {
                     match parsed {
                         Ok(p) => {
                             // The name has to be unique enough to pick out of a
@@ -1678,7 +1843,15 @@ impl Agent {
                 Ok(serde_json::to_value(out)?)
             }
             "profiles.upsert" => {
-                let profile: Profile = serde_json::from_value(params)?;
+                let mut profile: Profile = serde_json::from_value(params)?;
+                // A profile being created starts from the new-profile defaults:
+                // Real canvas and WebRTC Base on IP. Existing profiles keep
+                // whatever they store — `fp_seed == 0` is the one state that
+                // means "not saved yet", and upsert_profile assigns the seed on
+                // this write. Fields the caller set explicitly are untouched.
+                if profile.fp_seed == 0 {
+                    profile.overrides.apply_new_profile_defaults();
+                }
 
                 // The persona is checked HERE rather than only at launch.
                 //
@@ -1714,6 +1887,16 @@ impl Agent {
                 }
 
                 Ok(json!({ "id": self.store.upsert_profile(&profile).await? }))
+            }
+            // The note alone, beside the row it belongs to (04.11.2026). The
+            // dialog round-trips a whole profile; this must not, or a sentence
+            // typed from the table would carry every stale field in that row
+            // back into the store.
+            "profiles.set_notes" => {
+                let id = str_param(&params, "id")?;
+                let notes = params.get("notes").and_then(|v| v.as_str()).unwrap_or("");
+                self.store.set_notes(&id, notes).await?;
+                Ok(json!({}))
             }
             // Make many at once. The one-at-a-time dialog is fine for a first
             // profile and useless for the two hundredth, which is the number
@@ -1771,11 +1954,16 @@ impl Agent {
                     let mut p = template.clone();
                     p.id = String::new();
                     p.fp_seed = 0;
+                    // Same new-profile defaults as the dialog: Real canvas and
+                    // Base on IP WebRTC. A template that explicitly carries
+                    // Noise or Off keeps it; absent means these new profiles
+                    // take the defaults.
+                    p.overrides.apply_new_profile_defaults();
                     p.name = pattern.replace("{n}", &i.to_string());
                     if pick_persona {
-                        p.persona_id = fury_shared::catalogue::pick_weighted_on(
+                        p.persona_id = xchange_shared::catalogue::pick_weighted_on(
                             rand::random(),
-                            fury_shared::catalogue::host_os(),
+                            xchange_shared::catalogue::host_os(),
                         )
                         .id;
                     }
@@ -1848,7 +2036,7 @@ impl Agent {
                     }
                     let is_running = self.running.lock().await.contains_key(&id);
                     if !is_running {
-                        if let Err(e) = self.launch(&id, None, None, None, None, true).await {
+                        if let Err(e) = self.launch(&id, None, None, None, None, true, false).await {
                             refused.push(refusal(&id, &e));
                             continue;
                         }
@@ -1894,7 +2082,7 @@ impl Agent {
                     }
                     let is_running = self.running.lock().await.contains_key(&id);
                     if !is_running {
-                        if let Err(e) = self.launch(&id, None, None, None, None, true).await {
+                        if let Err(e) = self.launch(&id, None, None, None, None, true, false).await {
                             refused.push(refusal(&id, &e));
                             continue;
                         }
@@ -2069,6 +2257,68 @@ impl Agent {
                 Ok(json!({}))
             }
 
+            // A fresh browser folder for a profile, in the storage root chosen
+            // now.
+            //
+            // The case it exists for: the folder was moved, renamed or deleted
+            // behind the application's back while the row still pointed at it.
+            // Launching such a profile refuses rather than quietly starting
+            // empty (err.profileDirMissing), so the ways out were resetting the
+            // root for every profile or deleting this one and the account with
+            // it. This forgets the old path, removes what is there, and makes a
+            // new directory where the current root says profiles live. Cookies
+            // and site data in the old folder go; the row, its tags and the
+            // logins kept in XChange stay.
+            "profiles.reset" => {
+                let id = str_param(&params, "id")?;
+                if self.running.lock().await.contains_key(&id) {
+                    return Err(Coded {
+                        code: "err.resetOpen",
+                        message:
+                            "close this profile first — its browser is still writing to the folder"
+                                .into(),
+                    }
+                    .into());
+                }
+                let old = self.store.profile_dir(&id).await?;
+                let root = self.store.profile_root().await?;
+                let new = paths::profile_dir_in(root.as_deref(), &id);
+                let roots = self.store.known_roots().await?;
+                // Both paths are about to be handed to remove_dir_all, and
+                // neither is trusted: one comes out of a database column, the
+                // other out of a setting. Same guard the purge uses.
+                crate::paths::checked_profile_path(&roots, &id, &old)?;
+                if new != old {
+                    crate::paths::checked_profile_path(&roots, &id, &new)?;
+                    // The current root may already hold an orphan from an
+                    // earlier move; leaving it would restore the stale state
+                    // this call is meant to clear.
+                    if new.exists() {
+                        std::fs::remove_dir_all(&new)?;
+                    }
+                    // Made before the old directory goes, so a root that has
+                    // become unwritable costs nothing but the attempt.
+                    std::fs::create_dir_all(&new)?;
+                }
+                let removed = old.exists();
+                if removed {
+                    std::fs::remove_dir_all(&old)?;
+                }
+                std::fs::create_dir_all(&new)?;
+                self.store.set_profile_dir(&id, &new).await?;
+                tracing::info!(
+                    profile = %id,
+                    dir = %new.display(),
+                    removed,
+                    "profile folder reset"
+                );
+                Ok(json!({
+                    "dir": new.display().to_string(),
+                    "previous": old.display().to_string(),
+                    "removed": removed,
+                }))
+            }
+
             // What a profile will claim to be, before it exists.
             //
             // The competition builds a fingerprint from independent dropdowns —
@@ -2082,7 +2332,7 @@ impl Agent {
             "profile.preview" => {
                 let base = crate::personas::load(&str_param(&params, "persona_id")?)?;
                 let catalogue = crate::personas::all();
-                let overrides: fury_shared::overrides::MachineOverrides = params
+                let overrides: xchange_shared::overrides::MachineOverrides = params
                     .get("overrides")
                     .filter(|v| !v.is_null())
                     .map(|v| serde_json::from_value(v.clone()))
@@ -2090,7 +2340,7 @@ impl Agent {
                     .unwrap_or_default();
                 // What the pickers may offer for this machine, answered with the
                 // preview so the dialog never lists a value for the wrong OS.
-                let options = fury_shared::overrides::options_for(&base, &catalogue);
+                let options = xchange_shared::overrides::options_for(&base, &catalogue);
                 // An override that makes an impossible machine is shown, not
                 // hidden: the preview falls back to the persona as it is and
                 // lists the problems, and Save stays disabled on them.
@@ -2108,7 +2358,7 @@ impl Agent {
                             .collect()
                     })
                     .unwrap_or_else(|| vec!["en-US".into(), "en".into()]);
-                let mut ctx = fury_shared::persona::ProfileContext {
+                let mut ctx = xchange_shared::persona::ProfileContext {
                     timezone: params
                         .get("timezone")
                         .and_then(|v| v.as_str())
@@ -2118,7 +2368,7 @@ impl Agent {
                     // the UI locale exactly as the launch does. A preview that
                     // showed a different locale from the launch would be worse
                     // than no preview: it is read as a check that passed.
-                    ui_locale: fury_shared::locale::ui_locale_for(
+                    ui_locale: xchange_shared::locale::ui_locale_for(
                         languages.first().map(|s| s.as_str()),
                     ),
                     // The preview has no proxy to ask, so it cannot know where
@@ -2140,7 +2390,9 @@ impl Agent {
                 problems.extend(override_problems);
 
                 let mut cfg = persona.derive_core_config(seed.max(1) as u64, &ctx);
-                overrides.apply_config(&mut cfg);
+                // A new profile has no seed yet; pass 0 so the preview does not
+                // show a Base-on-IP local address the launch would change.
+                overrides.apply_config(&mut cfg, seed.max(0) as u64);
                 let get = |path: &str| -> serde_json::Value {
                     path.split('.')
                         .try_fold(&cfg, |n, part| n.get(part))
@@ -2157,7 +2409,7 @@ impl Agent {
                     let platform = get("clientHints.platform").as_str().unwrap_or("").to_string();
                     let version = get("clientHints.platformVersion").as_str().unwrap_or("").to_string();
                     let release = if platform == "Windows" {
-                        fury_shared::persona::windows_release_name(&version)
+                        xchange_shared::persona::windows_release_name(&version)
                             .map(|r| format!(" ({r})"))
                             .unwrap_or_default()
                     } else {
@@ -2219,7 +2471,11 @@ impl Agent {
                         )),
                     },
                     "ui_locale": get("locale.locale"),
-                    "webrtc": get("webrtc.ipHandlingPolicy"),
+                    // The mode a page will read; the policy itself is always
+                    // disable_non_proxied_udp and is not a user-facing choice.
+                    "webrtc": get("webrtc.mode"),
+                    "webrtc_public_ip": get("webrtc.publicIp"),
+                    "webrtc_local_ip": get("webrtc.localIp"),
                     "js_heap_gb": get("engine.jsHeapSizeLimit").as_f64().map(|b| (b / 1073741824.0 * 10.0).round() / 10.0),
                     "persona_source": persona.source,
                     "persona_weight": persona.weight,
@@ -2271,8 +2527,24 @@ impl Agent {
                     }
                 }
 
+                // Resolved here, before the call, because `export_project`
+                // takes a synchronous lookup: a profile can be filed under any
+                // root, so there is no single function that answers for all of
+                // them any more.
+                let dirs = resolve_dirs(&self.store, &self.store.profiles(Some(&id)).await?).await?;
                 let bytes = crate::transfer::export_project(
-                    &self.store, &id, &dest, &passphrase, with_data, paths::profile_dir,
+                    &self.store, &id, &dest, &passphrase, with_data,
+                    // Never an empty path on a miss. An empty `PathBuf` is not
+                    // "unknown", it is a path that `exists()` answers false for,
+                    // and the export skips a directory it cannot find — so a
+                    // lookup that missed would produce an archive that is
+                    // complete by every count and missing a profile's cookies.
+                    // The default root is at least a real place to look.
+                    move |pid: &str| {
+                        dirs.get(pid)
+                            .cloned()
+                            .unwrap_or_else(|| paths::profile_dir(pid))
+                    },
                 )
                 .await?;
                 Ok(json!({ "path": dest.display().to_string(), "bytes": bytes }))
@@ -2281,11 +2553,74 @@ impl Agent {
             "projects.import" => {
                 let src = std::path::PathBuf::from(str_param(&params, "path")?);
                 let passphrase = str_param(&params, "passphrase")?;
+                // Imported profiles have no row yet, so each one lands under the
+                // root in force now. Resolved once and handed to the import as a
+                // lookup, the same shape as the export above.
+                let root = self.store.profile_root().await?;
                 let (project_id, count) = crate::transfer::import_project(
-                    &self.store, &src, &passphrase, paths::profile_dir,
+                    &self.store, &src, &passphrase,
+                    move |new_id: &str| paths::profile_dir_in(root.as_deref(), new_id),
                 )
                 .await?;
                 Ok(json!({ "project_id": project_id, "profiles": count }))
+            }
+
+            "profiles.export" => {
+                let dir = std::path::PathBuf::from(str_param(&params, "dir")?);
+                let name = str_param(&params, "name")?;
+                let format = match str_param(&params, "format")?.as_str() {
+                    "directory" => crate::export::Format::Directory,
+                    "zip" => crate::export::Format::Zip,
+                    other => anyhow::bail!("unknown export format {other:?}"),
+                };
+                let targets: Vec<crate::export::Target> =
+                    serde_json::from_value(params.get("profiles").cloned().unwrap_or_default())?;
+
+                // Nothing may be open, for the same reason `projects.export`
+                // insists: a browser writes its cookie jar on its own schedule,
+                // and copying it mid-run produces a profile that opens logged
+                // out. An open one is counted as skipped, not treated as a
+                // reason to abandon the others.
+                let total = targets.len();
+                let live: Vec<_> = {
+                    let running = self.running.lock().await;
+                    targets
+                        .into_iter()
+                        .filter(|t| !running.contains_key(&t.id))
+                        .collect()
+                };
+                let busy = total - live.len();
+                let report =
+                    crate::export::export(&self.store, &live, &dir, &name, format).await?;
+                Ok(json!({
+                    "path": report.path.display().to_string(),
+                    "profiles": report.profiles,
+                    "skipped": report.skipped + busy,
+                    "bytes": report.bytes,
+                }))
+            }
+
+            "profiles.import" => {
+                let path = std::path::PathBuf::from(str_param(&params, "path")?);
+                let project_id = params
+                    .get("project_id")
+                    .and_then(|v| v.as_str())
+                    .map(str::to_string);
+                // A new profile lands under the root in force now; the import
+                // pins each one with `set_profile_dir` afterwards.
+                let root = self.store.profile_root().await?;
+                let report = crate::import_profiles::import(
+                    &self.store,
+                    &path,
+                    project_id.as_deref(),
+                    move |new_id: &str| paths::profile_dir_in(root.as_deref(), new_id),
+                )
+                .await?;
+                Ok(json!({
+                    "imported": report.imported,
+                    "logins": report.logins,
+                    "names": report.names,
+                }))
             }
 
             // Seal a profile into a bundle, and open one back.
@@ -2307,6 +2642,10 @@ impl Agent {
             // takes the lock, and the stop packs and pushes. An import that
             // spawned its own browser would skip all four, and the cookies
             // would be on this machine and nowhere else.
+            //
+            // The one difference is the window: the browser that does the
+            // exchange runs headless, so nothing appears and vanishes on the
+            // operator's screen for a read of their own cookie jar.
             "profile.cookies.export" | "profile.cookies.import" => {
                 let id = str_param(&params, "id")?;
                 let importing = method.ends_with("import");
@@ -2338,7 +2677,38 @@ impl Agent {
                                  CDP enabled"
                             );
                         }
-                        let out = self.launch(&id, None, None, None, None, true).await?;
+                        // A local profile's jar is a file, and reading it
+                        // needs no browser at all: Windows stores it as v10
+                        // rows this agent can decrypt with the key in `Local
+                        // State` (cookie_store.rs). Tried first, so an export
+                        // costs the profile no launch, no relay, no proxy and
+                        // no traffic — and a provider proxy, which has no
+                        // host:port until the shell fetches one, exports fine.
+                        //
+                        // Only a profile this machine owns: a team profile
+                        // lives on the server, its local copy can be stale,
+                        // and the launch path below is what pulls the current
+                        // bundle.
+                        let local = matches!(self.store.profile(&id).await, Ok(Some(_)));
+                        if !importing && local {
+                            if let Ok(dir) = self.store.profile_dir(&id).await {
+                                match crate::cookie_store::read(&dir).await {
+                                    Ok(cookies) => return Ok(json!({ "cookies": cookies })),
+                                    Err(e) => tracing::debug!(
+                                        error = %e,
+                                        "reading the cookie store directly failed; starting the browser"
+                                    ),
+                                }
+                            }
+                        }
+                        // Hidden: the exchange is jar in, jar out, and a
+                        // window that appears and vanishes for it is a flash
+                        // the operator did not ask for. Everything else about
+                        // the launch — the relay, the proxy, the profile
+                        // directory, the os-crypt key, and in team mode the
+                        // bundle pull, the lock and the push on close — is the
+                        // ordinary one.
+                        let out = self.launch(&id, None, None, None, None, true, true).await?;
                         let ws = out
                             .get("ws_endpoint")
                             .and_then(|v| v.as_str())
@@ -2357,10 +2727,13 @@ impl Agent {
                     crate::cookies::import(&ws, &incoming).await.map(|r| {
                         json!({
                             "imported": r.accepted,
-                            // Named rather than buried: a session cookie does
-                            // not survive the profile closing, and this call
-                            // closes it.
-                            "session_only": r.session_only,
+                            // `session_only` keeps its wire name: the number now
+                            // counts the session cookies that were given a
+                            // one-year expiry on the way in, so they survive the
+                            // close this call performs. Said out loud because it
+                            // is otherwise invisible: the file said "session"
+                            // and the jar now holds a dated cookie.
+                            "session_only": r.extended,
                             "skipped": r.skipped,
                         })
                     })
@@ -2393,7 +2766,7 @@ impl Agent {
                     }
                 }
                 let sealed = crate::bundle::pack(
-                    &paths::profile_dir(&id),
+                    &self.store.profile_dir(&id).await?,
                     &crate::bundle::Sealer::Machine(self.store.vault()),
                 )?;
                 let out = paths::data_dir().join("bundles");
@@ -2454,7 +2827,7 @@ impl Agent {
                 key.copy_from_slice(&raw);
 
                 let sealed = crate::bundle::pack(
-                    &paths::profile_dir(&id),
+                    &self.store.profile_dir(&id).await?,
                     &crate::bundle::Sealer::Shared {
                         key,
                         vault: Some(self.store.vault()),
@@ -2480,7 +2853,7 @@ impl Agent {
                     &std::fs::read(&path)?,
                     &wrapped_key,
                     &crate::bundle::Sealer::Machine(self.store.vault()),
-                    &paths::profile_dir(&id),
+                    &self.store.profile_dir(&id).await?,
                 )?;
                 Ok(json!({ "files": files }))
             }
@@ -2507,7 +2880,14 @@ impl Agent {
             }
             "profiles.purge" => {
                 let id = str_param(&params, "id")?;
-                self.store.purge_profile(&id, &paths::profile_dir(&id)).await?;
+                let dir = self.store.profile_dir(&id).await?;
+                // Never `remove_dir_all` on a path that came out of a database
+                // column without asking what it is. A row holding "/" or "C:\"
+                // — a bad edit, a hand-modified database, a root that was
+                // cleared — would delete the machine rather than the profile.
+                let roots = self.store.known_roots().await?;
+                crate::paths::checked_profile_path(&roots, &id, &dir)?;
+                self.store.purge_profile(&id, &dir).await?;
                 Ok(json!({}))
             }
 
@@ -2555,9 +2935,99 @@ impl Agent {
                     inline,
                     team,
                     cdp,
+                    false,
                 )
                 .await
             }
+            // Sign one local profile in from the window's Login button.
+            //
+            // Launched with CDP if it is closed, reused if a debugging port is
+            // already there. The browser is deliberately *not* stopped after
+            // the attempt: a verification code or captcha is finished by a
+            // person in that window. See login.rs for the order and why the
+            // saved cookie is written only when the profile is signed out.
+            "profile.login" => {
+                let id = str_param(&params, "id")?;
+                let platform = params
+                    .get("platform")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("shopee");
+                if platform != "shopee" {
+                    return Err(Coded {
+                        code: "err.loginUnsupported",
+                        message: "login is implemented for Shopee only".into(),
+                    }
+                    .into());
+                }
+                let url = params
+                    .get("url")
+                    .and_then(serde_json::Value::as_str)
+                    .filter(|v| !v.is_empty())
+                    .ok_or_else(|| anyhow::anyhow!("missing parameter \"url\""))?;
+                let check_url = params
+                    .get("check_url")
+                    .and_then(serde_json::Value::as_str)
+                    .filter(|v| !v.is_empty())
+                    .ok_or_else(|| anyhow::anyhow!("missing parameter \"check_url\""))?;
+                let cookies: Vec<serde_json::Value> = match params.get("cookies") {
+                    Some(raw) => serde_json::from_value(raw.clone())
+                        .map_err(|e| anyhow::anyhow!("cookies must be a JSON array: {e}"))?,
+                    None => Vec::new(),
+                };
+                let username = params
+                    .get("username")
+                    .and_then(serde_json::Value::as_str)
+                    .filter(|v| !v.is_empty());
+                let password = params
+                    .get("password")
+                    .and_then(serde_json::Value::as_str)
+                    .filter(|v| !v.is_empty());
+
+                let open = self
+                    .running
+                    .lock()
+                    .await
+                    .get(&id)
+                    .and_then(|r| r.ws_endpoint.clone());
+                let (ws, launched) = match open {
+                    Some(ws) => (ws, false),
+                    None => {
+                        if self.running.lock().await.contains_key(&id) {
+                            return Err(Coded {
+                                code: "err.loginNeedsCdp",
+                                message: "this profile is open without a debugging port. \
+                                          Close it and press Login again"
+                                    .into(),
+                            }
+                            .into());
+                        }
+                        let out = self.launch(&id, None, None, None, None, true, false).await?;
+                        let ws = out
+                            .get("ws_endpoint")
+                            .and_then(serde_json::Value::as_str)
+                            .map(str::to_string)
+                            .ok_or_else(|| {
+                                anyhow::anyhow!(
+                                    "the browser started but never wrote a debugging endpoint"
+                                )
+                            })?;
+                        (ws, true)
+                    }
+                };
+
+                let outcome =
+                    crate::login::shopee(&ws, url, check_url, &cookies, username, password).await?;
+                Ok(json!({
+                    "launched": launched,
+                    "logged_in": outcome.logged_in,
+                    "cookie_written": outcome.cookie_written,
+                    "signed_in_now": outcome.signed_in_now,
+                    "needs_action": outcome.needs_action,
+                    "url": outcome.url,
+                    "reason": outcome.reason,
+                }))
+            }
+
             "profile.stop" => self.stop(&str_param(&params, "id")?).await,
 
             // The page of an open profile, for an assistant over MCP. See
@@ -2577,7 +3047,7 @@ impl Agent {
                         None => {
                             return Err(Coded {
                                 code: "err.pageNotOpen",
-                                message: "this profile is not open. Start it with fury_start_profile first".into(),
+                                message: "this profile is not open. Start it with xchange_start_profile first".into(),
                             }
                             .into())
                         }
@@ -2587,9 +3057,9 @@ impl Agent {
                 let Some(ws) = ws else {
                     return Err(Coded {
                         code: "err.pageNoCdp",
-                        message: "this profile was opened without the automation port (from the Fury window, \
-                                  for instance), so its page cannot be driven. Close it with fury_stop_profile \
-                                  and start it again with fury_start_profile"
+                        message: "this profile was opened without the automation port (from the XChange window, \
+                                  for instance), so its page cannot be driven. Close it with xchange_stop_profile \
+                                  and start it again with xchange_start_profile"
                             .into(),
                     }
                     .into());
@@ -2601,6 +3071,7 @@ impl Agent {
                 let profile_id = str_param(&params, "profile_id")?;
                 Ok(serde_json::to_value(self.store.credentials(&profile_id).await?)?)
             }
+            "credentials.index" => Ok(serde_json::to_value(self.store.credential_index().await?)?),
             "credentials.upsert" => {
                 let c: crate::store::Credential = serde_json::from_value(params)?;
                 Ok(json!({ "id": self.store.upsert_credential(&c).await? }))
@@ -2631,7 +3102,7 @@ impl Agent {
                     .as_deref()
                     .filter(|v| !v.is_empty())
                     .ok_or_else(|| anyhow::anyhow!("this login has no two-factor seed"))?;
-                let totp = fury_shared::totp::Totp::parse(raw)?;
+                let totp = xchange_shared::totp::Totp::parse(raw)?;
                 let now = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
                     .map(|d| d.as_secs())
@@ -2740,6 +3211,7 @@ impl Agent {
         inline: Option<Profile>,
         team: Option<TeamKeys>,
         cdp: bool,
+        headless: bool,
     ) -> anyhow::Result<serde_json::Value> {
         let profile_key = team.as_ref().map(|t| t.profile_key);
         let key_generation = team.as_ref().and_then(|t| t.key_generation);
@@ -2842,7 +3314,7 @@ impl Agent {
             match crate::core_lookup_problem() {
                 Some(why) => anyhow::anyhow!("no core binary: {why}"),
                 None => anyhow::anyhow!(
-                    "no core binary found. Install one with `fury-agent install-core <file>`, \
+                    "no core binary found. Install one with `xchange-agent install-core <file>`, \
                      build it, or point FURY_CORE at one"
                 ),
             }
@@ -2913,7 +3385,7 @@ impl Agent {
         let start_page = relay.start_url();
         let (relay_port, relay_task) = relay.serve(0).await?;
         // The detect-suite probe, on the relay's own loopback address rather
-        // than on `fury.invalid`, and the difference is not cosmetic: loopback
+        // than on `xchange.invalid`, and the difference is not cosmetic: loopback
         // is a potentially trustworthy origin, so the page is a secure context
         // and `navigator.deviceMemory`, `navigator.gpu`, `enumerateDevices()`
         // and service workers all exist in it — every one is absent on plain
@@ -2941,6 +3413,25 @@ impl Agent {
         // for two questions with one answer is waste.
         let want_timezone = profile.timezone.is_none();
         let want_languages = profile.languages.is_none();
+        // BaseOnIp reports the exit address as the srflx candidate, so the
+        // launch needs that address even when timezone and languages are
+        // pinned. `Fixed` carries both addresses in the override.
+        let webrtc_mode = profile
+            .overrides
+            .webrtc
+            .as_ref()
+            .map(|w| w.mode)
+            .unwrap_or(xchange_shared::overrides::WebRtcMode::Off);
+        let want_webrtc_ip = webrtc_mode == xchange_shared::overrides::WebRtcMode::BaseOnIp;
+        // `Base on IP` promises the address the traffic leaves through now, not
+        // the one the proxy had the last time somebody pressed Check. The
+        // stored value is a cache for the timezone/language path; it is not
+        // good enough for a candidate a page will read.
+        let mut exit_ip = if want_webrtc_ip {
+            None
+        } else {
+            proxy.and_then(|p| p.last_ip.clone())
+        };
         let mut exit_country = proxy.and_then(|p| p.last_country.clone());
         let mut exit_timezone = proxy.and_then(|p| p.last_timezone.clone());
         let mut exit_location = proxy.and_then(|p| p.last_location.clone());
@@ -2951,6 +3442,7 @@ impl Agent {
         if (want_timezone && exit_timezone.is_none())
             || (want_languages && exit_country.is_none())
             || exit_location.is_none()
+            || want_webrtc_ip
         {
             // With no proxy the question is still worth asking, and the answer
             // is this machine. A profile that follows its exit and then claims
@@ -2986,12 +3478,19 @@ impl Agent {
                     // Only overwrite with an answer. A checker that returns a
                     // timezone and no country must not blank a country we
                     // already had.
+                    exit_ip = facts.ip.or(exit_ip);
                     exit_country = facts.country.or(exit_country);
                     exit_timezone = facts.timezone.or(exit_timezone);
                     exit_location = facts.location.or(exit_location);
                 }
                 Err(e) => {
                     tracing::warn!(error = format!("{e:#}"), exit_ms, "could not resolve the proxy exit");
+                    if want_webrtc_ip {
+                        return Err(anyhow::anyhow!(
+                            "WebRTC Base on IP needs the proxy exit address, and the exit did \
+                             not answer: {e:#}"
+                        ));
+                    }
                 }
             }
         }
@@ -3010,14 +3509,14 @@ impl Agent {
         });
 
         // What a Chrome installed in that country would say. Not our opinion of
-        // it: `fury_shared::locale` is generated from Chromium's own shipped
+        // it: `xchange_shared::locale` is generated from Chromium's own shipped
         // locales and its own IDS_ACCEPT_LANGUAGES values, so a German exit
         // gets `de-DE,de,en-US,en` because that is the string Chrome ships for
         // a German install — including the English tail, which is why this does
         // not make the profile look like a monolingual German.
         let exit_locale = exit_country
             .as_deref()
-            .and_then(fury_shared::locale::for_country);
+            .and_then(xchange_shared::locale::for_country);
         if want_languages && exit_locale.is_none() {
             tracing::warn!(
                 profile = %profile.name,
@@ -3026,7 +3525,7 @@ impl Agent {
                  is unknown or has no locale row"
             );
         }
-        let locale = exit_locale.unwrap_or(fury_shared::locale::FALLBACK);
+        let locale = exit_locale.unwrap_or(xchange_shared::locale::FALLBACK);
 
         let languages = profile.languages.clone().unwrap_or_else(|| {
             locale.languages.iter().map(|s| (*s).to_string()).collect()
@@ -3037,11 +3536,11 @@ impl Agent {
         // UI locale from the first of them, so the two never disagree; see
         // `ui_locale_for`.
         let ui_locale = match &profile.languages {
-            Some(langs) => fury_shared::locale::ui_locale_for(langs.first().map(|s| s.as_str())),
+            Some(langs) => xchange_shared::locale::ui_locale_for(langs.first().map(|s| s.as_str())),
             None => locale.ui.to_string(),
         };
 
-        let mut ctx = fury_shared::persona::ProfileContext {
+        let mut ctx = xchange_shared::persona::ProfileContext {
             timezone,
             languages,
             ui_locale,
@@ -3056,7 +3555,17 @@ impl Agent {
         profile.overrides.apply_context(&mut ctx);
         let ui_locale = ctx.ui_locale.clone();
         let mut config = persona.derive_core_config(profile.fp_seed as u64, &ctx);
-        profile.overrides.apply_config(&mut config);
+        profile.overrides.apply_config(&mut config, profile.fp_seed as u64);
+        if want_webrtc_ip {
+            let Some(ip) = exit_ip else {
+                anyhow::bail!(
+                    "WebRTC Base on IP needs the proxy exit address, and the exit did not \
+                     answer; refusing to launch rather than report a candidate set the \
+                     profile cannot stand behind"
+                );
+            };
+            config["webrtc"]["publicIp"] = serde_json::json!(ip);
+        }
         // The window's name on the Windows taskbar (patch 0904). Not part of
         // the persona: it is what the operator calls the profile, and nothing
         // a page can read -- the window title is the browser's own.
@@ -3067,16 +3576,49 @@ impl Agent {
         // Local mode has no roles to enforce: whoever can reach this socket
         // owns the machine and the data. Restrictions are a team-server concept
         // and are computed there.
-        let restrictions = fury_shared::rbac::LaunchRestrictions::for_perms(
-            fury_shared::rbac::PermSet::full_profile_work(),
+        let restrictions = xchange_shared::rbac::LaunchRestrictions::for_perms(
+            xchange_shared::rbac::PermSet::full_profile_work(),
         );
         // Asked for, and allowed. A profile whose restrictions deny CDP passes
         // no flag, so waiting for a file the browser will never write would
         // stall every such launch for the length of the timeout.
         let wants_cdp = cdp && !restrictions.deny_cdp;
 
-        let dir = paths::profile_dir(&profile.id);
+        let dir = self.store.profile_dir(&profile.id).await?;
+
+        // A profile whose row names a directory has been launched before, so a
+        // missing one is not "nothing here yet" — it is data that is somewhere
+        // else: an external drive that is not plugged in, a folder renamed in
+        // Explorer, a root that was deleted by hand.
+        //
+        // Creating it anyway is the quiet disaster. The browser opens empty, the
+        // operator signs in again to every site, and the real cookie jar sits
+        // untouched on the disk while the new one slowly replaces it in their
+        // mind. What they report is "the profile is not logged in any more",
+        // which points at cookies rather than at a path. Refusing names the
+        // folder instead, and nothing is written.
+        //
+        // Only a profile with no recorded directory — created but never opened
+        // — is allowed to make one.
+        let stored = self.store.stored_dir(&profile.id).await?;
+        if let Some(stored) = &stored {
+            if !dir.is_dir() {
+                return Err(anyhow::Error::new(Coded {
+                    code: "err.profileDirMissing",
+                    message: format!(
+                        "The folder this profile keeps its data in is not there: {stored}. \
+                         The profile was not opened, and nothing was written."
+                    ),
+                }));
+            }
+        }
         std::fs::create_dir_all(&dir)?;
+        // Record where it went, so that a later change of the storage root
+        // cannot move a profile that already has data. Only fills an empty
+        // column: a profile that has one keeps it.
+        if stored.is_none() {
+            self.store.set_profile_dir(&profile.id, &dir).await?;
+        }
         // Left behind by the previous run, and indistinguishable from this
         // one's once the browser is up.
         let _ = std::fs::remove_file(dir.join("DevToolsActivePort"));
@@ -3107,11 +3649,11 @@ impl Agent {
         // answer that leaves the data intact.
         let os_crypt_key = team.as_ref().map(|t| {
             t.cookie_key
-                .unwrap_or_else(|| fury_shared::keys::os_crypt_key(&t.profile_key, &profile.id))
+                .unwrap_or_else(|| xchange_shared::keys::os_crypt_key(&t.profile_key, &profile.id))
         });
-        let key_marker = dir.join("Fury Key Id");
+        let key_marker = dir.join("XChange Key Id");
         if let Some(key) = os_crypt_key.as_ref() {
-            let want = fury_shared::keys::key_fingerprint(key);
+            let want = xchange_shared::keys::key_fingerprint(key);
             if let Ok(found) = std::fs::read_to_string(&key_marker) {
                 let found = found.trim();
                 if !found.is_empty() && found != want {
@@ -3123,9 +3665,9 @@ impl Agent {
                         // (migration 0020) and a retired organisation key is
                         // caught by the shell before it gets here, so what is
                         // left is a profile last opened before a rotation made
-                        // by an older Fury, which did not.
+                        // by an older XChange, which did not.
                         message: "this profile's cookies were saved under a key that no longer \
-                                  exists: the organisation key was replaced by a version of Fury \
+                                  exists: the organisation key was replaced by a version of XChange \
                                   that did not carry the cookie key over. Opening the profile \
                                   would make the browser delete those cookies, so it was not opened"
                             .into(),
@@ -3142,7 +3684,7 @@ impl Agent {
             // in 0.1 s, and the log could not say whether the time went on the
             // wire or on writing the profile to disk. Now it says.
             let fetch_started = std::time::Instant::now();
-            let held = crate::unsynced::held(&profile.id);
+            let held = crate::unsynced::held(&dir);
             let fetched = srv.fetch_bundle(&profile.id, held).await?;
             let fetch_ms = fetch_started.elapsed().as_millis() as u64;
             use crate::sync::Fetched;
@@ -3170,7 +3712,7 @@ impl Agent {
                     // Not over a session this machine never managed to upload.
                     // See unsynced.rs.
                     use crate::unsynced::Pull;
-                    match crate::unsynced::decide(crate::unsynced::base(&profile.id), version) {
+                    match crate::unsynced::decide(crate::unsynced::base(&dir), version) {
                         Pull::KeepLocal => tracing::warn!(
                             profile = %profile.name,
                             version,
@@ -3179,7 +3721,7 @@ impl Agent {
                         ),
                         pull => {
                             if pull == Pull::SetAsideThenUnpack {
-                                let aside = crate::unsynced::set_aside(&profile.id)?;
+                                let aside = crate::unsynced::set_aside(&dir)?;
                                 tracing::warn!(
                                     profile = %profile.name,
                                     version,
@@ -3190,7 +3732,7 @@ impl Agent {
                             }
                             let unpack_started = std::time::Instant::now();
                             let files = crate::bundle::unpack(&bytes, &wrapped, &sealer, &dir)?;
-                            crate::unsynced::record_held(&profile.id, version);
+                            crate::unsynced::record_held(&dir, &profile.id, version);
                             tracing::info!(
                                 profile = %profile.name,
                                 version,
@@ -3229,7 +3771,7 @@ impl Agent {
         // be wrong after a crash or after a bundle is unpacked from a
         // colleague's machine, and the Sessions directory is the thing the
         // browser itself will be reading a moment later.
-        let start_urls = start_urls_for(&dir, &profile.start_urls, &start_page);
+        let start_urls = start_urls_for(&dir, &profile.start_urls);
 
         // Whatever has been installed for this profile. Read from disk rather
         // than from the database: the directory is what the browser will
@@ -3261,6 +3803,7 @@ impl Agent {
             // check and the exec, and the failure lands as a browser that
             // started without CDP for no visible reason.
             debug_port: wants_cdp.then_some(0),
+            headless,
         })?;
 
         let pid = child.id();
@@ -3293,6 +3836,7 @@ impl Agent {
                 child,
                 relay_port,
                 ws_endpoint: cdp_endpoint.as_ref().map(|(_, ws)| ws.clone()),
+                headless,
                 relay: relay_task,
                 server: server.map(|s| (s, pulled_version)),
                 profile_key,
@@ -3311,7 +3855,7 @@ impl Agent {
         // not matching when the key has been replaced since. The second case is
         // the one worth catching, and this is what catches it.
         if let Some(key) = os_crypt_key.as_ref() {
-            let id = fury_shared::keys::key_fingerprint(key);
+            let id = xchange_shared::keys::key_fingerprint(key);
             if let Err(e) = std::fs::write(&key_marker, &id) {
                 tracing::warn!(error = %e, "could not record the cookie key id");
             }
@@ -3346,6 +3890,19 @@ impl Agent {
                 None => return Ok(serde_json::json!({ "stopped": false })),
             }
         };
+        // A headless browser has no window for `ask_to_close` to press, and
+        // waiting ten seconds to kill it is the tail loss the paragraph below
+        // exists to avoid. `Browser.close` is the same shutdown the window's
+        // own button runs, over the only channel a windowless browser has.
+        if entry.headless {
+            if let Some(ws) = entry.ws_endpoint.clone() {
+                let _ = tokio::time::timeout(
+                    std::time::Duration::from_secs(3),
+                    crate::cookies::close(&ws),
+                )
+                .await;
+            }
+        }
         // Terminate, not kill. Chromium flushes its cookie jar on exit, and a
         // profile directory taken from a SIGKILLed browser holds the last write
         // it happened to manage rather than the session the operator just
@@ -3359,9 +3916,9 @@ impl Agent {
         // profiles were quietly dropping the tail of every session.
         //
         // `ask_to_close` is a SIGHUP on macOS and a WM_CLOSE on Windows; see
-        // fury_platform::process for why it is a function both platforms have
+        // xchange_platform::process for why it is a function both platforms have
         // to implement rather than a `#[cfg(unix)]` one of them can skip.
-        let asked = fury_platform::ask_to_close(&entry.child);
+        let asked = xchange_platform::ask_to_close(&entry.child);
         let close_started = std::time::Instant::now();
         // Bounded: a browser that will not close must not hold the UI.
         let mut exited = false;
@@ -3400,6 +3957,11 @@ impl Agent {
         // forwarding to the customer's proxy with nothing behind it.
         entry.relay.abort();
 
+        // Where this profile's data is, resolved once. Used by the pack below
+        // and by the unsent-session markers after it — the two must agree, or a
+        // marker lands beside a directory that nothing else reads.
+        let dir = self.store.profile_dir(profile_id).await?;
+
         let mut pushed = serde_json::Value::Null;
         if let Some((srv, base)) = entry.server.take() {
             // A server launch always carries a lock; the pair is set together at
@@ -3419,7 +3981,7 @@ impl Agent {
             // closing a team profile slow, 01.10.2026, and the log had nothing
             // to say about it: the pull was measured, the push never was.
             let pack_started = std::time::Instant::now();
-            let pushed_result = match crate::bundle::pack(&paths::profile_dir(profile_id), &sealer) {
+            let pushed_result = match crate::bundle::pack(&dir, &sealer) {
                 Ok(sealed) => {
                     let pack_ms = pack_started.elapsed().as_millis() as u64;
                     let push_started = std::time::Instant::now();
@@ -3467,10 +4029,10 @@ impl Agent {
             // agree. See unsynced.rs.
             match &pushed_result {
                 Ok(version) => {
-                    crate::unsynced::clear(profile_id);
-                    crate::unsynced::record_held(profile_id, *version);
+                    crate::unsynced::clear(&dir);
+                    crate::unsynced::record_held(&dir, profile_id, *version);
                 }
-                Err(_) => crate::unsynced::mark(profile_id, base),
+                Err(_) => crate::unsynced::mark(&dir, profile_id, base),
             }
 
             // Also after a push that FAILED. It used to return first, and the
@@ -3628,24 +4190,24 @@ mod tests {
 
     #[test]
     fn start_urls_open_once_and_then_the_session_takes_over() {
-        let tmp = std::env::temp_dir().join(format!("fury-su-{}", std::process::id()));
+        let tmp = std::env::temp_dir().join(format!("xchange-su-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&tmp);
         std::fs::create_dir_all(&tmp).unwrap();
 
         // First launch: what the profile asks for.
         assert_eq!(
-            start_urls_for(&tmp, &["https://shop.example/".to_string()], "http://fury.invalid/t/"),
+            start_urls_for(&tmp, &["https://shop.example/".to_string()]),
             vec!["https://shop.example/".to_string()]
         );
-        // First launch with nothing configured: the page that proves the
-        // disguise and the exit are working.
-        assert_eq!(start_urls_for(&tmp, &[], "http://fury.invalid/t/"), vec!["http://fury.invalid/t/".to_string()]);
+        // First launch with nothing configured: a blank tab. The relay's start
+        // page was the default and is deliberately not substituted here.
+        assert_eq!(start_urls_for(&tmp, &[]), vec!["about:blank".to_string()]);
 
         // Once the browser has been here, the session is the answer and passing
         // anything would stack a duplicate on top of it.
         std::fs::create_dir_all(tmp.join("Default").join("Sessions")).unwrap();
-        assert!(start_urls_for(&tmp, &["https://shop.example/".to_string()], "http://fury.invalid/t/").is_empty());
-        assert!(start_urls_for(&tmp, &[], "http://fury.invalid/t/").is_empty());
+        assert!(start_urls_for(&tmp, &["https://shop.example/".to_string()]).is_empty());
+        assert!(start_urls_for(&tmp, &[]).is_empty());
 
         let _ = std::fs::remove_dir_all(&tmp);
     }
@@ -3760,7 +4322,7 @@ mod exit_check_tests {
     #[allow(clippy::await_holding_lock)]
     async fn quitting_the_shell_waits_for_open_profiles() {
         let _guard = crate::ENV.lock().unwrap_or_else(|e| e.into_inner());
-        let home = std::env::temp_dir().join(format!("fury-quit-test-{}", std::process::id()));
+        let home = std::env::temp_dir().join(format!("xchange-quit-test-{}", std::process::id()));
         std::fs::remove_dir_all(&home).ok();
         // SAFETY: the mutex above is what makes this single-threaded.
         unsafe { std::env::set_var("FURY_HOME", &home) };
@@ -3777,6 +4339,7 @@ mod exit_check_tests {
                 heartbeat: None,
                 relay_port: 0,
                 ws_endpoint: None,
+                headless: false,
                 relay: tokio::spawn(async {}),
             },
         );

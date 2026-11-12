@@ -1,16 +1,16 @@
-Fury Browser
-Copyright 2026 Bogdan Shapovalov and the Fury authors
+XChange Browser
+Copyright 2026 Bogdan Shapovalov and the XChange authors
 
 This product is not affiliated with, endorsed by, or sponsored by Google LLC.
 "Chrome", "Chromium" and "Widevine" are trademarks of Google LLC, used here only
 to name the software this project derives from and interoperates with.
 
 
-1. FURY'S OWN CODE — AGPL-3.0-or-later
+1. XCHANGE'S OWN CODE — AGPL-3.0-or-later
 ---------------------------------------
 
 agent/, server/, desktop/, shared-rs/, tools/, core/build/, core/args/,
-core/verify/, deploy/ and docs/ are Fury's own work and are licensed under the
+core/verify/, deploy/ and docs/ are XChange's own work and are licensed under the
 GNU Affero General Public License, version 3 or later. The full text is in
 LICENSE.
 
@@ -29,7 +29,7 @@ there and they carry the same terms for different reasons.
 The context lines in every patch are Google's code, quoted so the patch can be
 applied, and they remain under Chromium's BSD-3-Clause licence.
 
-The lines Fury adds — including the files under components/fury/ that the series
+The lines XChange adds — including the files under components/fury/ that the series
 creates outright — are licensed BSD-3-Clause by choice, not by obligation.
 BSD-3-Clause imposes nothing on the licence of surrounding work, so these could
 have been AGPL. They are not, so that a Chromium built from this series carries
@@ -61,7 +61,7 @@ any rights to that code.
 
 agent/vendor/smoltcp is smoltcp 0.12.0 (https://github.com/smoltcp-rs/smoltcp),
 copied in under its own 0BSD licence (agent/vendor/smoltcp/LICENSE-0BSD.txt) with
-one change, described in agent/vendor/smoltcp/FURY.md. Its files keep their
+one change, described in agent/vendor/smoltcp/XCHANGE.md. Its files keep their
 licence; the AGPL notice above does not apply to them.
 
 
@@ -94,7 +94,7 @@ core/args/macos-arm64.gn, not a solved one.
 ----------------------
 
 tools/detect-suite/baselines/ holds three committed captures, all taken on
-macOS arm64: real Chrome 150, an unpatched Chromium 150 build, and one Fury
+macOS arm64: real Chrome 150, an unpatched Chromium 150 build, and one XChange
 profile running a Windows 11 persona through a proxy. They record what those
 browsers report through their own web APIs. The third is the evidence for the
 claims in the README — it is the capture the release gate passes 13 checks on.
@@ -108,4 +108,4 @@ publishing one should understand they are publishing a description of their own
 computer.
 
 Raw captures are not committed. See tools/detect-suite/baselines/.gitignore, and
-`cargo run -p fury-detect -- redact --check` before committing one.
+`cargo run -p xchange-detect -- redact --check` before committing one.

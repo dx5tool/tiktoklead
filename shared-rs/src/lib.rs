@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright 2026 Bogdan Shapovalov and the Fury authors
+// Copyright 2026 Bogdan Shapovalov and the XChange authors
 
-//! Types shared between `fury-server` and `fury-agent`.
+//! Types shared between `xchange-server` and `xchange-agent`.
 //!
 //! Everything here is transport-agnostic: no axum, no sqlx, no reqwest. Both
 //! sides depend on this crate so the wire format cannot drift.

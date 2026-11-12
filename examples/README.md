@@ -1,6 +1,6 @@
 # Automation
 
-Driving Fury profiles from a script: what the API is, what it deliberately is
+Driving XChange profiles from a script: what the API is, what it deliberately is
 not, and four working examples.
 
 ## Turning it on
@@ -9,7 +9,7 @@ The API is **off**. Not off-by-default-in-a-config — nothing binds a port unti
 you say so:
 
 ```bash
-FURY_API_PORT=35000 fury-agent serve
+FURY_API_PORT=35000 xchange-agent serve
 ```
 
 A local HTTP port is a way into every logged-in profile on the machine, so it
@@ -20,7 +20,7 @@ mistake should fail in.
 Authentication is one token, in one file, created on first use:
 
 ```bash
-cat "$HOME/Library/Application Support/Fury/api-token"
+cat "$HOME/Library/Application Support/XChange/api-token"
 ```
 
 Mode 0600, and file permissions are the whole authorisation story — the port
@@ -72,8 +72,8 @@ in which case the request succeeds and returns no endpoint — check for
 `ws_endpoint` rather than assuming it.
 
 **Automation is detectable and this does not hide that.** `navigator.webdriver`
-is false in Fury, but a page can time `console.debug` and see a driver. Measured
-on Fury 150, microseconds per call:
+is false in XChange, but a page can time `console.debug` and see a driver. Measured
+on XChange 150, microseconds per call:
 
 | | `"hello"` | 50-key object | 800-key object |
 |---|---|---|---|
@@ -83,7 +83,7 @@ on Fury 150, microseconds per call:
 
 Attaching costs nothing; `Runtime.enable` costs 2.7x on a string and more as the
 argument grows. Every driver calls it. Real Chrome measures the same, so this
-detects a driven browser rather than Fury — which is no comfort if the driven
+detects a driven browser rather than XChange — which is no comfort if the driven
 browser is yours. Run it yourself with
 [`tools/detect-suite/cdp-timing.py`](../tools/detect-suite/cdp-timing.py).
 

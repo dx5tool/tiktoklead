@@ -15,7 +15,7 @@ a crowd for somebody to hide in. If your machine is not in it — a different GP
 a different screen, a Linux laptop, an older Windows — that is the highest-value
 contribution there is, and it takes one command.
 
-Run the probe in an ordinary browser, not Fury:
+Run the probe in an ordinary browser, not XChange:
 
 ```bash
 cd tools/detect-suite && python3 collector.py
@@ -24,7 +24,7 @@ cd tools/detect-suite && python3 collector.py
 Open `http://127.0.0.1:8731/probe.html` in Chrome, then:
 
 ```bash
-cargo run -p fury-detect -- persona baselines/<your-capture>.json > persona.json
+cargo run -p xchange-detect -- persona baselines/<your-capture>.json > persona.json
 ```
 
 It refuses rather than guesses, so a file that comes out is a file that will
@@ -33,15 +33,15 @@ GPU, screen, fonts, audio latency and installed speech voices.
 
 ## Reporting a detection
 
-If a site catches a Fury profile, that is the most valuable bug report this
+If a site catches an XChange profile, that is the most valuable bug report this
 project can get, and the useful form of it is:
 
 1. What the site is (or, if you would rather not say, what it checks).
-2. A capture from the Fury profile, redacted:
-   `cargo run -p fury-detect -- redact <capture>.json <capture>-redacted.json`
+2. A capture from the XChange profile, redacted:
+   `cargo run -p xchange-detect -- redact <capture>.json <capture>-redacted.json`
 3. The same capture from real Chrome on the same machine, if you can.
 
-`fury-detect diff` between those two is usually the whole diagnosis.
+`xchange-detect diff` between those two is usually the whole diagnosis.
 
 Please do not send account credentials, and do not send a raw capture — it
 contains the public IP your proxy exits from.
@@ -63,7 +63,7 @@ named concern.
 the measurement said they were unnecessary: navigator.plugins (byte-identical to
 Chrome already), CSS media features (zero differences across 21 probes), and
 TLS/JA3 (BoringSSL randomises extension order per connection, so Chrome has no
-stable fingerprint to match). A patch that makes Fury *differ* from Chrome is
+stable fingerprint to match). A patch that makes XChange *differ* from Chrome is
 worse than no patch.
 
 **"It applies" and "it compiles" are not "it works."** Patch 0082 applied,
@@ -84,7 +84,7 @@ iframe. A spoof that reaches the main frame and forgets `new Worker()` is caught
 in one line by any serious checker.
 
 ```bash
-cargo run -p fury-detect -- gate <capture>.json
+cargo run -p xchange-detect -- gate <capture>.json
 ```
 
 Thirteen checks; all must pass.
@@ -101,12 +101,12 @@ cd desktop && npm run build     # typechecks and bundles the shell
 
 The first line surprises people, so: `desktop/src-tauri/tauri.conf.json`
 declares the agent as a Tauri sidecar, and `tauri-build` looks for it at
-`binaries/fury-agent-<target-triple>` while running the shell's build script.
+`binaries/xchange-agent-<target-triple>` while running the shell's build script.
 That directory is gitignored — a 7 MB binary per platform has no business in
 the history — so on a fresh clone the shell does not compile and says
 
 ```
-resource path `binaries/fury-agent-aarch64-apple-darwin` doesn't exist
+resource path `binaries/xchange-agent-aarch64-apple-darwin` doesn't exist
 ```
 
 which names a path that has never existed on your machine and does not mention
@@ -116,7 +116,7 @@ and it is the same script a release uses.
 It went unnoticed until the first CI run, because every machine that had ever
 built the shell already had one.
 
-Skip it and `cargo test --workspace --exclude fury-desktop` still works, which
+Skip it and `cargo test --workspace --exclude xchange-desktop` still works, which
 is what CI runs on Linux.
 
 All three must pass. There is no formatter check and no lint gate — match the

@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright 2026 Bogdan Shapovalov and the Fury authors
+// Copyright 2026 Bogdan Shapovalov and the XChange authors
 
 //! Turning a probe capture into a persona.
 //!
 //! Lives in shared-rs (moved 12.09.2026 from tools/detect-suite) so that the
 //! agent can do it too: the desktop's "capture this machine" button and the
-//! `fury-detect persona` command are the same conversion, and two copies of
+//! `xchange-detect persona` command are the same conversion, and two copies of
 //! the mapping would drift the first time a field was added to one.
 //!
 //! # Why this exists
@@ -29,7 +29,7 @@
 //! # What it will not do
 //!
 //! It refuses a capture from a browser that is already spoofing. A persona built
-//! from a Fury capture would describe a description, and the error is worth more
+//! from an XChange capture would describe a description, and the error is worth more
 //! than the file.
 //!
 //! It marks the result `source: "capture"` and not `"measured"`. `measured`
@@ -111,12 +111,12 @@ const WEBGL_PARAMS: &[&str] = &[
 
 pub fn from_capture(dump: &Value, id: &str, weight: f64) -> Result<Value, String> {
     // A capture from a browser that is already spoofing describes a
-    // description. Fury sets automation.hideTraces, so webdriver reads false
+    // description. XChange sets automation.hideTraces, so webdriver reads false
     // while the debugger is attached — that is not the tell. The tell is the
     // brand list: an unbranded Chromium says Chromium and not Google Chrome, and
-    // a Fury profile says whatever its persona told it to.
+    // an XChange profile says whatever its persona told it to.
     if dump.get("__fury").is_some() {
-        return Err(format!("this capture came from Fury; a persona must come from an unmodified browser"));
+        return Err(format!("this capture came from XChange; a persona must come from an unmodified browser"));
     }
 
     let ua = s(dump, "navigator.userAgent").ok_or("capture has no navigator.userAgent")?;

@@ -7,7 +7,7 @@
 -- removing a member does -- replaced every profile's cookie key too, while the
 -- cookies on disk and inside every bundle stayed encrypted under the old one.
 -- The agent then refused to launch each such profile rather than let Chromium
--- delete the rows it could not read (agent/src/ipc.rs, `Fury Key Id`). Met on
+-- delete the rows it could not read (agent/src/ipc.rs, `XChange Key Id`). Met on
 -- 14.10.2026: a member removed on the 13th, and a profile last opened on the
 -- 12th would not open again.
 --

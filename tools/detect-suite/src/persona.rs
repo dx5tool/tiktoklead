@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright 2026 Bogdan Shapovalov and the Fury authors
-//! `fury-detect persona`: the command-line face of `fury_shared::capture`.
+// Copyright 2026 Bogdan Shapovalov and the XChange authors
+//! `xchange-detect persona`: the command-line face of `xchange_shared::capture`.
 //! The conversion itself moved to shared-rs on 12.09.2026 so the agent can
 //! run it for the desktop's "capture this machine" button.
 use anyhow::{Context, Result};
-use fury_shared::capture::{from_capture, n, s};
+use xchange_shared::capture::{from_capture, n, s};
 use serde_json::Value;
 
 pub fn cmd_persona(args: &[String]) -> Result<()> {
@@ -29,7 +29,7 @@ pub fn cmd_persona(args: &[String]) -> Result<()> {
         }
     }
     let input = input.context(
-        "usage: fury-detect persona <capture.json> [--id name] [--weight 0.01]",
+        "usage: xchange-detect persona <capture.json> [--id name] [--weight 0.01]",
     )?;
 
     let dump: Value = serde_json::from_str(&std::fs::read_to_string(&input)?)?;
@@ -82,7 +82,7 @@ pub fn cmd_persona(args: &[String]) -> Result<()> {
 
     // Refuse to emit a persona the launcher would refuse to launch. Catching it
     // here costs a line; catching it in the field costs an account.
-    let parsed: fury_shared::Persona = serde_json::from_value(persona.clone())
+    let parsed: xchange_shared::Persona = serde_json::from_value(persona.clone())
         .context("the persona built from this capture does not match the schema")?;
     parsed
         .validate()
@@ -104,7 +104,7 @@ pub fn cmd_persona(args: &[String]) -> Result<()> {
 }
 
 
-/// `fury-detect personas-check [dir]`: what CI runs on a pull request that
+/// `xchange-detect personas-check [dir]`: what CI runs on a pull request that
 /// adds a contributed persona, and what a contributor can run first.
 ///
 /// Every file in the directory must: parse as a persona; pass `validate()`;
@@ -130,7 +130,7 @@ pub fn cmd_personas_check(args: &[String]) -> Result<()> {
     // Ids already shipped, minus the contributed ones (they are what is being
     // checked) — so a contributed file is compared against the built-in set
     // and against its siblings, not against itself.
-    let builtin: std::collections::HashSet<String> = fury_shared::catalogue::all()
+    let builtin: std::collections::HashSet<String> = xchange_shared::catalogue::all()
         .into_iter()
         .filter(|p| p.source.as_deref() != Some("capture"))
         .map(|p| p.id)
@@ -142,7 +142,7 @@ pub fn cmd_personas_check(args: &[String]) -> Result<()> {
         let name = f.file_stem().unwrap_or_default().to_string_lossy().to_string();
         let mut problems: Vec<String> = Vec::new();
         let text = std::fs::read_to_string(f)?;
-        match serde_json::from_str::<fury_shared::persona::Persona>(&text) {
+        match serde_json::from_str::<xchange_shared::persona::Persona>(&text) {
             Err(e) => problems.push(format!("does not parse as a persona: {e}")),
             Ok(p) => {
                 if p.id != name {

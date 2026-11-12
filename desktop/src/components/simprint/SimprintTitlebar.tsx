@@ -1,38 +1,30 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright 2026 Bogdan Shapovalov and the XChange authors
+
 import React, { useEffect, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   Home,
   ChevronRight,
-  ChevronDown,
   Bell,
   Download,
   Minus,
   Square,
   X,
-  Grip,
   PanelLeftClose,
   PanelLeft,
   Layers,
   Network,
   Puzzle,
+  FolderKanban,
   Bot,
   Users,
   Trash2,
   Folder,
   ShieldCheck,
-  Settings,
-  LogOut,
-  Languages,
-  Palette,
   Sun,
   Moon,
-  Monitor,
   Check,
-  Building,
-  HardDrive,
-  Wifi,
-  Fingerprint,
-  User,
 } from "lucide-react";
 import { useI18n } from "../../i18n";
 import { useTheme } from "../../theme";
@@ -61,9 +53,62 @@ const SECTION_ICONS: Record<View, React.ComponentType<{ size?: number; className
   sharedWithMe: Users,
   proxies: Network,
   extensions: Puzzle,
+  projects: FolderKanban,
   assistants: Bot,
   users: Users,
   trash: Trash2,
+};
+
+const LANGUAGES = [
+  { code: "en", name: "English" },
+  { code: "ru", name: "Русский" },
+  { code: "zh", name: "中文" },
+] as const;
+
+/** Flags drawn as SVG rather than emoji: Windows ships no flag glyphs, and the
+ *  window's CSP allows images only from itself (no flag CDN). */
+const Flag: React.FC<{ code: "en" | "ru" | "zh" }> = ({ code }) => {
+  const frame = "rounded-[2px] overflow-hidden ring-1 ring-black/10 shrink-0";
+  if (code === "ru") {
+    return (
+      <svg aria-hidden="true" width="22" height="15" viewBox="0 0 3 2" className={frame}>
+        <rect width="3" height="0.667" fill="#fff" />
+        <rect y="0.667" width="3" height="0.667" fill="#0039A6" />
+        <rect y="1.334" width="3" height="0.666" fill="#D52B1E" />
+      </svg>
+    );
+  }
+  if (code === "zh") {
+    return (
+      <svg aria-hidden="true" width="22" height="15" viewBox="0 0 30 20" className={frame}>
+        <rect width="30" height="20" fill="#DE2910" />
+        <text x="3" y="9" fontSize="8" fill="#FFDE00">
+          ★
+        </text>
+        <text x="11" y="5" fontSize="3" fill="#FFDE00">
+          ★
+        </text>
+        <text x="13.5" y="8" fontSize="3" fill="#FFDE00">
+          ★
+        </text>
+        <text x="13.5" y="12" fontSize="3" fill="#FFDE00">
+          ★
+        </text>
+        <text x="11" y="15" fontSize="3" fill="#FFDE00">
+          ★
+        </text>
+      </svg>
+    );
+  }
+  return (
+    <svg aria-hidden="true" width="22" height="15" viewBox="0 0 60 40" className={frame}>
+      <rect width="60" height="40" fill="#012169" />
+      <path d="M0,0 L60,40 M60,0 L0,40" stroke="#fff" strokeWidth="8" />
+      <path d="M0,0 L60,40 M60,0 L0,40" stroke="#C8102E" strokeWidth="4" />
+      <path d="M30,0 V40 M0,20 H60" stroke="#fff" strokeWidth="12" />
+      <path d="M30,0 V40 M0,20 H60" stroke="#C8102E" strokeWidth="6" />
+    </svg>
+  );
 };
 
 export const SimprintTitlebar: React.FC<SimprintTitlebarProps> = ({
@@ -82,26 +127,38 @@ export const SimprintTitlebar: React.FC<SimprintTitlebarProps> = ({
   updateAvailable,
   onDownloadCore,
 }) => {
-  const { t, language, setLanguage } = useI18n();
+  const { t, setLanguage, resolved } = useI18n();
   const [theme, setTheme] = useTheme();
-  const [userMenuOpen, setUserMenuOpen] = useState(false);
-  const [activeSubmenu, setActiveSubmenu] = useState<"theme" | "language" | null>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
+  const [langMenuOpen, setLangMenuOpen] = useState(false);
+  const langMenuRef = useRef<HTMLDivElement>(null);
+
+  const effectiveTheme =
+    theme === "system"
+      ? window.matchMedia("(prefers-color-scheme: light)").matches
+        ? "light"
+        : "dark"
+      : theme;
 
   const isTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
-  // Auto-close menu when clicking outside
+  // Auto-close the language menu when clicking outside, or on Escape
   useEffect(() => {
-    if (!userMenuOpen) return;
-    const handleClickOutside = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-        setUserMenuOpen(false);
-        setActiveSubmenu(null);
+    if (!langMenuOpen) return;
+    const away = (e: MouseEvent) => {
+      if (langMenuRef.current && !langMenuRef.current.contains(e.target as Node)) {
+        setLangMenuOpen(false);
       }
     };
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [userMenuOpen]);
+    const escape = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setLangMenuOpen(false);
+    };
+    document.addEventListener("mousedown", away);
+    document.addEventListener("keydown", escape);
+    return () => {
+      document.removeEventListener("mousedown", away);
+      document.removeEventListener("keydown", escape);
+    };
+  }, [langMenuOpen]);
 
   const handleMinimize = async () => {
     if (isTauri) {
@@ -169,6 +226,8 @@ export const SimprintTitlebar: React.FC<SimprintTitlebarProps> = ({
         ? t("nav.proxies")
         : view === "extensions"
         ? t("nav.extensions")
+        : view === "projects"
+        ? t("nav.projects")
         : view === "assistants"
         ? t("nav.assistants")
         : view === "users"
@@ -176,8 +235,6 @@ export const SimprintTitlebar: React.FC<SimprintTitlebarProps> = ({
           : view === "sharedWithMe"
             ? t("nav.sharedWithMe")
             : t("nav.profiles");
-
-  const displayName = me?.email ?? (shell.mode === "local" ? "Local User" : "User");
 
   return (
     <header
@@ -209,7 +266,7 @@ export const SimprintTitlebar: React.FC<SimprintTitlebarProps> = ({
             <ShieldCheck size={13} className="text-white" />
           </div>
           <span className="font-extrabold text-sm tracking-wider text-slate-900 dark:bg-gradient-to-r dark:from-white dark:to-slate-200 dark:bg-clip-text dark:text-transparent">
-            Fury
+            XChange
           </span>
         </div>
 
@@ -281,293 +338,58 @@ export const SimprintTitlebar: React.FC<SimprintTitlebarProps> = ({
           />
         </div>
 
-        {/* User Profile Dropdown Pill */}
-        <div className="relative" ref={menuRef}>
+        {/* Theme toggle: repaints immediately, icon shows the palette in use */}
+        <button
+          onClick={() => setTheme(effectiveTheme === "dark" ? "light" : "dark")}
+          title={effectiveTheme === "dark" ? t("bar.themeToLight") : t("bar.themeToDark")}
+          aria-label={effectiveTheme === "dark" ? t("bar.themeToLight") : t("bar.themeToDark")}
+          className="p-1.5 rounded-lg text-slate-500 hover:text-slate-900 hover:bg-slate-200/60 dark:text-slate-400 dark:hover:text-white dark:hover:bg-slate-800/60 transition-colors cursor-pointer !bg-transparent !border-0"
+        >
+          {effectiveTheme === "dark" ? <Moon size={15} /> : <Sun size={15} />}
+        </button>
+
+        {/* Language: the flag of the language in use; the menu picks another */}
+        <div className="relative" ref={langMenuRef}>
           <button
-            onClick={() => {
-              setUserMenuOpen(!userMenuOpen);
-              setActiveSubmenu(null);
-            }}
-            className="flex items-center gap-2 px-2.5 py-1 rounded-xl bg-slate-100 hover:bg-slate-200/80 border border-slate-200 text-slate-800 dark:bg-slate-900/80 dark:hover:bg-slate-800 dark:border-slate-800 dark:text-slate-200 transition-colors cursor-pointer"
+            onClick={() => setLangMenuOpen((open) => !open)}
+            title={t("set.language")}
+            aria-label={t("set.language")}
+            aria-haspopup="menu"
+            aria-expanded={langMenuOpen}
+            className="p-1 rounded-lg flex items-center hover:bg-slate-200/60 dark:hover:bg-slate-800/60 transition-colors cursor-pointer !bg-transparent !border-0"
           >
-            <div className="w-4 h-4 rounded-full bg-gradient-to-tr from-cyan-500 to-blue-600 flex items-center justify-center text-[10px] font-bold text-white shadow-sm">
-              😊
-            </div>
-            <span className="max-w-[120px] truncate text-xs font-medium">
-              {displayName}
-            </span>
-            <ChevronDown size={12} className="text-slate-400 dark:text-slate-500" />
+            <Flag code={resolved} />
           </button>
 
-          {/* User Menu Popup */}
-          {userMenuOpen && (
-            <div className="absolute right-0 top-10 w-60 py-1.5 bg-white border border-slate-200 text-slate-800 shadow-xl dark:bg-[#171b26]/98 dark:border-slate-800 dark:text-slate-200 dark:shadow-2xl rounded-2xl backdrop-blur-2xl z-50 text-xs">
-              {/* Menu Header */}
-              <div className="px-4 py-2.5 border-b border-slate-100 dark:border-slate-800/80">
-                <div className="font-semibold text-slate-900 dark:text-slate-100 truncate">{displayName}</div>
-                <div className="text-base mt-0.5 select-none">😊</div>
-              </div>
-
-              {/* Menu Items */}
-              <div className="py-1">
-                {/* 1. Account & Security */}
+          {langMenuOpen && (
+            <div
+              role="menu"
+              className="absolute right-0 top-9 w-44 py-1.5 bg-white border border-slate-200 text-slate-800 shadow-xl dark:bg-[#171b26]/98 dark:border-slate-800 dark:text-slate-200 dark:shadow-2xl rounded-xl backdrop-blur-2xl z-50 text-xs"
+            >
+              {LANGUAGES.map(({ code, name }) => (
                 <button
+                  key={code}
+                  role="menuitem"
                   onClick={() => {
-                    setUserMenuOpen(false);
-                    onSettings();
+                    setLanguage(code);
+                    setLangMenuOpen(false);
                   }}
-                  className="w-full flex items-center gap-3 px-4 py-2 text-slate-700 hover:text-slate-900 hover:bg-slate-100 dark:text-slate-300 dark:hover:text-white dark:hover:bg-slate-800/70 transition-colors cursor-pointer text-left !bg-transparent !border-0"
+                  className={`w-full flex items-center justify-between px-3.5 py-2 text-xs text-left hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer !bg-transparent !border-0 ${
+                    resolved === code
+                      ? "text-cyan-600 dark:text-cyan-400 font-semibold"
+                      : "text-slate-700 dark:text-slate-300"
+                  }`}
                 >
-                  <User size={15} className="text-slate-400" />
-                  <span>Account & Security</span>
+                  <span className="flex items-center gap-2.5">
+                    <Flag code={code} />
+                    <span>{name}</span>
+                  </span>
+                  {resolved === code && <Check size={13} />}
                 </button>
-
-                {/* 2. General */}
-                <button
-                  onClick={() => {
-                    setUserMenuOpen(false);
-                    onSettings();
-                  }}
-                  className="w-full flex items-center gap-3 px-4 py-2 text-slate-700 hover:text-slate-900 hover:bg-slate-100 dark:text-slate-300 dark:hover:text-white dark:hover:bg-slate-800/70 transition-colors cursor-pointer text-left !bg-transparent !border-0"
-                >
-                  <Settings size={15} className="text-slate-400" />
-                  <span>General</span>
-                </button>
-
-                {/* 3. Browser & Automation */}
-                <button
-                  onClick={() => {
-                    setUserMenuOpen(false);
-                    onView("assistants");
-                  }}
-                  className="w-full flex items-center gap-3 px-4 py-2 text-slate-700 hover:text-slate-900 hover:bg-slate-100 dark:text-slate-300 dark:hover:text-white dark:hover:bg-slate-800/70 transition-colors cursor-pointer text-left !bg-transparent !border-0"
-                >
-                  <Fingerprint size={15} className="text-slate-400" />
-                  <span>Browser & Automation</span>
-                </button>
-
-                {/* 4. Network & Sync */}
-                <button
-                  onClick={() => {
-                    setUserMenuOpen(false);
-                    onView("proxies");
-                  }}
-                  className="w-full flex items-center gap-3 px-4 py-2 text-slate-700 hover:text-slate-900 hover:bg-slate-100 dark:text-slate-300 dark:hover:text-white dark:hover:bg-slate-800/70 transition-colors cursor-pointer text-left !bg-transparent !border-0"
-                >
-                  <Wifi size={15} className="text-slate-400" />
-                  <span>Network & Sync</span>
-                </button>
-
-                {/* 5. Storage & Update */}
-                <button
-                  onClick={() => {
-                    setUserMenuOpen(false);
-                    onDownloadCore?.();
-                  }}
-                  className="w-full flex items-center gap-3 px-4 py-2 text-slate-700 hover:text-slate-900 hover:bg-slate-100 dark:text-slate-300 dark:hover:text-white dark:hover:bg-slate-800/70 transition-colors cursor-pointer text-left !bg-transparent !border-0"
-                >
-                  <HardDrive size={15} className="text-slate-400" />
-                  <span>Storage & Update</span>
-                </button>
-
-                {/* 6. Workspace */}
-                <button
-                  onClick={() => {
-                    setUserMenuOpen(false);
-                    onSelectProject(null);
-                    onView("profiles");
-                  }}
-                  className="w-full flex items-center gap-3 px-4 py-2 text-slate-700 hover:text-slate-900 hover:bg-slate-100 dark:text-slate-300 dark:hover:text-white dark:hover:bg-slate-800/70 transition-colors cursor-pointer text-left !bg-transparent !border-0"
-                >
-                  <Building size={15} className="text-slate-400" />
-                  <span>Workspace</span>
-                </button>
-
-                {/* 7. Team */}
-                <button
-                  onClick={() => {
-                    setUserMenuOpen(false);
-                    onView("users");
-                  }}
-                  className="w-full flex items-center justify-between px-4 py-2 text-slate-700 hover:text-slate-900 hover:bg-slate-100 dark:text-slate-300 dark:hover:text-white dark:hover:bg-slate-800/70 transition-colors cursor-pointer text-left !bg-transparent !border-0"
-                >
-                  <div className="flex items-center gap-3">
-                    <Users size={15} className="text-slate-400" />
-                    <span>Team</span>
-                  </div>
-                  <ChevronRight size={13} className="text-slate-400 dark:text-slate-500" />
-                </button>
-
-                {/* 8. Language Submenu */}
-                <div
-                  className="relative"
-                  onMouseEnter={() => setActiveSubmenu("language")}
-                >
-                  <button
-                    onClick={() => setActiveSubmenu(activeSubmenu === "language" ? null : "language")}
-                    className={`w-full flex items-center justify-between px-4 py-2 transition-colors cursor-pointer text-left !bg-transparent !border-0 ${
-                      activeSubmenu === "language"
-                        ? "bg-slate-100 dark:bg-slate-800 text-cyan-600 dark:text-cyan-400 font-medium"
-                        : "text-slate-700 hover:text-slate-900 hover:bg-slate-100 dark:text-slate-300 dark:hover:text-white dark:hover:bg-slate-800/70"
-                    }`}
-                  >
-                    <div className="flex items-center gap-3">
-                      <Languages size={15} className={activeSubmenu === "language" ? "text-cyan-600 dark:text-cyan-400" : "text-slate-400"} />
-                      <span>Language</span>
-                    </div>
-                    <ChevronRight size={13} className="text-slate-400 dark:text-slate-500" />
-                  </button>
-
-                  {activeSubmenu === "language" && (
-                    <div className="absolute right-full top-0 mr-1.5 w-36 py-1.5 bg-white border border-slate-200 text-slate-800 shadow-xl dark:bg-[#171b26]/98 dark:border-slate-800 dark:text-slate-200 dark:shadow-2xl rounded-xl backdrop-blur-2xl z-50">
-                      <button
-                        onClick={() => {
-                          setLanguage("en");
-                          setUserMenuOpen(false);
-                          setActiveSubmenu(null);
-                        }}
-                        className={`w-full flex items-center justify-between px-3.5 py-2 text-xs text-left hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer !bg-transparent !border-0 ${
-                          language === "en" ? "text-cyan-600 dark:text-cyan-400 font-semibold" : "text-slate-700 dark:text-slate-300"
-                        }`}
-                      >
-                        <span>English</span>
-                        {language === "en" && <Check size={13} />}
-                      </button>
-                      <button
-                        onClick={() => {
-                          setLanguage("ru");
-                          setUserMenuOpen(false);
-                          setActiveSubmenu(null);
-                        }}
-                        className={`w-full flex items-center justify-between px-3.5 py-2 text-xs text-left hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer !bg-transparent !border-0 ${
-                          language === "ru" ? "text-cyan-600 dark:text-cyan-400 font-semibold" : "text-slate-700 dark:text-slate-300"
-                        }`}
-                      >
-                        <span>Русский</span>
-                        {language === "ru" && <Check size={13} />}
-                      </button>
-                      <button
-                        onClick={() => {
-                          setLanguage("system");
-                          setUserMenuOpen(false);
-                          setActiveSubmenu(null);
-                        }}
-                        className={`w-full flex items-center justify-between px-3.5 py-2 text-xs text-left hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer !bg-transparent !border-0 ${
-                          language === "system" ? "text-cyan-600 dark:text-cyan-400 font-semibold" : "text-slate-700 dark:text-slate-300"
-                        }`}
-                      >
-                        <span>System</span>
-                        {language === "system" && <Check size={13} />}
-                      </button>
-                    </div>
-                  )}
-                </div>
-
-                {/* 9. Theme Submenu */}
-                <div
-                  className="relative"
-                  onMouseEnter={() => setActiveSubmenu("theme")}
-                >
-                  <button
-                    onClick={() => setActiveSubmenu(activeSubmenu === "theme" ? null : "theme")}
-                    className={`w-full flex items-center justify-between px-4 py-2 transition-colors cursor-pointer text-left !bg-transparent !border-0 ${
-                      activeSubmenu === "theme"
-                        ? "bg-blue-50 text-blue-700 dark:bg-blue-600/35 dark:text-blue-300 font-medium"
-                        : "text-slate-700 hover:text-slate-900 hover:bg-slate-100 dark:text-slate-300 dark:hover:text-white dark:hover:bg-slate-800/70"
-                    }`}
-                  >
-                    <div className="flex items-center gap-3">
-                      <Palette size={15} className={activeSubmenu === "theme" ? "text-blue-600 dark:text-blue-400" : "text-slate-400"} />
-                      <span>Theme</span>
-                    </div>
-                    <ChevronRight size={13} className="text-slate-400 dark:text-slate-500" />
-                  </button>
-
-                  {activeSubmenu === "theme" && (
-                    <div className="absolute right-full top-0 mr-1.5 w-36 py-1.5 bg-white border border-slate-200 text-slate-800 shadow-xl dark:bg-[#171b26]/98 dark:border-slate-800 dark:text-slate-200 dark:shadow-2xl rounded-xl backdrop-blur-2xl z-50">
-                      <button
-                        onClick={() => {
-                          setTheme("light");
-                          setUserMenuOpen(false);
-                          setActiveSubmenu(null);
-                        }}
-                        className={`w-full flex items-center justify-between px-3.5 py-2 text-xs text-left hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer !bg-transparent !border-0 ${
-                          theme === "light" ? "text-cyan-600 dark:text-cyan-400 font-semibold" : "text-slate-700 dark:text-slate-300"
-                        }`}
-                      >
-                        <div className="flex items-center gap-2">
-                          <Sun size={14} />
-                          <span>Light</span>
-                        </div>
-                        {theme === "light" && <Check size={13} />}
-                      </button>
-                      <button
-                        onClick={() => {
-                          setTheme("dark");
-                          setUserMenuOpen(false);
-                          setActiveSubmenu(null);
-                        }}
-                        className={`w-full flex items-center justify-between px-3.5 py-2 text-xs text-left hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer !bg-transparent !border-0 ${
-                          theme === "dark" ? "text-cyan-600 dark:text-cyan-400 font-semibold" : "text-slate-700 dark:text-slate-300"
-                        }`}
-                      >
-                        <div className="flex items-center gap-2">
-                          <Moon size={14} className={theme === "dark" ? "text-cyan-600 dark:text-cyan-400" : ""} />
-                          <span>Dark</span>
-                        </div>
-                        {theme === "dark" && <Check size={13} />}
-                      </button>
-                      <button
-                        onClick={() => {
-                          setTheme("system");
-                          setUserMenuOpen(false);
-                          setActiveSubmenu(null);
-                        }}
-                        className={`w-full flex items-center justify-between px-3.5 py-2 text-xs text-left hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer !bg-transparent !border-0 ${
-                          theme === "system" ? "text-cyan-600 dark:text-cyan-400 font-semibold" : "text-slate-700 dark:text-slate-300"
-                        }`}
-                      >
-                        <div className="flex items-center gap-2">
-                          <Monitor size={14} />
-                          <span>System</span>
-                        </div>
-                        {theme === "system" && <Check size={13} />}
-                      </button>
-                    </div>
-                  )}
-                </div>
-
-                {/* Divider */}
-                <div className="my-1.5 border-t border-slate-100 dark:border-slate-800/80" />
-
-                {/* 10. Switch User / Sign Out */}
-                <button
-                  onClick={() => {
-                    setUserMenuOpen(false);
-                    if (onSignOut && shell.mode !== "local") {
-                      onSignOut();
-                    } else {
-                      onSettings();
-                    }
-                  }}
-                  className="w-full flex items-center gap-3 px-4 py-2 text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-500/10 transition-colors text-xs text-left cursor-pointer !bg-transparent !border-0"
-                >
-                  <LogOut size={15} />
-                  <span>Switch User</span>
-                </button>
-              </div>
+              ))}
             </div>
           )}
         </div>
-
-        {/* 6-dot menu icon / Quick Command Palette Launcher */}
-        <button
-          onClick={onPaletteOpen}
-          title="Command Palette (Ctrl+K)"
-          className="p-1.5 rounded-lg text-slate-500 hover:text-slate-900 hover:bg-slate-200/60 dark:text-slate-400 dark:hover:text-white dark:hover:bg-slate-800/60 transition-colors cursor-pointer !bg-transparent !border-0"
-        >
-          <Grip size={15} />
-        </button>
 
         {/* Window controls (Minimize, Maximize, Close) */}
         <div className="flex items-center h-10 ml-2 border-l border-slate-200 dark:border-slate-800/80">

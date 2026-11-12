@@ -448,7 +448,7 @@ pub struct Socket<'a> {
     /// The sending window scaling factor advertised to remotes which support RFC 1323.
     /// It is zero if the window <= 64KiB and/or the remote does not support it.
     remote_win_shift: u8,
-    /// FURY: a window scale chosen by the caller instead of the one derived
+    /// XCHANGE: a window scale chosen by the caller instead of the one derived
     /// from the receive buffer. See `set_window_shift`.
     win_shift_override: Option<u8>,
     /// The remote window size, relative to local_seq_no
@@ -567,7 +567,7 @@ impl<'a> Socket<'a> {
         self.tsval_generator = generator;
     }
 
-    /// FURY: advertise this window scale in the SYN instead of the one the
+    /// XCHANGE: advertise this window scale in the SYN instead of the one the
     /// receive buffer implies.
     ///
     /// The scale is part of a host's TCP fingerprint (p0f and its kind read

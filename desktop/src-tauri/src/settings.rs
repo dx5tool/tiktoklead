@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright 2026 Bogdan Shapovalov and the Fury authors
+// Copyright 2026 Bogdan Shapovalov and the XChange authors
 
 //! Where this installation points, and what it calls itself.
 //!
-//! Fury is self-hosted, so there is no address to hard-code: the first thing a
+//! XChange is self-hosted, so there is no address to hard-code: the first thing a
 //! new installation needs is somewhere to connect to. That makes the server URL
 //! a first-class setting rather than a build-time constant, and the app has to
 //! be usable before one exists.
@@ -23,7 +23,7 @@ pub struct OwnPublicKey {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Settings {
-    /// Base URL of the Fury server, without a trailing slash. `None` until the
+    /// Base URL of the XChange server, without a trailing slash. `None` until the
     /// operator has been asked.
     pub server_url: Option<String>,
 
@@ -151,14 +151,14 @@ pub fn machine_name() -> String {
 
 /// Normalises a server URL as typed by a human.
 ///
-/// Accepts `fury.example.com`, `https://fury.example.com/`, and
+/// Accepts `xchange.example.com`, `https://xchange.example.com/`, and
 /// `http://127.0.0.1:8901`. Rejects anything that is not http(s), because a
 /// typo'd scheme would otherwise surface much later as an opaque transport
 /// error.
 pub fn normalise_server_url(input: &str) -> Result<String, String> {
     let trimmed = input.trim();
     if trimmed.is_empty() {
-        return Err("Enter the address of your Fury server.".into());
+        return Err("Enter the address of your XChange server.".into());
     }
 
     // Split the scheme off *before* touching trailing slashes. Stripping them
@@ -191,8 +191,8 @@ mod tests {
     #[test]
     fn a_bare_host_becomes_https() {
         assert_eq!(
-            normalise_server_url("fury.example.com").unwrap(),
-            "https://fury.example.com"
+            normalise_server_url("xchange.example.com").unwrap(),
+            "https://xchange.example.com"
         );
     }
 
@@ -209,14 +209,14 @@ mod tests {
     #[test]
     fn trailing_slashes_do_not_produce_double_slashes_later() {
         assert_eq!(
-            normalise_server_url("  https://fury.example.com/  ").unwrap(),
-            "https://fury.example.com"
+            normalise_server_url("  https://xchange.example.com/  ").unwrap(),
+            "https://xchange.example.com"
         );
     }
 
     #[test]
     fn other_schemes_are_refused() {
-        assert!(normalise_server_url("ftp://fury.example.com").is_err());
+        assert!(normalise_server_url("ftp://xchange.example.com").is_err());
         assert!(normalise_server_url("file:///etc/passwd").is_err());
         assert!(normalise_server_url("").is_err());
         assert!(normalise_server_url("   ").is_err());
@@ -237,8 +237,8 @@ mod tests {
         // the server URL is used as the keychain account name — changing its
         // case would orphan a stored token.
         assert_eq!(
-            normalise_server_url("HTTPS://Fury.Example.com").unwrap(),
-            "https://Fury.Example.com"
+            normalise_server_url("HTTPS://XChange.Example.com").unwrap(),
+            "https://XChange.Example.com"
         );
     }
 

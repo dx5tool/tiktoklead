@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright 2026 Bogdan Shapovalov and the Fury authors
+// Copyright 2026 Bogdan Shapovalov and the XChange authors
 
 //! Reading a pasted block of proxies.
 //!
@@ -342,7 +342,7 @@ fn parse_strict(line: &str) -> Result<ParsedProxy, ParseError> {
                 }),
                 (_, Some(_)) => Err(err(
                     "reversed",
-                    "this looks like user:pass:host:port. Fury reads four fields as \
+                    "this looks like user:pass:host:port. XChange reads four fields as \
                      host:port:user:pass, so rewrite the line that way or use \
                      http://user:pass@host:port",
                 )),
@@ -354,7 +354,7 @@ fn parse_strict(line: &str) -> Result<ParsedProxy, ParseError> {
         }
         3 => Err(err(
             "threeFields",
-            "three fields is not a shape Fury reads. Use host:port, \
+            "three fields is not a shape XChange reads. Use host:port, \
              host:port:user:pass, or http://user:pass@host:port",
         )),
         n => Err(err(
@@ -389,7 +389,7 @@ fn normalise_scheme(scheme: &str) -> Result<String, ParseError> {
         )),
         other => Err(err(
             "badScheme",
-            format!("{other:?} is not a proxy scheme Fury speaks. Use http, https or socks5"),
+            format!("{other:?} is not a proxy scheme XChange speaks. Use http, https or socks5"),
         )),
     }
 }

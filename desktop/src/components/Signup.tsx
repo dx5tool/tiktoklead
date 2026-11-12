@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright 2026 Bogdan Shapovalov and the Fury authors
+// Copyright 2026 Bogdan Shapovalov and the XChange authors
 
 import { Brand } from "./Brand";
 import { useEffect, useState } from "react";
@@ -12,7 +12,7 @@ import { PasswordPair } from "./PasswordPair";
  *
  *  The gap this fills: until now the only way onto a server was a code someone
  *  ran a command to issue, which is right for a team a person already runs and
- *  wrong for a product a person downloads. Somebody who installed Fury, wanted
+ *  wrong for a product a person downloads. Somebody who installed XChange, wanted
  *  their profiles on a server, and had nobody to ask had nowhere to go.
  *
  *  The address is asked first and asked alone, because whether this screen can

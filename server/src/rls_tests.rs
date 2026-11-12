@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright 2026 Bogdan Shapovalov and the Fury authors
+// Copyright 2026 Bogdan Shapovalov and the XChange authors
 
 //! Row-level security, against a real PostgreSQL.
 //!
@@ -10,7 +10,7 @@
 //! policies sat inert.
 //!
 //! ```bash
-//! DATABASE_URL=postgres://fury@127.0.0.1:5432/furytest cargo test -p fury-server
+//! DATABASE_URL=postgres://xchange@127.0.0.1:5432/xchangetest cargo test -p xchange-server
 //! ```
 //!
 //! Skipped, loudly, when `DATABASE_URL` is unset — a hosted CI runner has no
@@ -580,7 +580,7 @@ db_test!(the_login_journal_is_written_unbound_and_read_only_by_the_org, c, {
     sqlx::query("SELECT set_config('app.user_id', '', false)").execute(&mut c).await.expect("unbind");
     sqlx::query("SELECT record_login($1::uuid, $2::uuid, $3, $4, $5::inet, $6, $7, $8)")
         .bind(ORG_A).bind(USER_A).bind("a@example.com").bind("bad_password")
-        .bind("203.0.113.5").bind("laptop").bind("m-1").bind("Fury/0.1")
+        .bind("203.0.113.5").bind("laptop").bind("m-1").bind("XChange/0.1")
         .execute(&mut c).await.expect("record_login from an unbound connection");
     sqlx::query("SELECT record_login(NULL, NULL, $1, $2, NULL, '', NULL, NULL)")
         .bind("nobody@example.com").bind("bad_password")
@@ -622,8 +622,8 @@ db_test!(the_policy_is_stored_on_the_organisation_and_reads_back_with_defaults, 
         .execute(&mut c).await.expect("write policy");
     let p = crate::security::policy_of(&mut c, uuid::Uuid::parse_str(ORG_A).unwrap()).await.unwrap();
     assert_eq!(p.second_factor, "new_device");
-    assert!(p.admits(Some("10.2.3.4".parse().unwrap()), fury_shared::rbac::OrgRole::Member));
-    assert!(!p.admits(Some("8.8.8.8".parse().unwrap()), fury_shared::rbac::OrgRole::Member));
+    assert!(p.admits(Some("10.2.3.4".parse().unwrap()), xchange_shared::rbac::OrgRole::Member));
+    assert!(!p.admits(Some("8.8.8.8".parse().unwrap()), xchange_shared::rbac::OrgRole::Member));
 });
 
 // ---------------------------------------------------------------------------
@@ -637,7 +637,7 @@ db_test!(step_up_is_off_by_default_then_demands_enrolment_then_a_fresh_code, c, 
     let caller = crate::auth::Caller {
         user_id: uuid::Uuid::parse_str(USER_A).unwrap(),
         org_id: uuid::Uuid::parse_str(ORG_A).unwrap(),
-        role: fury_shared::rbac::OrgRole::Owner,
+        role: xchange_shared::rbac::OrgRole::Owner,
     };
     let raw = "test-token";
     let hash = crate::auth::hash_token(raw);
@@ -731,7 +731,7 @@ db_test!(the_listing_carries_the_last_launch_from_the_audit, c, {
     let caller = crate::auth::Caller {
         user_id: uuid::Uuid::parse_str(USER_A).unwrap(),
         org_id: uuid::Uuid::parse_str(ORG_A).unwrap(),
-        role: fury_shared::rbac::OrgRole::Owner,
+        role: xchange_shared::rbac::OrgRole::Owner,
     };
     let project = uuid::Uuid::parse_str(PROJECT_A).unwrap();
     // Two launches of one profile, the later one wins; a different action on
@@ -759,7 +759,7 @@ db_test!(the_listing_carries_the_current_bundle_size, c, {
     let caller = crate::auth::Caller {
         user_id: uuid::Uuid::parse_str(USER_A).unwrap(),
         org_id: uuid::Uuid::parse_str(ORG_A).unwrap(),
-        role: fury_shared::rbac::OrgRole::Owner,
+        role: xchange_shared::rbac::OrgRole::Owner,
     };
     let project = uuid::Uuid::parse_str(PROJECT_A).unwrap();
     // Two versions of one profile: the listing reports the current one, not
@@ -784,7 +784,7 @@ db_test!(the_listing_carries_the_current_bundle_size, c, {
 
 db_test!(edit_proxy_on_a_project_adds_proxies_and_changes_only_ones_own, c, {
     use crate::rbac_guard::{may_add_proxies, may_change_proxy, ProxyChange};
-    use fury_shared::rbac::OrgRole;
+    use xchange_shared::rbac::OrgRole;
     bind(&mut c, USER_A).await;
     make_project(&mut c, PROJECT_A, ORG_A, USER_A).await;
     let org = uuid::Uuid::parse_str(ORG_A).unwrap();
@@ -848,7 +848,7 @@ db_test!(edit_proxy_on_a_project_adds_proxies_and_changes_only_ones_own, c, {
 
 db_test!(a_proxy_older_than_its_author_column_is_claimed_by_the_log, c, {
     use crate::rbac_guard::{may_change_proxy, ProxyChange};
-    use fury_shared::rbac::OrgRole;
+    use xchange_shared::rbac::OrgRole;
     bind(&mut c, USER_A).await;
     make_project(&mut c, PROJECT_A, ORG_A, USER_A).await;
     // A member who added two proxies while they were admin, and one proxy
@@ -913,7 +913,7 @@ db_test!(a_proxy_older_than_its_author_column_is_claimed_by_the_log, c, {
 // ---------------------------------------------------------------------------
 
 db_test!(an_organisations_machine_is_in_its_catalogue_and_nobody_elses, c, {
-    let base = fury_shared::catalogue::all().into_iter().find(|p| p.id.starts_with("windows")).unwrap();
+    let base = xchange_shared::catalogue::all().into_iter().find(|p| p.id.starts_with("windows")).unwrap();
     let mut mine = serde_json::to_value(&base).unwrap();
     mine["id"] = serde_json::json!("captured-desk-1280x720");
     bind(&mut c, USER_A).await;
@@ -929,7 +929,7 @@ db_test!(an_organisations_machine_is_in_its_catalogue_and_nobody_elses, c, {
     let a = crate::api::org_catalogue(&mut c, org_a).await.unwrap();
     assert!(a.iter().any(|p| p.id == "captured-desk-1280x720"));
     assert!(!a.iter().any(|p| p.id == "liar"));
-    assert_eq!(a.len(), fury_shared::catalogue::all().len() + 1);
+    assert_eq!(a.len(), xchange_shared::catalogue::all().len() + 1);
 
     // B is bound now: row-level security hides A's machines from B's queries,
     // whichever organisation is asked about.
@@ -946,7 +946,7 @@ db_test!(an_organisations_machine_is_in_its_catalogue_and_nobody_elses, c, {
 
 db_test!(a_role_rewrites_the_grants_on_it_under_each_persons_ceiling, c, {
     use crate::rbac_guard::permissions_for;
-    use fury_shared::rbac::{Perm, PermSet};
+    use xchange_shared::rbac::{Perm, PermSet};
     bind(&mut c, USER_A).await;
     make_project(&mut c, PROJECT_A, ORG_A, USER_A).await;
     let role = "eeeeeeee-0000-0000-0000-000000000001";

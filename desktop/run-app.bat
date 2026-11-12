@@ -1,6 +1,6 @@
 @echo off
 rem ==============================================================================
-rem FURY DESKTOP — LAUNCHER & DEVELOPER WORKFLOW SCRIPT
+rem XCHANGE DESKTOP — LAUNCHER & DEVELOPER WORKFLOW SCRIPT
 rem ==============================================================================
 rem HƯỚNG DẪN DÀNH CHO DEVELOPER / AI LLM:
 rem
@@ -35,20 +35,20 @@ if not exist "node_modules" (
   if errorlevel 1 goto :fail
 )
 
-rem Ensure fury-agent sidecar exists
-if not exist "src-tauri\binaries\fury-agent-x86_64-pc-windows-msvc.exe" (
-  if exist "..\target\debug\fury-agent.exe" (
+rem Ensure xchange-agent sidecar exists
+if not exist "src-tauri\binaries\xchange-agent-x86_64-pc-windows-msvc.exe" (
+  if exist "..\target\debug\xchange-agent.exe" (
     if not exist "src-tauri\binaries" mkdir "src-tauri\binaries"
-    copy /y "..\target\debug\fury-agent.exe" "src-tauri\binaries\fury-agent-x86_64-pc-windows-msvc.exe" >nul
+    copy /y "..\target\debug\xchange-agent.exe" "src-tauri\binaries\xchange-agent-x86_64-pc-windows-msvc.exe" >nul
   )
 )
 
 rem Mode 1: Fast Launch using pre-built binary + Vite Hot-Reload (Default)
 if "%WANT_REBUILD%"=="0" (
-  if exist "..\target\debug\fury-desktop.exe" (
+  if exist "..\target\debug\xchange-desktop.exe" (
     echo ===================================================================
     echo ==^> MODE: FAST LAUNCH ^(HOT-RELOAD ACTIVATED^)
-    echo ==^> Found pre-built Fury Desktop binary.
+    echo ==^> Found pre-built XChange Desktop binary.
     echo ==^> Frontend changes in desktop\src\ will auto-update in ~50ms.
     echo ===================================================================
     
@@ -62,9 +62,9 @@ if "%WANT_REBUILD%"=="0" (
       echo ==^> Vite dev server is already running on port 5273.
     )
     
-    echo ==^> Launching Fury Desktop window...
-    start "" "..\target\debug\fury-desktop.exe"
-    echo ==^> Fury Desktop started successfully!
+    echo ==^> Launching XChange Desktop window...
+    start "" "..\target\debug\xchange-desktop.exe"
+    echo ==^> XChange Desktop started successfully!
     exit /b 0
   )
 )

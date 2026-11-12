@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright 2026 Bogdan Shapovalov and the Fury authors
+// Copyright 2026 Bogdan Shapovalov and the XChange authors
 
 //! Per-profile local proxy relay.
 //!
@@ -180,7 +180,7 @@ impl Relay {
     }
 
     /// Where the launcher points the first tab. Carries the token, and the
-    /// token is what makes the page answer: `http://fury.invalid/` on its own
+    /// token is what makes the page answer: `http://xchange.invalid/` on its own
     /// is forwarded upstream like any other name and fails the way a name that
     /// does not resolve fails through any proxy.
     pub fn start_url(&self) -> String {
@@ -278,8 +278,8 @@ impl Relay {
         // proxy, and nothing about the launch leaves the machine.
         //
         // And answered ONLY on the tokened path. The first version answered
-        // every request for `fury.invalid`, which handed any page in the
-        // profile a one-line test: `fetch("http://fury.invalid/", {mode:
+        // every request for `xchange.invalid`, which handed any page in the
+        // profile a one-line test: `fetch("http://xchange.invalid/", {mode:
         // "no-cors"})` resolves here and throws in every real browser, whose
         // resolver has never heard of the name. With the token, a request
         // without it goes upstream like any other host and fails the way an
@@ -353,7 +353,7 @@ impl Relay {
         // address is caught where names are resolved: `dial`, Direct.
         //
         // Except what the profile's own lists put there in as many words: a
-        // `@local` entry (fury_shared::domains, "The local network").
+        // `@local` entry (xchange_shared::domains, "The local network").
         let local = self.blocked.reached_locally(&host);
         if !local && !self.allow_local && is_local_target(&host) {
             tracing::debug!(target = %host, "local address refused");
@@ -615,7 +615,7 @@ async fn connect_upstream(host: &str, port: u16) -> Result<TcpStream, RelayError
 /// in, and either way the connection would leave from the real address.
 async fn dial_local(host: &str, port: u16) -> Result<Conn, RelayError> {
     let addrs = resolve_here(host, port).await?;
-    if !addrs.iter().all(|a| fury_shared::domains::is_private_network(a.ip())) {
+    if !addrs.iter().all(|a| xchange_shared::domains::is_private_network(a.ip())) {
         return Err(RelayError::ConnectRejected {
             target: host.to_string(),
             reason: format!(
@@ -1057,7 +1057,7 @@ fn escape_html(raw: &str) -> String {
 }
 
 /// What the relay answers itself, on the tokened path of either of its two
-/// names: `fury.invalid` (the start page) and its own loopback address (the
+/// names: `xchange.invalid` (the start page) and its own loopback address (the
 /// probe, which needs a secure context — see `probe_url`).
 #[derive(Debug, PartialEq)]
 enum Route {
@@ -1160,7 +1160,7 @@ pub(crate) const PROBE_SW: &str = include_str!("../../tools/detect-suite/sw-prob
 /// A `.invalid` name by design (RFC 6761): it can never resolve in DNS, so if
 /// this interception ever failed to fire, the request would fail loudly instead
 /// of quietly reaching a real site of that name.
-pub const START_HOST: &str = "fury.invalid";
+pub const START_HOST: &str = "xchange.invalid";
 
 fn parse_request_line(head: &str) -> Option<(String, String)> {
     let line = head.lines().next()?;
@@ -1262,7 +1262,7 @@ fn start_page(exit: &str, probe: Option<&str>) -> String {
         .map(|href| format!(r#"<p class="sub" style="margin-top:8px"><a href="{}" style="color:#e0552f">Full probe — every vector, every context →</a></p>"#, escape_html(href)))
         .unwrap_or_default();
     format!(
-        r##"<!doctype html><meta charset="utf-8"><title>Fury</title>
+        r##"<!doctype html><meta charset="utf-8"><title>XChange</title>
 <style>
  :root{{color-scheme:dark}}
  body{{margin:0;background:#0e1013;color:#e8eaed;
@@ -1283,7 +1283,7 @@ fn start_page(exit: &str, probe: Option<&str>) -> String {
  .bad{{background:rgba(224,160,48,.1);color:#e0a030}}
 </style>
 <main>
- <h1>Fury</h1>
+ <h1>XChange</h1>
  <p class="sub">What this profile reports right now, measured in this page. Nothing here left your machine.</p>
  <dl id="facts"></dl>
  <div id="verdict" class="v"></div>
@@ -1553,7 +1553,7 @@ mod tests {
     async fn with_no_proxy_a_public_name_with_a_private_answer_is_refused() {
         let probe = std::net::UdpSocket::bind("0.0.0.0:0").unwrap();
         let ip = match probe.connect("10.255.255.254:9").and_then(|_| probe.local_addr()) {
-            Ok(a) if fury_shared::domains::is_private_network(a.ip()) => a.ip(),
+            Ok(a) if xchange_shared::domains::is_private_network(a.ip()) => a.ip(),
             other => {
                 eprintln!("SKIPPED: no private address on this machine ({other:?})");
                 return;
@@ -1824,7 +1824,7 @@ mod tests {
         // packet is sent: a UDP connect only picks the route.
         let probe = std::net::UdpSocket::bind("0.0.0.0:0").unwrap();
         let ip = match probe.connect("10.255.255.254:9").and_then(|_| probe.local_addr()) {
-            Ok(a) if fury_shared::domains::is_private_network(a.ip()) => a.ip(),
+            Ok(a) if xchange_shared::domains::is_private_network(a.ip()) => a.ip(),
             other => {
                 eprintln!("SKIPPED: no private address on this machine ({other:?})");
                 return;
@@ -1869,7 +1869,7 @@ mod tests {
         for h in ["localhost.", "printer.local.", "[::1]"] {
             assert!(is_local_target(h), "{h} should be refused");
         }
-        for h in ["example.com", "8.8.8.8", "172.32.0.1", "2001:db8::1", "fury.invalid", "11.0.0.1"] {
+        for h in ["example.com", "8.8.8.8", "172.32.0.1", "2001:db8::1", "xchange.invalid", "11.0.0.1"] {
             assert!(!is_local_target(h), "{h} should pass");
         }
     }
@@ -1915,20 +1915,20 @@ mod tests {
         let r = Relay::new(Upstream::Http { host: "h".into(), port: 1, auth: None });
         let t = r.token.clone();
         // With the token: answered, in both request forms.
-        assert_eq!(r.route(&format!("http://fury.invalid/{t}/"), ""), Some(Route::Start));
-        assert_eq!(r.route(&format!("/{t}/"), "Host: fury.invalid\r\n"), Some(Route::Start));
-        assert_eq!(r.route(&format!("http://fury.invalid:80/{t}/probe/"), ""), Some(Route::Probe));
-        assert_eq!(r.route(&format!("http://fury.invalid/{t}/probe/probe.js?x=1"), ""), Some(Route::ProbeJs));
-        assert_eq!(r.route(&format!("http://fury.invalid/{t}/nothing"), ""), Some(Route::Missing));
+        assert_eq!(r.route(&format!("http://xchange.invalid/{t}/"), ""), Some(Route::Start));
+        assert_eq!(r.route(&format!("/{t}/"), "Host: xchange.invalid\r\n"), Some(Route::Start));
+        assert_eq!(r.route(&format!("http://xchange.invalid:80/{t}/probe/"), ""), Some(Route::Probe));
+        assert_eq!(r.route(&format!("http://xchange.invalid/{t}/probe/probe.js?x=1"), ""), Some(Route::ProbeJs));
+        assert_eq!(r.route(&format!("http://xchange.invalid/{t}/nothing"), ""), Some(Route::Missing));
         // Without it: NOT ours. Forwarded upstream and failing there is what a
         // real browser behind a real proxy does with a name that does not
         // resolve, and answering would be the tell.
-        assert_eq!(r.route("http://fury.invalid/", ""), None);
-        assert_eq!(r.route("http://fury.invalid/save", ""), None);
-        assert_eq!(r.route(&format!("http://fury.invalid/{}x/", &t[..31]), ""), None);
+        assert_eq!(r.route("http://xchange.invalid/", ""), None);
+        assert_eq!(r.route("http://xchange.invalid/save", ""), None);
+        assert_eq!(r.route(&format!("http://xchange.invalid/{}x/", &t[..31]), ""), None);
         // Other hosts, never.
         assert_eq!(r.route("http://example.com/", ""), None);
-        assert_eq!(r.route("http://notfury.invalid/", ""), None);
+        assert_eq!(r.route("http://notxchange.invalid/", ""), None);
         // Loopback only once there is a port, and only on that port.
         assert_eq!(r.route(&format!("http://127.0.0.1:4444/{t}/probe/"), ""), None);
         let _ = r.port.set(4444);

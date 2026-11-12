@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright 2026 Bogdan Shapovalov and the Fury authors
+// Copyright 2026 Bogdan Shapovalov and the XChange authors
 
-//! Where Fury keeps things, and the tag that follows from it.
+//! Where XChange keeps things, and the tag that follows from it.
 //!
 //! This is here rather than in the agent for one reason: two programs have to
 //! agree on it exactly. The agent listens at an address derived from the data
@@ -23,7 +23,7 @@
 
 use std::path::{Path, PathBuf};
 
-/// Root of everything this machine's Fury owns.
+/// Root of everything this machine's XChange owns.
 ///
 /// `FURY_HOME` overrides it, which is how tests and a second installation get
 /// their own.
@@ -42,7 +42,7 @@ pub fn data_dir() -> PathBuf {
     #[cfg(target_os = "macos")]
     {
         let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
-        PathBuf::from(home).join("Library/Application Support/Fury")
+        PathBuf::from(home).join("Library/Application Support/XChange")
     }
 
     // Not a shipped target — see lib.rs — but the Unix path compiles here so
@@ -55,14 +55,14 @@ pub fn data_dir() -> PathBuf {
         std::env::var("XDG_DATA_HOME")
             .map(PathBuf::from)
             .unwrap_or_else(|_| PathBuf::from(&home).join(".local/share"))
-            .join("fury")
+            .join("xchange")
     }
 
     #[cfg(windows)]
     {
         // APPDATA, not LOCALAPPDATA. The difference is roaming profiles: on a
         // domain-joined machine APPDATA follows the user between machines and
-        // LOCALAPPDATA does not. Fury's directory holds profile data that is
+        // LOCALAPPDATA does not. XChange's directory holds profile data that is
         // hundreds of megabytes, which is an argument for LOCALAPPDATA — and
         // the argument the other way wins, because the agent's local database
         // records which profiles this user has and losing it on a different
@@ -76,7 +76,7 @@ pub fn data_dir() -> PathBuf {
                 PathBuf::from(std::env::var("USERPROFILE").unwrap_or_else(|_| ".".into()))
                     .join("AppData/Roaming")
             })
-            .join("Fury")
+            .join("XChange")
     }
 }
 
@@ -112,8 +112,8 @@ mod tests {
     #[test]
     fn two_installations_do_not_share_an_address() {
         assert_ne!(
-            short_tag(Path::new("/home/a/Fury")),
-            short_tag(Path::new("/home/b/Fury"))
+            short_tag(Path::new("/home/a/XChange")),
+            short_tag(Path::new("/home/b/XChange"))
         );
     }
 

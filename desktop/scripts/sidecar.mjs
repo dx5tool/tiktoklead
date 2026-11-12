@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright 2026 Bogdan Shapovalov and the Fury authors
+// Copyright 2026 Bogdan Shapovalov and the XChange authors
 //
 // Build the agent and place it where the bundler expects a sidecar.
 //
@@ -57,21 +57,21 @@ if (!triple) {
   process.exit(1)
 }
 
-// Tauri looks for `fury-agent-<triple><exe suffix>` and the suffix is not
+// Tauri looks for `xchange-agent-<triple><exe suffix>` and the suffix is not
 // optional on Windows: a sidecar named without `.exe` is a sidecar the bundler
 // reports as missing, in a message that names the triple and not the extension.
 const exe = triple.includes('windows') ? '.exe' : ''
 
-console.log('==> cargo build --release -p fury-agent')
-run('cargo', ['build', '--release', '-p', 'fury-agent'], { stdio: 'inherit' })
+console.log('==> cargo build --release -p xchange-agent')
+run('cargo', ['build', '--release', '-p', 'xchange-agent'], { stdio: 'inherit' })
 
 const binaries = join(repo, 'desktop', 'src-tauri', 'binaries')
 mkdirSync(binaries, { recursive: true })
 copyFileSync(
-  join(repo, 'target', 'release', `fury-agent${exe}`),
-  join(binaries, `fury-agent-${triple}${exe}`),
+  join(repo, 'target', 'release', `xchange-agent${exe}`),
+  join(binaries, `xchange-agent-${triple}${exe}`),
 )
-console.log(`==> sidecar: fury-agent-${triple}${exe}`)
+console.log(`==> sidecar: xchange-agent-${triple}${exe}`)
 
 // Sign the sidecar HERE, before `tauri build` runs, and not afterwards.
 //
@@ -95,7 +95,7 @@ console.log(`==> sidecar: fury-agent-${triple}${exe}`)
 // ID, or library validation refuses the bundle. One variable cannot drift from
 // itself; two would.
 if (triple.includes('darwin')) {
-  const sidecar = join(binaries, `fury-agent-${triple}${exe}`)
+  const sidecar = join(binaries, `xchange-agent-${triple}${exe}`)
   const identity = process.env.APPLE_SIGNING_IDENTITY
   if (identity) {
     console.log(`==> signing sidecar with ${identity}`)

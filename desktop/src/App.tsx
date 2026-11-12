@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright 2026 Bogdan Shapovalov and the Fury authors
+// Copyright 2026 Bogdan Shapovalov and the XChange authors
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useI18n, type Key } from "./i18n";
@@ -7,16 +7,19 @@ import { api, ApiError, type LocalProxy, type Me, type MirrorStatus, type Profil
 import { Login } from "./components/Login";
 import { ProfileDialog } from "./components/ProfileDialog";
 import { BulkProfiles } from "./components/BulkProfiles";
-import { Cookies } from "./components/Cookies";
+import { Cookies, exportFileName } from "./components/Cookies";
 import { Extensions } from "./components/Extensions";
+import { DiskUsage } from "./components/DiskUsage";
 import { NetworkReport } from "./components/NetworkReport";
 import { ExtensionsView } from "./components/ExtensionsView";
 import { AssistantsView } from "./components/AssistantsView";
 import { WarmDialog } from "./components/WarmDialog";
 import { useAsk } from "./components/Ask";
+import { IconButton } from "./components/Icon";
 import { CommandPalette, type Command } from "./components/CommandPalette";
 import { isOpenHere } from "./components/ProfileTable";
 import { Proxies } from "./components/Proxies";
+import { Projects } from "./components/Projects";
 import { Trash } from "./components/Trash";
 import { Users } from "./components/Users";
 import { ServerSetup } from "./components/ServerSetup";
@@ -27,6 +30,7 @@ import { type View } from "./components/Sidebar";
 import { ShareDialog } from "./components/ShareDialog";
 import { CsvImport } from "./components/CsvImport";
 import { AntidetectImport } from "./components/AntidetectImport";
+import { AccountImport } from "./components/AccountImport";
 import { useTheme } from "./theme";
 import { exitSharing } from "./consistency";
 import { setStage as saveStage } from "./status";
@@ -38,6 +42,24 @@ import { SimprintHeader } from "./components/simprint/SimprintHeader";
 import { SimprintProfileTable } from "./components/simprint/SimprintProfileTable";
 import { SimprintProfileGrid } from "./components/simprint/SimprintProfileGrid";
 import { SimprintBulkBar } from "./components/simprint/SimprintBulkBar";
+import { SimprintStartUrls } from "./components/simprint/SimprintStartUrls";
+import { SimprintExportProfiles } from "./components/simprint/SimprintExportProfiles";
+import { SimprintImportProfiles } from "./components/simprint/SimprintImportProfiles";
+import { SimprintPager, PAGE_SIZES } from "./components/simprint/SimprintPager";
+import { SHOW_VIEW_TOGGLE, sortProfiles, type ProfileSort } from "./components/simprint/utils";
+import {
+  providerForProxy,
+  fetchProviderExit,
+  providerFetches,
+  recordProviderFetch,
+} from "./providerProxy";
+import {
+  pickShopeeCredential,
+  shopeeCheckUrl,
+  shopeeLoginCookies,
+  shopeeLoginUrl,
+  SHOPEE_PLATFORM,
+} from "./shopee";
 
 /** What the browser build the agent asks for changes, for the bar that offers
  *  it. One sentence for every build told a Mac being offered 0.3.8 about a
@@ -52,6 +74,15 @@ const CORE_WHAT: Record<string, Key> = {
 function coreWhat(need: string): Key {
   return CORE_WHAT[need] ?? "app.coreWhatOther";
 }
+
+/** What the agent's login outcome means, in the interface's words. */
+const LOGIN_REASON: Record<string, Key> = {
+  otp: "login.reason.otp",
+  captcha: "login.reason.captcha",
+  no_credentials: "login.reason.noCredentials",
+  login_failed: "login.reason.loginFailed",
+  no_form: "login.reason.noForm",
+};
 
 export function App() {
   // The shell answers what the interface cannot know on its own: whether this
@@ -76,6 +107,11 @@ export function App() {
   // agent already keeps; refreshed with the rows.
   const [personaIds, setPersonaIds] = useState<Set<string> | null>(null);
   const [proxyList, setProxyList] = useState<LocalProxy[] | null>(null);
+  // Which local profiles hold a saved login. The row's Login button writes
+  // one of those into the browser, so a profile with none has no button: it
+  // used to be offered on every Shopee row and answered "no saved login"
+  // only after the press (reported 11.11.2026).
+  const [loginProfileIds, setLoginProfileIds] = useState<Set<string> | null>(null);
   const [shared, setShared] = useState<Profile[]>([]);
   /** The profiles a share dialog is open for, or null. */
   const [sharing, setSharing] = useState<Profile[] | null>(null);
@@ -86,11 +122,16 @@ export function App() {
   // first), and holding every button in the list for that long read as the
   // application having frozen -- "the Open button does not press", 27.09.2026.
   const [launching, setLaunching] = useState<Set<string>>(new Set());
+  // Profiles whose Login press is in flight. Per profile for the same reason:
+  // the agent opens a browser, checks the shop, writes cookies and may type a
+  // username and password; holding the whole list for that would read as a
+  // frozen window.
+  const [logging, setLogging] = useState<Set<string>>(new Set());
   // The release feed's answer, and the version the operator said "later" to.
   const [update, setUpdate] = useState<Awaited<ReturnType<typeof api.checkUpdate>> | null>(null);
   const [dismissedUpdate, setDismissedUpdate] = useState<string | null>(() => {
     try {
-      return localStorage.getItem("fury.update.dismissed");
+      return localStorage.getItem("xchange.update.dismissed");
     } catch {
       return null;
     }
@@ -101,7 +142,7 @@ export function App() {
   // (14.10.2026). A server without `server_version` predates 0.4.2.
   const [dismissedServer, setDismissedServer] = useState<string | null>(() => {
     try {
-      return localStorage.getItem("fury.serverUpdate.dismissed");
+      return localStorage.getItem("xchange.serverUpdate.dismissed");
     } catch {
       return null;
     }
@@ -136,7 +177,7 @@ export function App() {
   useEffect(() => {
     let off = false;
     try {
-      off = localStorage.getItem("fury.update.auto") === "off";
+      off = localStorage.getItem("xchange.update.auto") === "off";
     } catch {
       /* default: on */
     }
@@ -149,12 +190,11 @@ export function App() {
   const [editing, setEditing] = useState<Profile | null | undefined>(undefined);
   const [query, setQuery] = useState("");
   const [tag, setTag] = useState("");
-  // The stage filter (5.5): "" is every stage, "\u0000none" is no stage.
-  const [stage, setStage] = useState("");
   const [projectFilter, setProjectFilter] = useState("");
+  const [sort, setSort] = useState<ProfileSort>("created_desc");
   const [viewMode, setViewMode] = useState<"table" | "grid">(() => {
     try {
-      return (localStorage.getItem("fury.view_mode") as "table" | "grid") || "table";
+      return (localStorage.getItem("xchange.view_mode") as "table" | "grid") || "table";
     } catch {
       return "table";
     }
@@ -162,14 +202,52 @@ export function App() {
   const handleViewModeChange = (mode: "table" | "grid") => {
     setViewMode(mode);
     try {
-      localStorage.setItem("fury.view_mode", mode);
+      localStorage.setItem("xchange.view_mode", mode);
+    } catch {
+      /* ignore */
+    }
+  };
+  /** A row is picked by a click, or painted by a press-and-drag across rows. */
+  const [selectMode, setSelectMode] = useState<"click" | "drag">(() => {
+    try {
+      return localStorage.getItem("xchange.select_mode") === "drag" ? "drag" : "click";
+    } catch {
+      return "click";
+    }
+  });
+  const handleSelectModeChange = (mode: "click" | "drag") => {
+    setSelectMode(mode);
+    try {
+      localStorage.setItem("xchange.select_mode", mode);
+    } catch {
+      /* ignore */
+    }
+  };
+  /** While the switcher is hidden there is no way back from grid, so the
+   *  stored mode is ignored and the list renders as a table. */
+  const shownViewMode = SHOW_VIEW_TOGGLE ? viewMode : "table";
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState<number>(() => {
+    try {
+      const saved = Number(localStorage.getItem("xchange.page_size"));
+      return (PAGE_SIZES as readonly number[]).includes(saved) ? saved : 50;
+    } catch {
+      return 50;
+    }
+  });
+  const listScrollRef = useRef<HTMLDivElement>(null);
+  const handlePageSize = (size: number) => {
+    setPageSize(size);
+    setPage(1);
+    try {
+      localStorage.setItem("xchange.page_size", String(size));
     } catch {
       /* ignore */
     }
   };
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
     try {
-      return localStorage.getItem("fury.sidebar_collapsed") === "true";
+      return localStorage.getItem("xchange.sidebar_collapsed") === "true";
     } catch {
       return false;
     }
@@ -178,7 +256,7 @@ export function App() {
     setSidebarCollapsed((prev) => {
       const next = !prev;
       try {
-        localStorage.setItem("fury.sidebar_collapsed", String(next));
+        localStorage.setItem("xchange.sidebar_collapsed", String(next));
       } catch {
         /* ignore */
       }
@@ -190,8 +268,13 @@ export function App() {
   const [bulk, setBulk] = useState<Profile | null | undefined>(undefined);
   const [csv, setCsv] = useState(false);
   const [gologin, setGologin] = useState(false);
+  const [accountImport, setAccountImport] = useState(false);
   const [cookiesFor, setCookiesFor] = useState<Profile | null>(null);
+  const [startUrlsFor, setStartUrlsFor] = useState<Profile[] | null>(null);
+  const [exportProfilesFor, setExportProfilesFor] = useState<Profile[] | null>(null);
+  const [importProfilesOpen, setImportProfilesOpen] = useState(false);
   const [extFor, setExtFor] = useState<Profile | null>(null);
+  const [diskFor, setDiskFor] = useState<Profile | null>(null);
   const [netFor, setNetFor] = useState<Profile | null>(null);
   // The synchronised group, polled while it runs so the banner's counter and
   // membership stay true to the agent rather than to the click that started it.
@@ -346,8 +429,6 @@ export function App() {
   const newOrigin: "local" | "team" =
     active?.origin === "local" || active?.origin === "team" ? active.origin : local ? "local" : "team";
   const canChooseOrigin = !local && !active;
-  // The CSV and anti-detect imports file profiles on this computer.
-  const importsHere = local || !active || active.origin === "local";
   // Local mode has nobody to sign in as. Team mode does, and until it happens
   // there is nothing to show.
   const ready = shell !== null && (local || shell.signed_in);
@@ -419,6 +500,14 @@ export function App() {
       // the list.
       void api.personas().then((ps) => setPersonaIds(new Set(ps.map((x) => x.id))), () => {});
       void api.proxies().then(setProxyList, () => {});
+      // One call for every profile, so the Login button can be derived here
+      // rather than asked per row. A failure keeps the previous answer: a
+      // button that disappears because the agent blinked is worse than one
+      // that stays for one poll longer.
+      void api.credentialIndex().then(
+        (rows) => setLoginProfileIds(new Set(rows.map((row) => row.profile_id))),
+        () => {},
+      );
       // A launch notice outlives its launch by exactly one poll.
       //
       // Here rather than in the Close button, because the browser is closed
@@ -472,6 +561,25 @@ export function App() {
     await refreshProfiles();
   };
 
+  /** Opens the profile's folder where the browser keeps its data, and says
+   *  where it would be when it is gone. A local profile has a directory from
+   *  its first launch; a team one is unpacked into the same place. */
+  const openProfileFolder = async (p: Profile) => {
+    try {
+      const { path, opened } = await api.openProfileFolder(p.id);
+      if (!opened) {
+        void ask({
+          title: t("row.openFolderMissingTitle"),
+          detail: t("row.openFolderMissing", { path }),
+          confirmLabel: t("ui.ok"),
+          alert: true,
+        });
+      }
+    } catch (e) {
+      setError(say(e));
+    }
+  };
+
   useEffect(() => {
     void refreshProfiles();
     // A browser can be closed from its own window, and in team mode a colleague
@@ -482,10 +590,47 @@ export function App() {
     return () => clearInterval(timer);
   }, [refreshProfiles]);
 
+  // Tags in use. Groups were a second, weaker version of this — one label where
+  // a tag list allows several — and two ways to sort the same profiles is one
+  // too many. Projects are the unit that carries access, so nothing was lost.
+  const tags = Array.from(new Set(profiles.flatMap((p) => p.tags))).sort();
+
+  const shown = sortProfiles(
+    matching(profiles, query)
+      .filter(
+        (p) =>
+          tag === "" ||
+          (tag === "\u0000none" ? p.tags.length === 0 : p.tags.includes(tag)),
+      )
+      .filter(
+        (p) =>
+          projectFilter === "" ||
+          (projectFilter === "\u0000none" ? !p.project_id : p.project_id === projectFilter),
+      )
+      .filter((p) => !openOnly || p.running),
+    sort,
+  );
+
+  const pageCount = Math.max(1, Math.ceil(shown.length / pageSize));
+  const safePage = Math.min(page, pageCount);
+  const paged = shown.slice((safePage - 1) * pageSize, safePage * pageSize);
+
+  useEffect(() => {
+    setPage(1);
+  }, [query, tag, projectFilter, openOnly, sort]);
+
+  useEffect(() => {
+    setPage((prev) => Math.min(prev, pageCount));
+  }, [pageCount]);
+
+  useEffect(() => {
+    listScrollRef.current?.scrollTo({ top: 0 });
+  }, [safePage, pageSize]);
+
   if (fatal) {
     return (
       <div className="splash">
-        <div>Fury</div>
+        <div>XChange</div>
         <p className="error" style={{ maxWidth: 460, marginTop: "var(--s-4)" }}>
           {fatal}
         </p>
@@ -496,7 +641,7 @@ export function App() {
     );
   }
 
-  if (!shell) return <div className="splash">Fury</div>;
+  if (!shell) return <div className="splash">XChange</div>;
 
   if (signingUp) {
     return (
@@ -577,11 +722,88 @@ export function App() {
     setShell(await api.shell());
   };
 
+  /** Provider problems are a message the operator has to read, not a bar that
+   *  scrolls away: a key that cannot be used is the end of the launch. */
+  const providerNotice = (message: string) => {
+    void ask({
+      title: t("prov.title"),
+      detail: message,
+      confirmLabel: t("ui.ok"),
+      alert: true,
+    });
+  };
+
+  /** Ask the provider for the exit this profile needs before starting it.
+   *
+   *  A provider proxy has no address until a profile opens: the key is local,
+   *  the provider's interval is remembered per key, and this is the one place
+   *  that turns the key into the host:port the agent launches through. A false
+   *  answer means the launch must not happen, and the reason is already on
+   *  screen (waiting, an expired key, or a key that is not on this machine). */
+  const prepareProviderProxy = async (profile: Profile): Promise<boolean> => {
+    const entry = providerForProxy(profile.proxy?.id);
+    if (!entry) {
+      if (profile.proxy?.kind === "provider") {
+        providerNotice(t("prov.noKey"));
+        return false;
+      }
+      return true;
+    }
+    if (!providerFetches(entry.provider)) {
+      providerNotice(t("prov.notConnected", { provider: entry.provider }));
+      return false;
+    }
+    const wait = (entry.next_request_at ?? 0) - Date.now();
+    if (wait > 0) {
+      providerNotice(
+        t("prov.wait", { provider: entry.provider, secs: Math.ceil(wait / 1000) }),
+      );
+      return false;
+    }
+    try {
+      const info = await fetchProviderExit(entry);
+      const current = (proxyList ?? []).find((x) => x.id === entry.proxy_id);
+      await api.saveProxy({
+        id: entry.proxy_id ?? profile.proxy?.id ?? "",
+        name: current?.name ?? entry.name ?? profile.proxy?.name ?? entry.provider,
+        kind: info.kind,
+        host: info.host,
+        port: info.port,
+        username: current?.username ?? null,
+        password: current?.password ?? null,
+        last_country: null,
+        last_ip: info.lastIp,
+        rotate_url: current?.rotate_url ?? entry.rotate_url ?? null,
+        checker_url: current?.checker_url ?? entry.checker_url ?? null,
+      });
+      recordProviderFetch(entry.provider, entry.api_key, {
+        next_request_at: info.nextRequestAt,
+        expires_at: info.expiresAt ?? 0,
+        last_ip: info.lastIp,
+      });
+      await refreshProfiles();
+      void api.proxies().then(setProxyList, () => {});
+      return true;
+    } catch (e) {
+      // A refusal that named a wait ("too many IP changes, 57s") is remembered
+      // against the key, so the next open says so without asking again.
+      const nextRequestAt = (e as { nextRequestAt?: number } | null)?.nextRequestAt ?? 0;
+      if (nextRequestAt > 0) {
+        recordProviderFetch(entry.provider, entry.api_key, {
+          next_request_at: nextRequestAt,
+        });
+      }
+      providerNotice(`${entry.provider}: ${say(e)}`);
+      return false;
+    }
+  };
+
   const onLaunch = async (profile: Profile, force = false) => {
     if (launching.has(profile.id)) return;
     setLaunching((prev) => new Set(prev).add(profile.id));
     setError(null);
     try {
+      if (!(await prepareProviderProxy(profile))) return;
       const res = await api.launch(profile.id, force, profile.origin);
       // Restrictions are the technical half of "an operator cannot take the
       // data home", and they are applied silently. Saying which ones landed is
@@ -615,26 +837,78 @@ export function App() {
     }
   };
 
-  // Tags in use. Groups were a second, weaker version of this — one label where
-  // a tag list allows several — and two ways to sort the same profiles is one
-  // too many. Projects are the unit that carries access, so nothing was lost.
-  const tags = Array.from(new Set(profiles.flatMap((p) => p.tags))).sort();
-  // Stages in use, lower-cased so "Banned" and "banned" are one filter.
-  const stages = Array.from(new Set(profiles.map((p) => (p.status ?? "").trim().toLowerCase()).filter(Boolean))).sort();
+  // Sign one local Shopee profile in through its browser.
+  //
+  // The cookie is written by the agent only after it has checked that the
+  // profile is not already signed in, so a live session is never overwritten
+  // by an older seed. If the shop asks for a code or a captcha the browser is
+  // left open and this reports that a person has to finish it.
+  const onLogin = async (profile: Profile) => {
+    if (logging.has(profile.id)) return;
+    setLogging((prev) => new Set(prev).add(profile.id));
+    setError(null);
+    try {
+      // A provider proxy's credentials are fetched at launch time. Login opens
+      // the profile itself, so it has to ask for them exactly as Open does.
+      if (!(await prepareProviderProxy(profile))) return;
 
-  const shown = matching(profiles, query)
-    .filter(
-      (p) =>
-        tag === "" ||
-        (tag === "\u0000none" ? p.tags.length === 0 : p.tags.includes(tag)),
-    )
-    .filter((p) => stage === "" || (stage === "\u0000none" ? !p.status : (p.status ?? "").trim().toLowerCase() === stage))
-    .filter(
-      (p) =>
-        projectFilter === "" ||
-        (projectFilter === "\u0000none" ? !p.project_id : p.project_id === projectFilter),
-    )
-    .filter((p) => !openOnly || p.running);
+      const credentials = await api.credentials(profile.id, profile.origin);
+      const credential = pickShopeeCredential(credentials);
+      if (!credential) {
+        setError(t("login.noCredentials"));
+        return;
+      }
+
+      let cookies: Record<string, unknown>[] = [];
+      if (credential.cookie?.trim()) {
+        cookies = shopeeLoginCookies(credential.cookie, profile);
+        if (cookies.length === 0) {
+          setError(t("login.cookieInvalid"));
+          return;
+        }
+      }
+
+      const result = await api.loginProfile(profile.id, {
+        cookies,
+        username: credential.username,
+        password: credential.password,
+        platform: SHOPEE_PLATFORM,
+        url: shopeeLoginUrl(profile),
+        checkUrl: shopeeCheckUrl(profile),
+        origin: profile.origin,
+      });
+
+      if (result.logged_in) {
+        setNotice({
+          text: t(
+            result.signed_in_now
+              ? "login.signedIn"
+              : result.cookie_written
+                ? "login.cookieWritten"
+                : "login.already",
+          ),
+          forProfile: null,
+        });
+      } else {
+        const reason = result.reason ?? "login_failed";
+        setNotice({
+          text: `${t("login.needsAction")} ${t(LOGIN_REASON[reason] ?? "login.reason.loginFailed")}`,
+          forProfile: null,
+        });
+      }
+    } catch (e) {
+      setError(say(e));
+    } finally {
+      setLogging((prev) => {
+        const next = new Set(prev);
+        next.delete(profile.id);
+        return next;
+      });
+      // The browser is open whether the sign-in worked or stopped at a
+      // verification step, so the row has to learn that either way.
+      await refreshProfiles().catch(() => {});
+    }
+  };
 
   // Exit sharing over EVERY profile, not the filtered view: the question is
   // how many accounts a site sees from one address.
@@ -647,13 +921,32 @@ export function App() {
       return next;
     });
 
-  const toggleAll = () =>
-    setSelected((prev) =>
-      // Everything visible, not everything that exists: a search is narrowing
-      // on purpose, and selecting rows nobody can see is how bulk deletes go
-      // wrong.
-      prev.size === shown.length ? new Set() : new Set(shown.map((p) => p.id)),
-    );
+  /** Membership, not a flip: a drag paints each row it crosses once, and rows
+   *  already in the target state must not be flipped. */
+  const setPicked = (id: string, on: boolean) =>
+    setSelected((prev) => {
+      if (prev.has(id) === on) return prev;
+      const next = new Set(prev);
+      if (on) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+
+  const toggleAll = () => {
+    // The current page, not everything that exists: selecting rows nobody can
+    // see is how bulk deletes go wrong. Rows picked on other pages stay
+    // picked, and the bulk bar still acts on all of them.
+    const ids = paged.map((p) => p.id);
+    const every = ids.length > 0 && ids.every((id) => selected.has(id));
+    setSelected((prev) => {
+      const next = new Set(prev);
+      for (const id of ids) {
+        if (every) next.delete(id);
+        else next.add(id);
+      }
+      return next;
+    });
+  };
 
   const chosen = shown.filter((p) => selected.has(p.id));
   const openable = chosen.filter((p) => !p.running);
@@ -670,6 +963,10 @@ export function App() {
     setError(t("bar.openingMany"));
     try {
       for (const p of openable) {
+        if (!(await prepareProviderProxy(p))) {
+          setError(null);
+          return;
+        }
         await api.launch(p.id, false, p.origin);
         await refreshProfiles();
       }
@@ -738,6 +1035,226 @@ export function App() {
     await load();
     await refreshProfiles();
     setBusy(false);
+  };
+
+  /** The cache alone, over the whole selection.
+   *
+   *  The agent refuses a profile whose browser is open — Chromium holds those
+   *  directories — so the open ones are named before the click rather than
+   *  discovered one failure at a time. */
+  const handleClearCacheSelected = async () => {
+    const targets = chosen.filter((p) => !p.running && p.permissions.includes("edit_profile"));
+    if (targets.length === 0) {
+      await ask({
+        title: t("ext.trim"),
+        detail: t("bar.trimNone"),
+        confirmLabel: t("ui.ok"),
+        alert: true,
+      });
+      return;
+    }
+    const skipped = chosen.length - targets.length;
+    const go = await ask({
+      title: t("bar.clearCacheCount", { n: targets.length }),
+      detail:
+        t("bar.trimConfirm") + (skipped > 0 ? " " + t("bar.trimSkipped", { n: skipped }) : ""),
+      confirmLabel: t("ext.trim"),
+    });
+    if (go === null) return;
+    setBusy(true);
+    let bytes = 0;
+    let done = 0;
+    let failed = 0;
+    for (const p of targets) {
+      try {
+        const r = await api.trimProfile(p.id);
+        bytes += r.bytes;
+        done++;
+      } catch {
+        failed++;
+      }
+    }
+    await refreshProfiles();
+    setBusy(false);
+    setNotice({
+      text:
+        t("bar.trimDone", { n: done, mb: mb(bytes) }) +
+        (failed > 0 ? " " + t("bar.trimFailed", { n: failed }) : ""),
+      forProfile: null,
+    });
+  };
+
+  /** One cookie file per profile, named the way the Cookies dialog names them.
+   *
+   *  The folder is chosen before anything is read: reading a jar opens and
+   *  closes the profile — a team profile pulls its bundle and takes the lock —
+   *  and spending that on an export somebody then cancels is a cost this
+   *  button must not have. */
+  const handleExportCookiesSelected = async () => {
+    const targets = chosen.filter((p) => p.permissions.includes("export_cookies"));
+    if (targets.length === 0) {
+      await ask({
+        title: t("bar.exportCookies"),
+        detail: t("bar.exportNone"),
+        confirmLabel: t("ui.ok"),
+        alert: true,
+      });
+      return;
+    }
+    const go = await ask({
+      title: t("bar.exportCookies"),
+      detail: t("bar.exportConfirm", { n: targets.length }),
+      confirmLabel: t("ck.exportFile"),
+    });
+    if (go === null) return;
+
+    let dir: string | null = null;
+    try {
+      dir = await api.pickFolder(t("ck.exportFilePick"));
+    } catch (e) {
+      setError(say(e));
+      return;
+    }
+    if (dir === null) return;
+
+    setBusy(true);
+    let done = 0;
+    let failed = 0;
+    let firstError: unknown = null;
+    // Two profiles can share a name, and a fast run stamps them with the same
+    // second: the suffix keeps the second file from overwriting the first.
+    const used = new Set<string>();
+    const fileNameFor = (name: string) => {
+      const base = exportFileName(name);
+      let candidate = base;
+      let n = 2;
+      while (used.has(candidate.toLowerCase())) {
+        candidate = base.replace(/\.json$/i, ` (${n}).json`);
+        n++;
+      }
+      used.add(candidate.toLowerCase());
+      return candidate;
+    };
+    for (const p of targets) {
+      try {
+        const { cookies } = await api.exportCookies(p.id);
+        await api.writeCookiesFile(dir, fileNameFor(p.name), JSON.stringify(cookies, null, 2));
+        done++;
+      } catch (e) {
+        failed++;
+        if (firstError === null) firstError = e;
+      }
+    }
+    setBusy(false);
+    if (done === 0) {
+      await ask({
+        title: t("bar.exportCookies"),
+        detail: t("ck.exportFileFailed", { reason: say(firstError ?? "") }),
+        confirmLabel: t("ui.ok"),
+        alert: true,
+      });
+      return;
+    }
+    setNotice({
+      text:
+        t("bar.exportDone", { n: done, path: dir }) +
+        (failed > 0 ? " " + t("bar.exportFailed", { n: failed }) : ""),
+      forProfile: null,
+    });
+  };
+
+  /** Whole profiles — browser data and every saved login — out to a folder or
+   *  a zip.
+   *
+   *  A team profile's logins live on the server, sealed with the organisation
+   *  key, and the server gates reading them on `reveal_secrets`. Without it
+   *  the export would silently leave the accounts behind, so it is refused
+   *  before the dialog opens rather than discovered on the next machine.
+   *  A local profile needs no such right: its logins are in its own store. */
+  const handleOpenExportProfiles = async () => {
+    const targets = chosen.filter((p) => p.permissions.includes("export_cookies"));
+    if (targets.length === 0) {
+      await ask({
+        title: t("bar.exportProfiles"),
+        detail: t("bar.exportProfilesNone"),
+        confirmLabel: t("ui.ok"),
+        alert: true,
+      });
+      return;
+    }
+    const sealed = targets.filter(
+      (p) => p.origin !== "local" && !p.permissions.includes("reveal_secrets"),
+    );
+    if (sealed.length > 0) {
+      await ask({
+        title: t("bar.exportProfiles"),
+        detail: t("bar.exportProfilesSecrets", { n: sealed.length }),
+        confirmLabel: t("ui.ok"),
+        alert: true,
+      });
+      return;
+    }
+    setExportProfilesFor(targets);
+  };
+
+  /** One list of start pages, written to every selected profile.
+   *
+   *  Replacing the list outright is the point: the operator typed what the
+   *  batch should open with, and appending would leave yesterday's sites in
+   *  front of it. */
+  const handleApplyStartUrls = async (urls: string[]) => {
+    const targets = chosen.filter((p) => p.permissions.includes("edit_profile"));
+    const skipped = startUrlsFor ? startUrlsFor.length - targets.length : 0;
+    setBusy(true);
+    let done = 0;
+    let firstError: unknown = null;
+    let failed = 0;
+    for (const p of targets) {
+      try {
+        // A local profile is written through `profiles.upsert`, whose `proxy`
+        // field is the full record rather than the summary a row carries: the
+        // id goes in `proxy_id` and `proxy` is nulled, exactly as the proxy
+        // assignment above does. Spreading the row as-is refuses every profile
+        // that has a proxy.
+        await api.saveProfile(
+          p.origin === "local"
+            ? { ...p, proxy_id: p.proxy?.id ?? "", proxy: null, start_urls: urls }
+            : { ...p, start_urls: urls },
+          p.origin,
+        );
+        done++;
+      } catch (e) {
+        failed++;
+        if (firstError === null) firstError = e;
+      }
+    }
+    await refreshProfiles();
+    setBusy(false);
+    if (done === 0 && firstError !== null) throw new Error(say(firstError));
+    setStartUrlsFor(null);
+    setNotice({
+      text: [
+        t("bar.startUrlsDone", { n: done }),
+        skipped > 0 ? t("bar.startUrlsSkipped", { n: skipped }) : "",
+        failed > 0 ? t("bar.startUrlsFailed", { n: failed }) : "",
+      ]
+        .filter(Boolean)
+        .join(" "),
+      forProfile: null,
+    });
+  };
+
+  const handleOpenStartUrls = async () => {
+    if (!chosen.some((p) => p.permissions.includes("edit_profile"))) {
+      await ask({
+        title: t("bar.changeStartUrls"),
+        detail: t("bar.startUrlsNone"),
+        confirmLabel: t("ui.ok"),
+        alert: true,
+      });
+      return;
+    }
+    setStartUrlsFor(chosen);
   };
 
   const handleMoveSelected = async (to: string) => {
@@ -842,7 +1359,7 @@ export function App() {
             title: t("ex.exportTitle"),
             detail: t("ex.exportDetail"),
             placeholder: t("ex.path"),
-            initial: `${active.name.replace(/[^\w.-]+/g, "-")}.fury`,
+            initial: `${active.name.replace(/[^\w.-]+/g, "-")}.xchange`,
             confirmLabel: t("nav.export"),
           });
           if (!path) return;
@@ -929,7 +1446,6 @@ export function App() {
         onSelect={setActive}
         view={view}
         onView={setView}
-        onNewProfile={() => setEditing(null)}
         onSettings={() => { setSettingsTab("general"); setSettingsOpen(true); }}
         onRenameProject={async (p) => {
           const name = await ask({
@@ -1048,7 +1564,13 @@ export function App() {
             confirmLabel: t("ui.create"),
           });
           if (!name) return;
-          await api.createProjectIn(name, origin);
+          // The sidebar's + takes the same place a project made on the Projects
+          // page would: after the highest weight already in the list.
+          const highest = projects.reduce(
+            (max, p) => (Number.isFinite(p.sort_weight) ? Math.max(max, p.sort_weight) : max),
+            -1,
+          );
+          await api.createProjectIn(name, origin, Math.min(highest + 1, 2_147_483_647));
           await load();
         }}
       />
@@ -1062,19 +1584,20 @@ export function App() {
             }
             totalCount={view === "sharedWithMe" ? shared.length : profiles.length}
             runningCount={profiles.filter((p) => p.running).length}
-            viewMode={viewMode}
+            viewMode={shownViewMode}
             onViewModeChange={handleViewModeChange}
+            selectMode={selectMode}
+            onSelectModeChange={view === "profiles" ? handleSelectModeChange : undefined}
             query={query}
             onQueryChange={setQuery}
             tags={tags}
             selectedTag={tag}
             onTagChange={setTag}
-            stages={stages}
-            selectedStage={stage}
-            onStageChange={setStage}
             projects={projects}
             selectedProject={projectFilter}
             onProjectChange={setProjectFilter}
+            sort={sort}
+            onSortChange={setSort}
             projectCounts={Object.fromEntries(
               projects.map((proj) => [
                 proj.id,
@@ -1084,17 +1607,11 @@ export function App() {
             noProjectCount={profiles.filter((p) => !p.project_id).length}
             openOnly={openOnly}
             onOpenOnlyChange={setOpenOnly}
-            importsHere={importsHere}
+            onNewProfile={view === "profiles" ? () => setEditing(null) : undefined}
             onOpenBulk={() => setBulk(null)}
-            onOpenCsv={() => setCsv(true)}
-            onOpenGologin={() => setGologin(true)}
+            onImportProfiles={() => setImportProfilesOpen(true)}
+            onImportAccounts={() => setAccountImport(true)}
             onRefresh={() => refreshProfiles()}
-            stageCounts={Object.fromEntries(
-              stages.map((st) => [
-                st,
-                profiles.filter((p) => (p.status ?? "").trim().toLowerCase() === st).length,
-              ])
-            )}
           />
         )}
 
@@ -1313,7 +1830,7 @@ export function App() {
           </div>
         )}
 
-        {/* A newer Fury. The check used to sit behind a button on the About
+        {/* A newer XChange. The check used to sit behind a button on the About
             screen, so nobody saw a release unless they went looking: the
             owner ran 0.2.10 for a week of releases and asked why the
             application never said (08.10.2026). Checked at start and every
@@ -1352,7 +1869,7 @@ export function App() {
               disabled={!!installing}
               onClick={() => {
                 try {
-                  localStorage.setItem("fury.update.dismissed", update.latest ?? "");
+                  localStorage.setItem("xchange.update.dismissed", update.latest ?? "");
                 } catch {
                   /* a private window: dismissed for this session only */
                 }
@@ -1396,7 +1913,7 @@ export function App() {
               <button
                 className="ghost"
                 onClick={() =>
-                  void api.openUrl("https://github.com/furyteamtop/fury-antidetect-browser/blob/main/docs/14-team-server.md")
+                  void api.openUrl("https://github.com/dx5tool/fury-nomaster/blob/main/docs/14-team-server.md")
                 }
               >
                 {t("app.serverUpdateSteps")}
@@ -1405,7 +1922,7 @@ export function App() {
                 className="ghost"
                 onClick={() => {
                   try {
-                    localStorage.setItem("fury.serverUpdate.dismissed", latest);
+                    localStorage.setItem("xchange.serverUpdate.dismissed", latest);
                   } catch {
                     /* a private window: dismissed for this session only */
                   }
@@ -1481,7 +1998,8 @@ export function App() {
 
         {notice && (
           <div className="notice infoBar" role="status">
-            {notice.text}
+            <IconButton icon="close" label={t("app.dismiss")} onClick={() => setNotice(null)} />
+            <span className="noticeText">{notice.text}</span>
             <button className="ghost" onClick={() => setNotice(null)}>
               {t("app.dismiss")}
             </button>
@@ -1490,7 +2008,8 @@ export function App() {
 
         {error && (
           <div className="notice" role="status">
-            {error}
+            <IconButton icon="close" label={t("app.dismiss")} onClick={() => setError(null)} />
+            <span className="noticeText">{error}</span>
             <button className="ghost" onClick={() => setError(null)}>
               {t("app.dismiss")}
             </button>
@@ -1503,6 +2022,16 @@ export function App() {
             them looking for a profile list that was never theirs. */}
         {view === "proxies" && <Proxies profiles={profiles} local={local} myEmail={me?.email ?? null} />}
         {view === "extensions" && <ExtensionsView profiles={profiles} />}
+        {view === "projects" && (
+          <Projects
+            projects={projects}
+            local={local}
+            onChanged={async () => {
+              await load();
+              await refreshProfiles(null);
+            }}
+          />
+        )}
         {view === "assistants" && <AssistantsView />}
 
         {view === "users" && (
@@ -1533,7 +2062,7 @@ export function App() {
           <div className="tableWrap flex-1 overflow-auto">
             {shared.length === 0 ? (
               <p className="muted" style={{ padding: "var(--s-3)" }}>{t("shared.empty")}</p>
-            ) : viewMode === "table" ? (
+            ) : shownViewMode === "table" ? (
               <SimprintProfileTable
                 profiles={shared}
                 showProject
@@ -1567,24 +2096,32 @@ export function App() {
         )}
 
         {view === "profiles" && (
-          <div className="tableWrap flex-1 overflow-auto">
-            {viewMode === "table" ? (
+          <div className="tableWrap flex-1 overflow-auto" ref={listScrollRef}>
+            {shownViewMode === "table" ? (
               <SimprintProfileTable
-                profiles={shown}
+                profiles={paged}
+                offset={(safePage - 1) * pageSize}
                 showProject={active === null}
+                tailSpace={chosen.length > 0 ? 112 : undefined}
                 selected={selected}
                 onToggle={toggle}
                 onToggleAll={toggleAll}
+                selectMode={selectMode}
+                onSetPicked={setPicked}
                 me={me}
                 thisMachine={shell.machine_name}
                 local={local}
                 busy={busy}
                 launching={launching}
+                logging={logging}
                 onLaunch={onLaunch}
+                onLogin={onLogin}
+                withLogin={loginProfileIds}
                 onStop={onStop}
                 onNotes={saveNotes}
                 onEdit={setEditing}
                 onExtensions={setExtFor}
+                onDisk={setDiskFor}
                 onShare={local ? undefined : (p) => setSharing([p])}
                 onNetwork={setNetFor}
                 onClone={(p) => setBulk(p)}
@@ -1601,12 +2138,42 @@ export function App() {
                   await api.deleteProfile(p.id, p.origin);
                   await refreshProfiles();
                 }}
+                onReset={async (p) => {
+                  // Naming the destination is the difference between "a reset"
+                  // and knowing which disk the folder will land on.
+                  const storage = await api.storageInfo().catch(() => null);
+                  const root = storage?.profile_root ?? storage?.default_root;
+                  const go = await ask({
+                    title: t("row.reset"),
+                    detail: root
+                      ? t("row.confirmReset", { name: p.name, path: root })
+                      : t("row.confirmResetNoPath", { name: p.name }),
+                    confirmLabel: t("row.reset"),
+                    danger: true,
+                  });
+                  if (go === null) return;
+                  setBusy(true);
+                  setError(null);
+                  try {
+                    const r = await api.resetProfile(p.id);
+                    await refreshProfiles();
+                    setNotice({
+                      text: t("row.resetDone", { name: p.name, path: r.dir }),
+                      forProfile: null,
+                    });
+                  } catch (e) {
+                    setError(say(e));
+                  } finally {
+                    setBusy(false);
+                  }
+                }}
                 onCookies={setCookiesFor}
+                onOpenFolder={openProfileFolder}
                 onQuickEdit={saveNameAndTags}
               />
             ) : (
               <SimprintProfileGrid
-                profiles={shown}
+                profiles={paged}
                 selected={selected}
                 onToggle={toggle}
                 me={me}
@@ -1618,6 +2185,7 @@ export function App() {
                 onStop={onStop}
                 onEdit={setEditing}
                 onExtensions={setExtFor}
+                onDisk={setDiskFor}
                 onShare={local ? undefined : (p) => setSharing([p])}
                 onNetwork={setNetFor}
                 onClone={(p) => setBulk(p)}
@@ -1635,14 +2203,27 @@ export function App() {
                   await refreshProfiles();
                 }}
                 onCookies={setCookiesFor}
+                onOpenFolder={openProfileFolder}
                 onQuickEdit={saveNameAndTags}
               />
             )}
           </div>
         )}
 
-        {chosen.length > 0 && (
+        {view === "profiles" && (
+          <SimprintPager
+            page={safePage}
+            pageCount={pageCount}
+            pageSize={pageSize}
+            total={shown.length}
+            onPage={setPage}
+            onPageSize={handlePageSize}
+          />
+        )}
+
+        {view === "profiles" && chosen.length > 0 && (
           <SimprintBulkBar
+            raised
             chosen={chosen}
             busy={busy}
             local={local}
@@ -1661,6 +2242,10 @@ export function App() {
             onClone={(p) => setBulk(p)}
             onCookies={(p) => setCookiesFor(p)}
             onClear={() => setSelected(new Set())}
+            onClearCache={handleClearCacheSelected}
+            onExportCookies={handleExportCookiesSelected}
+            onExportProfiles={handleOpenExportProfiles}
+            onChangeStartUrls={handleOpenStartUrls}
           />
         )}
 
@@ -1748,6 +2333,16 @@ export function App() {
             }}
           />
         )}
+        {accountImport && (
+          <AccountImport
+            projectId={active?.origin === "local" ? active.id : null}
+            onDone={() => {
+              void load();
+              void refreshProfiles();
+            }}
+            onClose={() => setAccountImport(false)}
+          />
+        )}
         {csv && (
           <CsvImport
             projectId={active?.origin === "local" ? active.id : null}
@@ -1766,6 +2361,49 @@ export function App() {
 
         {cookiesFor && (
           <Cookies profile={cookiesFor} onClose={() => setCookiesFor(null)} />
+        )}
+        {startUrlsFor && (
+          <SimprintStartUrls
+            profiles={startUrlsFor}
+            onClose={() => setStartUrlsFor(null)}
+            onApply={handleApplyStartUrls}
+          />
+        )}
+        {exportProfilesFor && (
+          <SimprintExportProfiles
+            profiles={exportProfilesFor}
+            onClose={() => setExportProfilesFor(null)}
+            onDone={(result) => {
+              setExportProfilesFor(null);
+              setNotice({
+                text:
+                  t("bar.exportProfilesDone", { n: result.profiles, path: result.path }) +
+                  (result.skipped > 0
+                    ? " " + t("bar.exportProfilesSkipped", { n: result.skipped })
+                    : ""),
+                forProfile: null,
+              });
+            }}
+          />
+        )}
+        {importProfilesOpen && (
+          <SimprintImportProfiles
+            projectId={active?.origin === "local" ? active.id : null}
+            projectName={active?.origin === "local" ? active.name : null}
+            onClose={() => setImportProfilesOpen(false)}
+            onDone={async (result) => {
+              setImportProfilesOpen(false);
+              await load();
+              await refreshProfiles();
+              setNotice({
+                text: t("bar.importProfilesDone", {
+                  n: result.imported,
+                  logins: result.logins,
+                }),
+                forProfile: null,
+              });
+            }}
+          />
         )}
         {warmFor && (
           <WarmDialog
@@ -1788,10 +2426,23 @@ export function App() {
             onClose={() => setExtFor(null)}
           />
         )}
+        {diskFor && (
+          <DiskUsage
+            profile={diskFor}
+            running={isOpenHere(diskFor, { local, userId: me?.user_id, machine: shell.machine_name })}
+            onClose={() => setDiskFor(null)}
+          />
+        )}
       </main>
       </div>
     </div>
   );
+}
+
+/** Bytes as megabytes, one decimal below ten — the reading the storage dialog uses. */
+function mb(bytes: number): string {
+  const m = bytes / (1024 * 1024);
+  return m >= 10 ? Math.round(m).toString() : m.toFixed(1);
 }
 
 /** Search across the three things someone actually looks a profile up by. */

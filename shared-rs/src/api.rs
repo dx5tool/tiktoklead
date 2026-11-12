@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright 2026 Bogdan Shapovalov and the Fury authors
+// Copyright 2026 Bogdan Shapovalov and the XChange authors
 
 //! Wire types for the server REST API and the agent local API.
 
@@ -18,6 +18,13 @@ pub struct ProjectSummary {
     pub name: String,
     pub description: String,
     pub color: Option<String>,
+    /// Lower sorts first; equal weights are ordered by name.
+    #[serde(default)]
+    pub sort_weight: i32,
+    /// Who made it: the user's email on a team server. Empty from a server
+    /// older than this field.
+    #[serde(default)]
+    pub creator: String,
     pub profile_count: i64,
     /// What the requesting user may do here. Resolved server-side; the client
     /// must not compute this itself.

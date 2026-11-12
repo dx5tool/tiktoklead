@@ -13,14 +13,14 @@
     "Source: docs/08-competitors.md, the table of cores on 27.09.2026;",
     "AdsPower, Multilogin and Undetectable re-read on 02.10.2026, unchanged.",
     "",
-    "Fury's own `chrome` here is not used: build.py puts the major from",
+    "XChange's own `chrome` here is not used: build.py puts the major from",
     "core/CHROMIUM_VERSION in its place, so this file cannot make it stale."
   ],
   "measured": "2026-09-27",
   "source": "docs/08-competitors.md",
   "rows": [
     {
-      "name": "Fury",
+      "name": "XChange",
       "chrome": 155,
       "self": true,
       "teams": "yes",

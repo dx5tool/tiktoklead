@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright 2026 Bogdan Shapovalov and the Fury authors
+// Copyright 2026 Bogdan Shapovalov and the XChange authors
 
 //! Undetectable, through its Local API ("Undetectable Local API" 1.5.0).
 //! The app has to be running and signed in, on a paid plan; there is no

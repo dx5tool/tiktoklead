@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: AGPL-3.0-or-later
-# Copyright 2026 Bogdan Shapovalov and the Fury authors
+# Copyright 2026 Bogdan Shapovalov and the XChange authors
 """Run one job across every profile, one at a time.
 
-    FURY_API_PORT=35000 fury-agent serve
+    FURY_API_PORT=35000 xchange-agent serve
     ./rotate.py                      # dry run: says what it would do
     ./rotate.py --go                 # does it
 
@@ -29,7 +29,7 @@ import random
 import sys
 import time
 
-from fury import Fury, running
+from xchange import XChange, running
 
 
 def do_the_job(session: dict, profile: dict) -> str:
@@ -54,8 +54,8 @@ def main() -> int:
     ap.add_argument("--max-gap", type=float, default=90, help="seconds between profiles, maximum")
     args = ap.parse_args()
 
-    fury = Fury()
-    profiles = fury.profiles()
+    xchange = XChange()
+    profiles = xchange.profiles()
 
     if args.project:
         profiles = [p for p in profiles if p.get("project_id") == args.project]
@@ -89,7 +89,7 @@ def main() -> int:
     for i, profile in enumerate(profiles):
         print(f"[{i + 1}/{len(profiles)}] {profile['name']}", flush=True)
         try:
-            with running(fury, profile["id"], cdp=True) as session:
+            with running(xchange, profile["id"], cdp=True) as session:
                 results.append((profile["name"], do_the_job(session, profile)))
         except Exception as e:
             # Kept going deliberately. Abandoning eight profiles because the

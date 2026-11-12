@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright 2026 Bogdan Shapovalov and the Fury authors
+// Copyright 2026 Bogdan Shapovalov and the XChange authors
 
 import { Brand } from "./Brand";
 import { useState } from "react";
@@ -7,7 +7,7 @@ import { useI18n } from "../i18n";
 import { api, type Shell } from "../api";
 import { DEFAULT_SERVER } from "../defaults";
 
-/** First run. Fury is self-hosted, so there is no address to default to — the
+/** First run. XChange is self-hosted, so there is no address to default to — the
  *  app cannot do anything until someone says where their server is. The address
  *  is checked before it is saved, because a typo'd host otherwise surfaces one
  *  screen later as a failed sign-in, which reads as "wrong password". */
@@ -106,7 +106,7 @@ export function ServerSetup({
     <form className="login" onSubmit={submit}>
       <Brand version={version} />
       {/* The first-run explanation is for a first run. Somebody coming back to
-          their own account does not need to be told that Fury is self-hosted
+          their own account does not need to be told that XChange is self-hosted
           and that the address below is one offered to people with no server —
           it is not, it is theirs, and the sentence under the field says so. */}
       {!(lastServer && lastEmail) && <p className="muted center">{t("srv.where")}</p>}

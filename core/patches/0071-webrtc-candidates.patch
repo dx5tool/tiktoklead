@@ -1,0 +1,256 @@
+diff --git a/components/fury/fury_config.cc b/components/fury/fury_config.cc
+index 72e603d..01c1a6a 100644
+--- a/components/fury/fury_config.cc
++++ b/components/fury/fury_config.cc
+@@ -244,4 +244,41 @@ std::optional<std::vector<std::string>> FuryConfig::GetStringList(
+   return out;
+ }
+ 
++std::optional<WebRtcFakeCandidates> GetWebRtcFakeCandidates() {
++  const FuryConfig* config = FuryConfig::Get();
++  if (!config) {
++    return std::nullopt;
++  }
++  std::optional<std::string> mode = config->GetString("webrtc.mode");
++  if (!mode || (*mode != "base_on_ip" && *mode != "fixed")) {
++    // `off` is the ordinary state and must not log; an unknown value would
++    // have been refused by the agent before launch, but if one arrives, no
++    // candidate is safer than a made-up one.
++    if (mode && *mode != "off") {
++      LOG(ERROR) << "fury: unknown webrtc.mode=" << *mode
++                 << "; reporting no candidates";
++    }
++    return std::nullopt;
++  }
++  std::optional<std::string> local_ip = config->GetString("webrtc.localIp");
++  std::optional<std::string> public_ip = config->GetString("webrtc.publicIp");
++  if (!local_ip || local_ip->empty() || !public_ip || public_ip->empty()) {
++    LOG(ERROR) << "fury: webrtc.mode=" << *mode
++               << " without both candidate addresses; reporting no candidates";
++    return std::nullopt;
++  }
++
++  // One port for both candidates, stable for one profile: a host and its
++  // server-reflexive sibling share the local port by definition. Derived from
++  // the local address, which is itself derived from the profile seed.
++  uint32_t hash = 2166136261u;
++  for (unsigned char c : *local_ip) {
++    hash ^= c;
++    hash *= 16777619u;
++  }
++  const uint16_t port = static_cast<uint16_t>(49152 + (hash % 16384));
++
++  return WebRtcFakeCandidates{*public_ip, *local_ip, port};
++}
++
+ }  // namespace fury
+diff --git a/components/fury/fury_config.h b/components/fury/fury_config.h
+index 90accae..c459517 100644
+--- a/components/fury/fury_config.h
++++ b/components/fury/fury_config.h
+@@ -5,6 +5,7 @@
+ #ifndef COMPONENTS_FURY_FURY_CONFIG_H_
+ #define COMPONENTS_FURY_FURY_CONFIG_H_
+ 
++#include <cstdint>
+ #include <memory>
+ #include <optional>
+ #include <string>
+@@ -104,6 +105,19 @@ class COMPONENT_EXPORT(FURY) FuryConfig {
+   std::unique_ptr<Storage> storage_;
+ };
+ 
++// The candidate set a page should read when the profile asked for synthesized
++// WebRTC candidates, or nullopt when the mode is `off` or the config is
++// incomplete. The addresses never leave JavaScript: the real UDP sockets stay
++// disabled by `disable_non_proxied_udp` (patch 0070), so no packet is sent.
++struct WebRtcFakeCandidates {
++  std::string public_ip;
++  std::string local_ip;
++  uint16_t port;
++};
++
++COMPONENT_EXPORT(FURY) std::optional<WebRtcFakeCandidates>
++GetWebRtcFakeCandidates();
++
+ }  // namespace fury
+ 
+ #endif  // COMPONENTS_FURY_FURY_CONFIG_H_
+diff --git a/third_party/blink/renderer/modules/peerconnection/rtc_peer_connection.cc b/third_party/blink/renderer/modules/peerconnection/rtc_peer_connection.cc
+index a5537fe..e951c11 100644
+--- a/third_party/blink/renderer/modules/peerconnection/rtc_peer_connection.cc
++++ b/third_party/blink/renderer/modules/peerconnection/rtc_peer_connection.cc
+@@ -49,6 +49,7 @@
+ #include "base/task/thread_pool.h"
+ #include "build/build_config.h"
+ #include "build/buildflag.h"
++#include "components/fury/fury_config.h"
+ #include "services/metrics/public/cpp/ukm_builders.h"
+ #include "services/network/public/cpp/connection_allowlist.h"
+ #include "third_party/blink/public/common/features.h"
+@@ -2576,6 +2577,59 @@ void RTCPeerConnection::DidGenerateICECandidate(
+   MaybeDispatchEvent(RTCPeerConnectionIceEvent::Create(ice_candidate));
+ }
+ 
++void RTCPeerConnection::FuryMaybeSendFakeCandidates() {
++  if (fury_fake_candidates_emitted_) {
++    return;
++  }
++  std::optional<fury::WebRtcFakeCandidates> candidates =
++      fury::GetWebRtcFakeCandidates();
++  if (!candidates) {
++    return;
++  }
++  fury_fake_candidates_emitted_ = true;
++
++  // The ufrag is not part of the address, but a candidate without one next to
++  // a local description that has one is a contradiction a checker can read.
++  std::string ufrag;
++  if (RTCSessionDescription* description = localDescription()) {
++    const std::string sdp = description->sdp().Utf8();
++    constexpr char kUfrag[] = "a=ice-ufrag:";
++    size_t at = sdp.find(kUfrag);
++    if (at != std::string::npos) {
++      const size_t begin = at + sizeof(kUfrag) - 1;
++      const size_t end = sdp.find_first_of("\r\n", begin);
++      if (end != std::string::npos) {
++        ufrag = sdp.substr(begin, end - begin);
++      }
++    }
++  }
++  const std::string suffix =
++      ufrag.empty() ? " generation 0" : " generation 0 ufrag " + ufrag;
++  const String username_fragment =
++      ufrag.empty() ? String() : String::FromUTF8(ufrag.c_str());
++
++  // Real Chrome 155 writes both candidates with the same local port and a
++  // component of 1; these strings carry the shape a page expects, including
++  // the related address on the srflx candidate. Nothing is sent: the policy is
++  // still disable_non_proxied_udp, so the ICE agent has no socket behind them.
++  const std::string host = "candidate:1 1 udp 2122260223 " +
++                           candidates->local_ip + " " +
++                           std::to_string(candidates->port) + " typ host" +
++                           suffix;
++  const std::string srflx = "candidate:2 1 udp 1686052607 " +
++                            candidates->public_ip + " " +
++                            std::to_string(candidates->port) +
++                            " typ srflx raddr " + candidates->local_ip +
++                            " rport " + std::to_string(candidates->port) +
++                            suffix;
++  for (const std::string& candidate : {host, srflx}) {
++    auto* platform_candidate = MakeGarbageCollected<RTCIceCandidatePlatform>(
++        String::FromUTF8(candidate.c_str()), String("0"),
++        std::optional<uint16_t>(0), username_fragment, String());
++    DidGenerateICECandidate(platform_candidate);
++  }
++}
++
+ void RTCPeerConnection::DidFailICECandidate(const String& address,
+                                             std::optional<uint16_t> port,
+                                             const String& host_candidate,
+@@ -2938,6 +2992,11 @@ void RTCPeerConnection::ChangeIceGatheringState(
+                  ice_gathering_state));
+     if (ice_gathering_state ==
+         webrtc::PeerConnectionInterface::kIceGatheringComplete) {
++      // Fury (0071): the profile asked for a candidate set, and the policy
++      // gathered nothing. Dispatch the synthesized host and srflx candidates
++      // before the null that ends the list, so the page reads the same set
++      // whether it listens to onicecandidate or calls getStats().
++      FuryMaybeSendFakeCandidates();
+       // If ICE gathering is completed, generate a null ICE candidate, to
+       // signal end of candidates.
+       ScheduleDispatchEvent(RTCPeerConnectionIceEvent::Create(nullptr));
+diff --git a/third_party/blink/renderer/modules/peerconnection/rtc_peer_connection.h b/third_party/blink/renderer/modules/peerconnection/rtc_peer_connection.h
+index d48bc99..2599d5a 100644
+--- a/third_party/blink/renderer/modules/peerconnection/rtc_peer_connection.h
++++ b/third_party/blink/renderer/modules/peerconnection/rtc_peer_connection.h
+@@ -443,6 +443,9 @@ class MODULES_EXPORT RTCPeerConnection final
+   void ChangeIceGatheringState(
+       webrtc::PeerConnectionInterface::IceGatheringState);
+   bool SetIceGatheringState(webrtc::PeerConnectionInterface::IceGatheringState);
++  // Fury (0071): dispatch the synthesized host and srflx candidates once,
++  // before the null that ends gathering. No-op unless the config asks for them.
++  void FuryMaybeSendFakeCandidates();
+ 
+   void ChangeIceConnectionState(
+       webrtc::PeerConnectionInterface::IceConnectionState);
+@@ -485,6 +488,8 @@ class MODULES_EXPORT RTCPeerConnection final
+   webrtc::PeerConnectionInterface::IceGatheringState ice_gathering_state_;
+   webrtc::PeerConnectionInterface::IceConnectionState ice_connection_state_;
+   webrtc::PeerConnectionInterface::PeerConnectionState peer_connection_state_;
++  // Fury (0071): the synthesized set is emitted once per peer connection.
++  bool fury_fake_candidates_emitted_ = false;
+ 
+   // True once the connection has reached the connected state at least once.
+   // Used to report first-connect usage metrics exactly once per connection.
+diff --git a/third_party/blink/renderer/modules/peerconnection/web_rtc_stats_report_callback_resolver.cc b/third_party/blink/renderer/modules/peerconnection/web_rtc_stats_report_callback_resolver.cc
+index 875de72..bfbe8e8 100644
+--- a/third_party/blink/renderer/modules/peerconnection/web_rtc_stats_report_callback_resolver.cc
++++ b/third_party/blink/renderer/modules/peerconnection/web_rtc_stats_report_callback_resolver.cc
+@@ -1,15 +1,66 @@
+ #include "third_party/blink/renderer/modules/peerconnection/web_rtc_stats_report_callback_resolver.h"
+ 
++#include <memory>
++#include <optional>
++#include <string>
++#include <utility>
++
++#include "components/fury/fury_config.h"
+ #include "third_party/blink/renderer/bindings/core/v8/script_promise_resolver.h"
+ #include "third_party/blink/renderer/core/execution_context/execution_context.h"
+ #include "third_party/blink/renderer/platform/peerconnection/rtc_stats.h"
++#include "third_party/webrtc/api/stats/rtcstats_objects.h"
+ 
+ namespace blink {
+ 
++namespace {
++
++std::unique_ptr<const webrtc::RTCStats> FuryCandidateStat(
++    const char* id,
++    webrtc::Timestamp timestamp,
++    const std::string& address,
++    uint16_t port,
++    const char* candidate_type,
++    int32_t priority,
++    std::optional<std::string> related_address = std::nullopt,
++    std::optional<int32_t> related_port = std::nullopt) {
++  auto stat = std::make_unique<webrtc::RTCLocalIceCandidateStats>(id,
++                                                                 timestamp);
++  stat->address = address;
++  stat->port = static_cast<int32_t>(port);
++  stat->protocol = "udp";
++  stat->candidate_type = candidate_type;
++  stat->priority = priority;
++  stat->related_address = std::move(related_address);
++  stat->related_port = related_port;
++  return stat;
++}
++
++}  // namespace
++
+ void WebRTCStatsReportCallbackResolver(
+     ScriptPromiseResolver<RTCStatsReport>* resolver,
+     std::unique_ptr<RTCStatsReportPlatform> report) {
+   DCHECK(ExecutionContext::From(resolver->GetScriptState())->IsContextThread());
++  // Fury (0071): the peer connection's getStats() must agree with the
++  // candidates dispatched on onicecandidate. The policy gathered none, so the
++  // two entries below are the whole local-candidate set. Track-level getStats()
++  // does not come through here, which is correct: it has no candidates.
++  if (std::optional<fury::WebRtcFakeCandidates> fake =
++          fury::GetWebRtcFakeCandidates()) {
++    webrtc::scoped_refptr<webrtc::RTCStatsReport> with_fakes =
++        report->stats_report().Copy();
++    const webrtc::Timestamp timestamp =
++        report->stats_report().timestamp();
++    with_fakes->AddStats(FuryCandidateStat("IT01L", timestamp, fake->local_ip,
++                                           fake->port, "host", 2122260223));
++    with_fakes->AddStats(FuryCandidateStat("IT02L", timestamp, fake->public_ip,
++                                           fake->port, "srflx", 1686052607,
++                                           fake->local_ip, fake->port));
++    webrtc::scoped_refptr<const webrtc::RTCStatsReport> const_fakes =
++        with_fakes;
++    report = std::make_unique<RTCStatsReportPlatform>(const_fakes);
++  }
+   resolver->Resolve(MakeGarbageCollected<RTCStatsReport>(std::move(report)));
+ }
+ 

@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: AGPL-3.0-or-later
-# Copyright 2026 Bogdan Shapovalov and the Fury authors
-"""Drive a Fury profile with Playwright.
+# Copyright 2026 Bogdan Shapovalov and the XChange authors
+"""Drive an XChange profile with Playwright.
 
     pip install playwright          # no `playwright install` needed — see below
-    FURY_API_PORT=35000 fury-agent serve
+    FURY_API_PORT=35000 xchange-agent serve
     ./playwright_example.py <profile-id>
 
 `playwright install` downloads Playwright's own browsers, and you do not want
@@ -15,7 +15,7 @@ running and downloads nothing.
 
 import sys
 
-from fury import Fury, running
+from xchange import XChange, running
 
 try:
     from playwright.sync_api import sync_playwright
@@ -24,9 +24,9 @@ except ImportError:
 
 
 def main(profile_id: str) -> int:
-    fury = Fury()
+    xchange = XChange()
 
-    with running(fury, profile_id, cdp=True) as session:
+    with running(xchange, profile_id, cdp=True) as session:
         ws = session.get("ws_endpoint")
         if not ws:
             # Not a failure of this script: a team server can forbid CDP for a

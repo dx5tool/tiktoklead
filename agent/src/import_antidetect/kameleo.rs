@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright 2026 Bogdan Shapovalov and the Fury authors
+// Copyright 2026 Bogdan Shapovalov and the XChange authors
 
 //! Kameleo, through its Local API (developer.kameleo.io/static/swagger.json,
 //! 5.3.1). The app has to be running; there is no token on the HTTP API.

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright 2026 Bogdan Shapovalov and the Fury authors
+// Copyright 2026 Bogdan Shapovalov and the XChange authors
 
 //! What a WireGuard profile's TCP looks like from the far side.
 //!
@@ -18,7 +18,7 @@
 //!
 //! So every packet the stack produces passes through a [`Shaper`] first, which
 //! makes it the persona's OS. The numbers below were captured on the wire on
-//! 14.10.2026, at srv.furybrowser.dev, from real machines:
+//! 14.10.2026, at srv.xchange.dev, from real machines:
 //!
 //! ```text
 //!   Windows 11 26200  ttl 128  id+  win 65535  mss,nop,ws 8,nop,nop,sok

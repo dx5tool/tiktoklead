@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright 2026 Bogdan Shapovalov and the Fury authors
+// Copyright 2026 Bogdan Shapovalov and the XChange authors
 
 //! Installing a browser extension into a profile, so that its identity survives.
 //!
@@ -283,7 +283,7 @@ fn state_dirs(ext_id: &str) -> [PathBuf; 4] {
 /// the source does not have is removed from the destination too, so the copy
 /// is the source's state and nothing else. Both browsers must be closed.
 pub fn copy_with_state(src_profile: &Path, dst_profile: &Path, ext_id: &str) -> Result<Installed> {
-    if !fury_shared::extensions::is_id(ext_id) {
+    if !xchange_shared::extensions::is_id(ext_id) {
         bail!("{ext_id:?} is not an extension id");
     }
     let src_root = src_profile.join(crate::paths::EXTENSIONS_DIR);
@@ -303,7 +303,7 @@ pub fn copy_with_state(src_profile: &Path, dst_profile: &Path, ext_id: &str) -> 
     if dst_dir.exists() {
         std::fs::remove_dir_all(&dst_dir).with_context(|| format!("clearing {}", dst_dir.display()))?;
     }
-    fury_platform::tree::copy_tree_portable(Path::new(&source.path), &dst_dir)
+    xchange_platform::tree::copy_tree_portable(Path::new(&source.path), &dst_dir)
         .with_context(|| format!("copying {}", source.path))?;
 
     for rel in state_dirs(ext_id) {
@@ -312,7 +312,7 @@ pub fn copy_with_state(src_profile: &Path, dst_profile: &Path, ext_id: &str) -> 
             std::fs::remove_dir_all(&to).with_context(|| format!("clearing {}", to.display()))?;
         }
         if from.is_dir() {
-            fury_platform::tree::copy_tree_portable(&from, &to)
+            xchange_platform::tree::copy_tree_portable(&from, &to)
                 .with_context(|| format!("copying {}", from.display()))?;
         }
     }
@@ -621,7 +621,7 @@ mod tests {
     }
 
     fn scratch(name: &str) -> PathBuf {
-        let d = std::env::temp_dir().join(format!("fury-ext-{}-{name}", std::process::id()));
+        let d = std::env::temp_dir().join(format!("xchange-ext-{}-{name}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
         d

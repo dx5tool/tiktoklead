@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright 2026 Bogdan Shapovalov and the Fury authors
+// Copyright 2026 Bogdan Shapovalov and the XChange authors
 
 //! The vault — one key on this machine, and what it seals.
 //!
@@ -13,7 +13,7 @@
 //!
 //! So the secret columns are sealed with a key that lives in the OS keychain
 //! rather than beside them. What that buys is real but bounded, and worth
-//! stating plainly: a copied `fury.db` is now useless on its own. It is not a
+//! stating plainly: a copied `xchange.db` is now useless on its own. It is not a
 //! defence against a process running as this user, which can ask the keychain
 //! for the key exactly as the agent does.
 //!
@@ -35,8 +35,11 @@ use base64::Engine;
 use chacha20poly1305::aead::{Aead, KeyInit};
 use chacha20poly1305::{XChaCha20Poly1305, XNonce};
 
-const SERVICE: &str = "dev.fury.agent";
+const SERVICE: &str = "dev.xchange.agent";
 const ACCOUNT: &str = "vault-key";
+/// The on-disk tag of a sealed column value, and the same kind of constant as
+/// the ciphertext it prefixes: rows already in the local database carry it.
+/// Renaming it makes every saved proxy password and login read as blank.
 const PREFIX: &str = "fury:v1:";
 const NONCE_LEN: usize = 24;
 
@@ -58,7 +61,7 @@ const NONCE_LEN: usize = 24;
 /// A failed read is remembered too, so a refused keychain does not put its
 /// dialog up again at every list refresh -- but only until `retry`. It used to
 /// be remembered for the life of the process: one dismissed dialog after an
-/// update and every sealed proxy password read back as empty until Fury was
+/// update and every sealed proxy password read back as empty until XChange was
 /// restarted, with nothing on screen to say so (tester, 15.10.2026).
 pub struct Vault {
     key: std::sync::Mutex<Key>,

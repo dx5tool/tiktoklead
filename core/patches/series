@@ -275,6 +275,25 @@
 # broken is not a control.
 0070-webrtc-policy.patch!
 
+# --- webrtc candidate set ---------------------------------------------------
+# 0070 leaves the browser gathering NOTHING, which is the honest state under
+# the enterprise policy but gives the profile no candidate set at all. This
+# patch adds the two modes a profile can ask for: Base on IP (host = a private
+# address derived from the seed, srflx = the proxy exit resolved at launch) and
+# Fixed (both addresses typed in).
+#
+# It does NOT re-enable WebRTC. The policy stays disable_non_proxied_udp, so no
+# UDP packet or STUN request leaves the process; the candidates are synthesized
+# in the Blink binding, and the peer connection's getStats() report is extended
+# with the same two entries so the two surfaces cannot disagree. Actual peer
+# connections do not connect — the same as before this patch, when there were
+# no candidates to connect with.
+#
+# Mode `off` is the default and changes nothing.
+#
+# Written against the M155 source; verify it with verify-0071.py after a build.
+0071-webrtc-candidates.patch!
+
 # --- time & locale ----------------------------------------------------------
 0080-timezone-icu.patch
 # WRITTEN, after being wrongly retired. The reasoning that retired it was that

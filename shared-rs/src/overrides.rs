@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright 2026 Bogdan Shapovalov and the Fury authors
+// Copyright 2026 Bogdan Shapovalov and the XChange authors
 
 //! Per-profile changes to a persona, field by field.
 //!
@@ -55,6 +55,10 @@ pub struct MachineOverrides {
     /// Canvas and WebGL readback: noised (the default) or this machine's own.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub canvas: Option<CanvasMode>,
+    /// What a page reads from `RTCPeerConnection`. Absent is `Off`, the state
+    /// every profile has today: no ICE candidates at all.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub webrtc: Option<WebRtcOverride>,
 }
 
 /// What a page gets when it reads a canvas back.
@@ -81,6 +85,96 @@ pub enum CanvasMode {
 /// Marks a config whose canvas is real on purpose, so the launch check can tell
 /// it from one that forgot the seed. The core never reads it.
 pub const REAL_CANVAS_MARKER: &str = "canvas";
+
+/// What a page reads from a peer connection.
+///
+/// `Off` is the default and stays it: the preference is
+/// `disable_non_proxied_udp`, so the browser gathers nothing and no packet
+/// leaves past the relay. The other two modes do not enable WebRTC — the real
+/// sockets stay closed — they only make the JavaScript binding report a
+/// candidate set a page can read. Actual peer connections do not connect.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WebRtcMode {
+    /// No candidates. The state every profile has today.
+    Off,
+    /// Host candidate takes a private address from the profile's seed, srflx
+    /// takes the proxy exit address resolved at launch.
+    BaseOnIp,
+    /// Both addresses are typed in by the operator.
+    Fixed,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WebRtcOverride {
+    pub mode: WebRtcMode,
+    /// The srflx address. Required for `Fixed`, rejected for the other modes:
+    /// `BaseOnIp` takes it from the exit, and `Off` has no candidate at all.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub public_ip: Option<String>,
+    /// The host candidate address. Required for `Fixed`; for `BaseOnIp` an
+    /// absent value is derived from the profile seed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub local_ip: Option<String>,
+}
+
+/// A private IPv4 address that is stable for one profile.
+///
+/// Used as the host candidate in `BaseOnIp` when the operator did not type
+/// one. It never leaves the browser: the real UDP sockets stay disabled, so
+/// this address is only what the JS binding reports.
+pub fn derived_local_ip(seed: u64) -> String {
+    let a = 1 + (seed % 254) as u8;
+    let b = 2 + ((seed >> 8) % 253) as u8;
+    format!("192.168.{a}.{b}")
+}
+
+fn parse_ip(value: &str, what: &str) -> Result<std::net::IpAddr, String> {
+    value
+        .trim()
+        .parse()
+        .map_err(|_| format!("{what} {:?} is not an IP address", value.trim()))
+}
+
+fn is_public_ip(ip: std::net::IpAddr) -> bool {
+    match ip {
+        std::net::IpAddr::V4(v4) => {
+            let o = v4.octets();
+            !(v4.is_unspecified()
+                || v4.is_loopback()
+                || v4.is_private()
+                || v4.is_link_local()
+                || v4.is_broadcast()
+                || v4.is_multicast()
+                || v4.is_documentation()
+                // "This network", carrier-grade NAT, benchmarking and the
+                // reserved class: none of them is an address a peer could use.
+                || o[0] == 0
+                || (o[0] == 100 && (64..=127).contains(&o[1]))
+                || (o[0] == 198 && (o[1] == 18 || o[1] == 19))
+                || o[0] >= 240)
+        }
+        std::net::IpAddr::V6(v6) => {
+            // 2001:db8::/32 is documentation space on both the v4 and v6
+            // side; `Ipv6Addr::is_documentation` is not stable on our MSRV.
+            let segments = v6.segments();
+            let documentation = segments[0] == 0x2001 && segments[1] == 0x0db8;
+            !(v6.is_unspecified()
+                || v6.is_loopback()
+                || v6.is_multicast()
+                || v6.is_unique_local()
+                || v6.is_unicast_link_local()
+                || documentation)
+        }
+    }
+}
+
+fn is_private_local_ip(ip: std::net::IpAddr) -> bool {
+    match ip {
+        std::net::IpAddr::V4(v4) => v4.is_private() && !v4.is_loopback() && !v4.is_link_local(),
+        std::net::IpAddr::V6(v6) => v6.is_unique_local(),
+    }
+}
 
 /// What a desktop profile takes from the monitor it runs on unless the
 /// profile pins a screen: the size, the usable area and its offset, and the
@@ -219,6 +313,32 @@ impl MachineOverrides {
         *self == Self::default()
     }
 
+    /// What a profile created from now on starts with.
+    ///
+    /// Canvas is Real and WebRTC is Base on IP: the operator chose those
+    /// defaults on 12.11.2026, and they are applied at creation only. An
+    /// existing profile has its own fingerprint and its own candidate set;
+    /// silently changing either would change the one thing a warmed account
+    /// must keep.
+    pub fn apply_new_profile_defaults(&mut self) {
+        if self.canvas.is_none() {
+            self.canvas = Some(CanvasMode::Real);
+        }
+        if self.webrtc.is_none() {
+            self.webrtc = Some(WebRtcOverride {
+                mode: WebRtcMode::BaseOnIp,
+                public_ip: None,
+                local_ip: None,
+            });
+        }
+    }
+
+    pub fn for_new_profile() -> Self {
+        let mut overrides = Self::default();
+        overrides.apply_new_profile_defaults();
+        overrides
+    }
+
     /// The pins that live in the core config itself rather than in the
     /// persona or the context.
     ///
@@ -229,7 +349,7 @@ impl MachineOverrides {
     /// The screen: a desktop profile that pins none reports the monitor it runs
     /// on (see `MONITOR_KEYS`). A pinned one is already in the config, since
     /// `apply` put it into the persona the config was derived from.
-    pub fn apply_config(&self, config: &mut serde_json::Value) {
+    pub fn apply_config(&self, config: &mut serde_json::Value, seed: u64) {
         if self.canvas == Some(CanvasMode::Real) {
             if let Some(noise) = config.get_mut("noise").and_then(|n| n.as_object_mut()) {
                 noise.remove("canvasSeed");
@@ -243,6 +363,60 @@ impl MachineOverrides {
                     screen.remove(*key);
                 }
                 screen.insert(REAL_SCREEN_MARKER.into(), serde_json::json!("real"));
+            }
+        }
+
+        if config.get("webrtc").is_none() {
+            config["webrtc"] = serde_json::json!({});
+        }
+        if let Some(webrtc) = config.get_mut("webrtc").and_then(|v| v.as_object_mut()) {
+            match &self.webrtc {
+                Some(ov) if ov.mode == WebRtcMode::Fixed => {
+                    webrtc.insert("mode".into(), serde_json::json!("fixed"));
+                    if let Some(ip) = ov.public_ip.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+                        webrtc.insert("publicIp".into(), serde_json::json!(ip));
+                    } else {
+                        webrtc.remove("publicIp");
+                    }
+                    if let Some(ip) = ov.local_ip.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+                        webrtc.insert("localIp".into(), serde_json::json!(ip));
+                    } else {
+                        webrtc.remove("localIp");
+                    }
+                }
+                Some(ov) if ov.mode == WebRtcMode::BaseOnIp => {
+                    webrtc.insert("mode".into(), serde_json::json!("base_on_ip"));
+                    webrtc.remove("publicIp");
+                    let local = ov
+                        .local_ip
+                        .as_deref()
+                        .map(str::trim)
+                        .filter(|s| !s.is_empty())
+                        .map(str::to_string);
+                    match (local, seed) {
+                        (Some(ip), _) => {
+                            webrtc.insert("localIp".into(), serde_json::json!(ip));
+                        }
+                        // A profile that has not been saved yet has no seed, and
+                        // therefore no stable private address to preview. The
+                        // launch generates the seed first and fills this in; an
+                        // invented value here would be one the launch changes.
+                        (None, 0) => {
+                            webrtc.remove("localIp");
+                        }
+                        (None, seed) => {
+                            webrtc.insert(
+                                "localIp".into(),
+                                serde_json::json!(derived_local_ip(seed)),
+                            );
+                        }
+                    }
+                }
+                _ => {
+                    webrtc.insert("mode".into(), serde_json::json!("off"));
+                    webrtc.remove("publicIp");
+                    webrtc.remove("localIp");
+                }
             }
         }
     }
@@ -333,6 +507,61 @@ impl MachineOverrides {
                     "{}, {} is not a place on Earth",
                     g.latitude, g.longitude
                 ));
+            }
+        }
+
+        if let Some(webrtc) = &self.webrtc {
+            let public = webrtc.public_ip.as_deref().filter(|s| !s.trim().is_empty());
+            let local = webrtc.local_ip.as_deref().filter(|s| !s.trim().is_empty());
+            match webrtc.mode {
+                WebRtcMode::Off => {
+                    if public.is_some() || local.is_some() {
+                        errs.push(
+                            "WebRTC Off reports no candidates, so it takes no public or local IP"
+                                .into(),
+                        );
+                    }
+                }
+                WebRtcMode::Fixed => {
+                    match public {
+                        None => errs.push("WebRTC Fixed needs the public IP it reports".into()),
+                        Some(value) => match parse_ip(value, "the WebRTC public IP") {
+                            Err(e) => errs.push(e),
+                            Ok(ip) if !is_public_ip(ip) => errs.push(format!(
+                                "WebRTC public IP {ip} is not a globally routable address"
+                            )),
+                            Ok(_) => {}
+                        },
+                    }
+                    match local {
+                        None => errs.push("WebRTC Fixed needs the local IP it reports".into()),
+                        Some(value) => match parse_ip(value, "the WebRTC local IP") {
+                            Err(e) => errs.push(e),
+                            Ok(ip) if !is_private_local_ip(ip) => errs.push(format!(
+                                "WebRTC local IP {ip} is not a private address"
+                            )),
+                            Ok(_) => {}
+                        },
+                    }
+                }
+                WebRtcMode::BaseOnIp => {
+                    if public.is_some() {
+                        errs.push(
+                            "WebRTC Base on IP takes its public address from the proxy exit; \
+                             remove the public IP"
+                                .into(),
+                        );
+                    }
+                    if let Some(value) = local {
+                        match parse_ip(value, "the WebRTC local IP") {
+                            Err(e) => errs.push(e),
+                            Ok(ip) if !is_private_local_ip(ip) => errs.push(format!(
+                                "WebRTC local IP {ip} is not a private address"
+                            )),
+                            Ok(_) => {}
+                        }
+                    }
+                }
             }
         }
 
@@ -459,17 +688,21 @@ mod tests {
 
     #[test]
     fn real_canvas_drops_the_seed_and_says_so_and_noise_changes_nothing() {
-        let config = || serde_json::json!({ "noise": { "canvasSeed": 7, "audioSeed": 9 } });
+        let config = || serde_json::json!({
+            "noise": { "canvasSeed": 7, "audioSeed": 9 },
+            "webrtc": { "mode": "off", "ipHandlingPolicy": "disable_non_proxied_udp" },
+        });
 
         let mut real = config();
-        MachineOverrides { canvas: Some(CanvasMode::Real), ..Default::default() }.apply_config(&mut real);
+        MachineOverrides { canvas: Some(CanvasMode::Real), ..Default::default() }
+            .apply_config(&mut real, 1);
         assert!(real["noise"].get("canvasSeed").is_none());
         assert_eq!(real["noise"]["canvas"], "real");
         assert_eq!(real["noise"]["audioSeed"], 9, "audio noise is not canvas");
 
         for ov in [MachineOverrides::default(), MachineOverrides { canvas: Some(CanvasMode::Noise), ..Default::default() }] {
             let mut same = config();
-            ov.apply_config(&mut same);
+            ov.apply_config(&mut same, 1);
             assert_eq!(same, config());
         }
         assert_eq!(
@@ -493,7 +726,7 @@ mod tests {
         let win = persona("win11-rtx4060-1920x1080");
 
         let mut c = win.derive_core_config(1, &ctx);
-        MachineOverrides::default().apply_config(&mut c);
+        MachineOverrides::default().apply_config(&mut c, 1);
         for key in MONITOR_KEYS {
             assert!(c["screen"].get(*key).is_none(), "{key} is still the persona's");
         }
@@ -508,14 +741,205 @@ mod tests {
             ..Default::default()
         };
         let mut c = pin.apply(&win, &all).unwrap().derive_core_config(1, &ctx);
-        pin.apply_config(&mut c);
+        pin.apply_config(&mut c, 1);
         assert_eq!(c["screen"]["width"], 2560);
         assert!(c["screen"].get("size").is_none());
 
         // A handset's screen is the model and stays.
         let mut phone = serde_json::json!({ "mobile": { "enabled": true }, "screen": { "width": 412, "height": 915 } });
-        MachineOverrides::default().apply_config(&mut phone);
+        MachineOverrides::default().apply_config(&mut phone, 1);
         assert_eq!(phone["screen"]["width"], 412);
+    }
+
+    #[test]
+    fn webrtc_off_takes_no_addresses_and_fixed_needs_both() {
+        let all = catalogue::all();
+        let win = persona("win11-rtx4060-1920x1080");
+
+        let fixed = MachineOverrides {
+            webrtc: Some(WebRtcOverride {
+                mode: WebRtcMode::Fixed,
+                public_ip: Some("8.8.8.8".into()),
+                local_ip: Some("192.168.1.20".into()),
+            }),
+            ..Default::default()
+        };
+        fixed
+            .apply(&win, &all)
+            .expect("a globally routable public address and a private local one");
+
+        for bad in [
+            WebRtcOverride {
+                mode: WebRtcMode::Fixed,
+                public_ip: Some("192.168.1.20".into()),
+                local_ip: Some("192.168.1.20".into()),
+            },
+            WebRtcOverride {
+                mode: WebRtcMode::Fixed,
+                public_ip: Some("8.8.8.8".into()),
+                local_ip: Some("8.8.8.8".into()),
+            },
+            WebRtcOverride {
+                mode: WebRtcMode::Fixed,
+                public_ip: None,
+                local_ip: Some("192.168.1.20".into()),
+            },
+            WebRtcOverride {
+                mode: WebRtcMode::BaseOnIp,
+                public_ip: Some("8.8.8.8".into()),
+                local_ip: None,
+            },
+            WebRtcOverride {
+                mode: WebRtcMode::Off,
+                public_ip: Some("8.8.8.8".into()),
+                local_ip: None,
+            },
+            WebRtcOverride {
+                mode: WebRtcMode::BaseOnIp,
+                public_ip: None,
+                local_ip: Some("8.8.8.8".into()),
+            },
+        ] {
+            let ov = MachineOverrides { webrtc: Some(bad.clone()), ..Default::default() };
+            assert!(ov.apply(&win, &all).is_err(), "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn webrtc_config_follows_the_mode_and_the_seed() {
+        let seed = 0x1234_5678;
+        let mut config =
+            serde_json::json!({ "webrtc": { "ipHandlingPolicy": "disable_non_proxied_udp" } });
+
+        MachineOverrides::default().apply_config(&mut config, seed);
+        assert_eq!(config["webrtc"]["mode"], "off");
+        assert!(config["webrtc"].get("publicIp").is_none());
+        assert!(config["webrtc"].get("localIp").is_none());
+
+        let base = MachineOverrides {
+            webrtc: Some(WebRtcOverride {
+                mode: WebRtcMode::BaseOnIp,
+                public_ip: None,
+                local_ip: None,
+            }),
+            ..Default::default()
+        };
+        let mut config =
+            serde_json::json!({ "webrtc": { "ipHandlingPolicy": "disable_non_proxied_udp" } });
+        base.apply_config(&mut config, seed);
+        assert_eq!(config["webrtc"]["mode"], "base_on_ip");
+        assert_eq!(config["webrtc"]["localIp"], derived_local_ip(seed));
+        assert!(config["webrtc"].get("publicIp").is_none());
+
+        // A profile that has not been saved yet has no seed to derive from.
+        let mut preview =
+            serde_json::json!({ "webrtc": { "ipHandlingPolicy": "disable_non_proxied_udp" } });
+        base.apply_config(&mut preview, 0);
+        assert!(
+            preview["webrtc"].get("localIp").is_none(),
+            "an unsaved profile must not preview an address the launch will change"
+        );
+
+        let fixed = MachineOverrides {
+            webrtc: Some(WebRtcOverride {
+                mode: WebRtcMode::Fixed,
+                public_ip: Some("8.8.8.8".into()),
+                local_ip: Some("10.0.0.7".into()),
+            }),
+            ..Default::default()
+        };
+        fixed.apply_config(&mut config, seed);
+        assert_eq!(config["webrtc"]["mode"], "fixed");
+        assert_eq!(config["webrtc"]["publicIp"], "8.8.8.8");
+        assert_eq!(config["webrtc"]["localIp"], "10.0.0.7");
+    }
+
+    #[test]
+    fn webrtc_candidate_keys_are_required_only_when_a_mode_reports_them() {
+        use crate::persona::ProfileContext;
+        let win = persona("win11-rtx4060-1920x1080");
+        let ctx = ProfileContext {
+            timezone: "Europe/Berlin".into(),
+            languages: vec!["en-US".into()],
+            ui_locale: "en-US".into(),
+            geolocation: None,
+            chrome_major: 155,
+            chrome_full_version: "155.0.8059.39".into(),
+        };
+
+        let mut off = win.derive_core_config(1, &ctx);
+        MachineOverrides::default().apply_config(&mut off, 1);
+        crate::fingerprint::check_core_config(&off)
+            .expect("off asks for no candidate addresses");
+
+        let fixed = MachineOverrides {
+            webrtc: Some(WebRtcOverride {
+                mode: WebRtcMode::Fixed,
+                public_ip: Some("8.8.8.8".into()),
+                local_ip: Some("192.168.1.20".into()),
+            }),
+            ..Default::default()
+        };
+        let mut done = win.derive_core_config(1, &ctx);
+        fixed.apply_config(&mut done, 1);
+        crate::fingerprint::check_core_config(&done)
+            .expect("fixed supplies both addresses");
+
+        let half = MachineOverrides {
+            webrtc: Some(WebRtcOverride {
+                mode: WebRtcMode::Fixed,
+                public_ip: None,
+                local_ip: Some("192.168.1.20".into()),
+            }),
+            ..Default::default()
+        };
+        let mut broken = win.derive_core_config(1, &ctx);
+        half.apply_config(&mut broken, 1);
+        let errs = crate::fingerprint::check_core_config(&broken)
+            .expect_err("fixed without a public address must not launch");
+        assert!(
+            errs.iter().any(|e| e.contains("webrtc.publicIp")),
+            "{errs:?}"
+        );
+    }
+
+    #[test]
+    fn the_new_profile_defaults_are_real_canvas_and_base_on_ip() {
+        let defaults = MachineOverrides::for_new_profile();
+        assert_eq!(defaults.canvas, Some(CanvasMode::Real));
+        assert_eq!(
+            defaults.webrtc.as_ref().map(|w| w.mode),
+            Some(WebRtcMode::BaseOnIp)
+        );
+        assert_eq!(
+            serde_json::to_string(&defaults).unwrap(),
+            r#"{"canvas":"real","webrtc":{"mode":"base_on_ip"}}"#
+        );
+
+        // An explicit choice is the operator's, even on a new profile.
+        let mut explicit = MachineOverrides {
+            canvas: Some(CanvasMode::Noise),
+            webrtc: Some(WebRtcOverride {
+                mode: WebRtcMode::Off,
+                public_ip: None,
+                local_ip: None,
+            }),
+            ..Default::default()
+        };
+        explicit.apply_new_profile_defaults();
+        assert_eq!(explicit.canvas, Some(CanvasMode::Noise));
+        assert_eq!(
+            explicit.webrtc.as_ref().map(|w| w.mode),
+            Some(WebRtcMode::Off)
+        );
+    }
+
+    #[test]
+    fn a_derived_local_ip_is_private_and_stable() {
+        let ip: std::net::IpAddr = derived_local_ip(7).parse().unwrap();
+        assert!(is_private_local_ip(ip));
+        assert_eq!(derived_local_ip(7), derived_local_ip(7));
+        assert_ne!(derived_local_ip(7), derived_local_ip(8));
     }
 
     #[test]

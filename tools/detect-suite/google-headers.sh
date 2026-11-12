@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: AGPL-3.0-or-later
-# Copyright 2026 Bogdan Shapovalov and the Fury authors
+# Copyright 2026 Bogdan Shapovalov and the XChange authors
 
 # Does this browser send Chrome's Google-only request headers?
 #
@@ -14,13 +14,13 @@
 # fonts.gstatic.com is on a large share of the web, so "nobody but Google" is
 # not a small audience.
 #
-# Measured 12.09.2026 on this Mac, Chrome 153.0.8010.36 vs the Fury core built
+# Measured 12.09.2026 on this Mac, Chrome 153.0.8010.36 vs the XChange core built
 # from 153.0.8010.37, a page on github.io embedding reCAPTCHA:
 #
 #   Chrome: x-browser-validation on 12 requests to www.google.com and 6 to
 #           fonts.gstatic.com; x-client-data on 15 and 6 (second launch — the
 #           seed arrives on the first and applies on the next).
-#   Fury:   none of the five, on any host.
+#   XChange:   none of the five, on any host.
 #
 # The headers are only visible in a net-log: they travel inside TLS and the
 # relay sees a CONNECT tunnel. So this launches the browser with a throwaway

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright 2026 Bogdan Shapovalov and the Fury authors
+// Copyright 2026 Bogdan Shapovalov and the XChange authors
 
 import { Brand } from "./Brand";
 import { useEffect, useState } from "react";
@@ -81,7 +81,7 @@ export function Login({
         // Told, not blocked: the sign-in stands, and Settings has the
         // enrolment. Locking people out the day a policy changes is how
         // policies get turned off.
-        sessionStorage.setItem("fury.mustEnrolTotp", "1");
+        sessionStorage.setItem("xchange.mustEnrolTotp", "1");
       }
       // Unlocking is not the same as signing in, and it is only the second one
       // that this call finishing means. A member whose key has not been handed

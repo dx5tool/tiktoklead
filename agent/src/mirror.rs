@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright 2026 Bogdan Shapovalov and the Fury authors
+// Copyright 2026 Bogdan Shapovalov and the XChange authors
 
 //! Synchronised windows: what you do in one profile, every other profile in
 //! the group does too — in its own way.
@@ -513,7 +513,7 @@ fn jitter(lo: u64, hi: u64) -> u64 {
 }
 
 const BINDING: &str = "__furyMirror";
-const WORLD: &str = "fury-mirror";
+const WORLD: &str = "xchange-mirror";
 
 /// Installed in an isolated world in every page of every member. Reports
 /// clicks, keys and wheel ticks through the binding; nothing it does is visible

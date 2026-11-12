@@ -136,5 +136,5 @@ du -sh "$here/dist-core/Fury" | cut -f1
 
 echo "== packing"
 mkdir -p "$dist"
-tar -cJf "$dist/fury-core-windows.tar.xz" -C "$here/dist-core" Fury
-ls -la "$dist/fury-core-windows.tar.xz" | awk '{printf "   %.0f MB\n", $5/1000000}'
+tar -cJf "$dist/xchange-core-windows.tar.xz" -C "$here/dist-core" Fury
+ls -la "$dist/xchange-core-windows.tar.xz" | awk '{printf "   %.0f MB\n", $5/1000000}'

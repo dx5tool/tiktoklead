@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright 2026 Bogdan Shapovalov and the Fury authors
+// Copyright 2026 Bogdan Shapovalov and the XChange authors
 
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useEffect, useState } from "react";
@@ -8,7 +8,7 @@ import { isDesktop } from "./api";
 export const themes = ["system", "dark", "light"] as const;
 export type Theme = (typeof themes)[number];
 
-const KEY = "fury.theme";
+const KEY = "xchange.theme";
 
 /** Theme choice, applied to the document root.
  *

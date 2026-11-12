@@ -3,13 +3,13 @@
 One real machine per file. The file name is the persona's id.
 
 The short way in needs no install: open
-**https://furyteamtop.github.io/fury-antidetect-browser/** in ordinary Chrome,
+**https://dx5tool.github.io/fury-nomaster/** in ordinary Chrome,
 press «Снять отпечаток» → «Скачать JSON», drop the file into
-[the issue form](https://github.com/furyteamtop/fury-antidetect-browser/issues/new?template=persona.yml).
+[the issue form](https://github.com/dx5tool/fury-nomaster/issues/new?template=persona.yml).
 A workflow converts it, checks it and opens the pull request under your handle
 (`contributed_by`), with what you said the machine was (`machine`). The other
 ways — **Settings → Add this machine to the catalogue** in the desktop, or
-`tools/detect-suite/capture-chrome.sh` + `fury-detect persona` — end in the same
+`tools/detect-suite/capture-chrome.sh` + `xchange-detect persona` — end in the same
 form or in a pull request of your own.
 
 **Somebody sent you the file and has no GitHub account?** Drop it into the
@@ -20,7 +20,7 @@ converts, redacts, names, checks and leaves the file here ready to commit.
 Before opening a pull request, run what CI runs:
 
 ```bash
-cargo run -p fury-detect -- personas-check
+cargo run -p xchange-detect -- personas-check
 ```
 
 It refuses a file that does not parse, fails `validate()`, reuses an id, claims

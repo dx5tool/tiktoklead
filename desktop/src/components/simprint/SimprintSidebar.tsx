@@ -1,17 +1,18 @@
-import React, { useState } from "react";
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright 2026 Bogdan Shapovalov and the XChange authors
+
+import React from "react";
 import {
   Layers,
   Share2,
   Network,
   Puzzle,
+  FolderKanban,
   Bot,
   Users as UsersIcon,
   Trash2,
-  Plus,
   Settings as SettingsIcon,
-  Folder,
   ChevronRight,
-  MoreVertical,
 } from "lucide-react";
 import { useI18n } from "../../i18n";
 import type { Me, Project, Shell } from "../../api";
@@ -31,7 +32,6 @@ interface SimprintSidebarProps {
   onDeleteProject: (p: Project) => void;
   view: View;
   onView: (v: View) => void;
-  onNewProfile: () => void;
   onSettings: () => void;
 }
 
@@ -40,6 +40,7 @@ const NAV_ICONS: Record<View, React.ComponentType<{ className?: string; size?: n
   sharedWithMe: Share2,
   proxies: Network,
   extensions: Puzzle,
+  projects: FolderKanban,
   assistants: Bot,
   users: UsersIcon,
   trash: Trash2,
@@ -59,53 +60,23 @@ export const SimprintSidebar: React.FC<SimprintSidebarProps> = ({
   onDeleteProject,
   view,
   onView,
-  onNewProfile,
   onSettings,
 }) => {
   const { t } = useI18n();
   const local = shell.mode === "local";
-  const [activeMenuId, setActiveMenuId] = useState<string | null>(null);
 
   const navItems: View[] = local
-    ? ["profiles", "proxies", "extensions", "assistants", "users", "trash"]
-    : ["profiles", "sharedWithMe", "proxies", "extensions", "assistants", "users", "trash"];
-
-  const projectSections = local
-    ? ([["local", "app.projects"]] as const)
-    : ([
-        ["team", "app.projectsTeam"],
-        ["local", "app.projectsHere"],
-      ] as const);
+    ? ["profiles", "proxies", "extensions", "projects", "trash"]
+    : ["profiles", "sharedWithMe", "proxies", "extensions", "projects", "trash"];
 
   return (
     <aside
       className={`h-full flex flex-col justify-between bg-[var(--simprint-sidebar-bg)] border-r border-[var(--simprint-border)] text-[var(--simprint-text)] select-none z-20 transition-all duration-300 ease-in-out ${
-        collapsed ? "w-16 min-w-[4rem]" : "w-64 min-w-[16rem]"
+        collapsed ? "w-12 min-w-[3rem]" : "w-48 min-w-[12rem]"
       }`}
     >
-      {/* Sidebar Top: + New Profile Button */}
-      <div className={`p-3 ${collapsed ? "flex flex-col items-center" : "p-3 pb-2"}`}>
-        {!collapsed ? (
-          <button
-            onClick={onNewProfile}
-            className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl font-medium text-sm text-white bg-gradient-to-r from-cyan-500 via-sky-500 to-blue-600 hover:from-cyan-400 hover:via-sky-400 hover:to-blue-500 shadow-lg shadow-cyan-500/25 active:scale-[0.98] transition-all duration-200 border border-cyan-400/30 cursor-pointer"
-          >
-            <Plus size={18} className="stroke-[2.5]" />
-            <span>{t("bar.newProfile")}</span>
-          </button>
-        ) : (
-          <button
-            onClick={onNewProfile}
-            title={t("bar.newProfile")}
-            className="w-10 h-10 flex items-center justify-center rounded-xl text-white bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 shadow-md shadow-cyan-500/20 transition-all cursor-pointer border border-cyan-400/30 shrink-0"
-          >
-            <Plus size={20} className="stroke-[2.5]" />
-          </button>
-        )}
-      </div>
-
       {/* Main Navigation & Folders list */}
-      <nav className={`flex-1 overflow-y-auto py-2 space-y-4 ${collapsed ? "px-2" : "px-3"}`}>
+      <nav className={`flex-1 overflow-y-auto py-3 space-y-4 ${collapsed ? "px-1" : "px-3"}`}>
         {/* Core Nav Links */}
         <div className="space-y-1">
           {navItems.map((v) => {
@@ -141,159 +112,27 @@ export const SimprintSidebar: React.FC<SimprintSidebarProps> = ({
           })}
         </div>
 
-        {/* Project Folders */}
-        <div className={`pt-2 border-t border-[var(--simprint-border)] ${collapsed ? "space-y-2" : "space-y-3"}`}>
-          {projectSections.map(([side, label]) => {
-            const sideProjects = projects.filter((p) => p.origin === side);
-
-            if (collapsed) {
-              return (
-                <div key={side} className="space-y-1">
-                  {sideProjects.map((p) => {
-                    const isFolderActive = p.id === active?.id && view === "profiles";
-                    return (
-                      <button
-                        key={p.id}
-                        onClick={() => {
-                          onSelect(p);
-                          onView("profiles");
-                        }}
-                        title={`${p.name} (${p.profile_count})`}
-                        className={`w-10 h-9 mx-auto flex items-center justify-center rounded-xl transition-colors cursor-pointer relative ${
-                          isFolderActive
-                            ? "bg-cyan-500/15 text-cyan-600 dark:text-cyan-400 border border-cyan-500/30"
-                            : "text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 hover:bg-slate-200/60 dark:hover:bg-slate-800/40 !bg-transparent !border-0"
-                        }`}
-                      >
-                        <Folder size={16} className={isFolderActive ? "text-cyan-600 dark:text-cyan-400" : "text-slate-400 dark:text-slate-500"} />
-                        {p.profile_count > 0 && (
-                          <span className="absolute top-1 right-1 h-1.5 w-1.5 rounded-full bg-cyan-500" />
-                        )}
-                      </button>
-                    );
-                  })}
-                </div>
-              );
-            }
-
-            return (
-              <div key={side} className="space-y-1">
-                <div className="flex items-center justify-between px-3 py-1 text-xs font-semibold uppercase tracking-wider text-slate-500">
-                  <span>{t(label as never)}</span>
-                  <button
-                    onClick={() => onNewProject(side)}
-                    title={t(side === "local" ? "app.newProjectHere" : "app.newProject")}
-                    className="p-1 rounded-md text-slate-500 dark:text-slate-400 hover:text-cyan-600 dark:hover:text-cyan-400 hover:bg-cyan-500/10 transition-colors cursor-pointer !bg-transparent !border-0"
-                  >
-                    <Plus size={14} />
-                  </button>
-                </div>
-
-                {sideProjects.length === 0 ? (
-                  <div className="px-3 py-2 text-xs text-slate-500 italic">
-                    {side === "team" ? t("app.nothingShared") : t("app.noFoldersHere")}
-                  </div>
-                ) : (
-                  <div className="space-y-0.5">
-                    {sideProjects.map((p) => {
-                      const isFolderActive = p.id === active?.id && view === "profiles";
-                      const isMenuOpen = activeMenuId === p.id;
-                      return (
-                        <div key={p.id} className="relative group">
-                          <button
-                            onClick={() => {
-                              onSelect(p);
-                              onView("profiles");
-                            }}
-                            onContextMenu={(e) => {
-                              e.preventDefault();
-                              setActiveMenuId(isMenuOpen ? null : p.id);
-                            }}
-                            className={`w-full flex items-center justify-between px-3 py-1.5 rounded-lg text-xs font-medium transition-colors cursor-pointer ${
-                              isFolderActive
-                                ? "bg-cyan-500/15 text-cyan-700 dark:text-cyan-400 border border-cyan-500/30"
-                                : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 hover:bg-slate-200/60 dark:hover:bg-slate-800/40 !bg-transparent !border-0"
-                            }`}
-                          >
-                            <div className="flex items-center gap-2 truncate pr-2">
-                              <Folder size={14} className={isFolderActive ? "text-cyan-600 dark:text-cyan-400" : "text-slate-400 dark:text-slate-500"} />
-                              <span className="truncate">{p.name}</span>
-                            </div>
-                            <div className="flex items-center gap-1">
-                              <span
-                                className={`px-1.5 py-0.2 rounded-full text-[10px] ${
-                                  isFolderActive
-                                    ? "bg-cyan-100 text-cyan-800 dark:bg-cyan-500/20 dark:text-cyan-300 font-semibold"
-                                    : "bg-slate-200 text-slate-700 dark:bg-slate-800 dark:text-slate-400"
-                                }`}
-                              >
-                                {p.profile_count}
-                              </span>
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setActiveMenuId(isMenuOpen ? null : p.id);
-                                }}
-                                className="opacity-0 group-hover:opacity-100 p-0.5 rounded text-slate-400 hover:text-slate-900 dark:hover:text-white transition-opacity !bg-transparent !border-0"
-                              >
-                                <MoreVertical size={12} />
-                              </button>
-                            </div>
-                          </button>
-
-                          {/* Context Menu for Folder */}
-                          {isMenuOpen && (
-                            <div className="absolute right-2 top-8 w-36 py-1 bg-white border border-slate-200 text-slate-800 shadow-xl dark:bg-slate-900 dark:border-slate-700/80 dark:text-slate-300 dark:shadow-xl rounded-xl z-50 text-xs">
-                              <button
-                                onClick={() => {
-                                  setActiveMenuId(null);
-                                  onRenameProject(p);
-                                }}
-                                className="w-full text-left px-3 py-1.5 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-white !bg-transparent !border-0"
-                              >
-                                {t("proj.rename")}
-                              </button>
-                              {!local && p.origin === "local" && (
-                                <button
-                                  onClick={() => {
-                                    setActiveMenuId(null);
-                                    onSendProject(p);
-                                  }}
-                                  className="w-full text-left px-3 py-1.5 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-white !bg-transparent !border-0"
-                                >
-                                  {t("proj.sendAll")}
-                                </button>
-                              )}
-                              {!local && p.origin === "team" && (
-                                <button
-                                  onClick={() => {
-                                    setActiveMenuId(null);
-                                    onShareProject(p);
-                                  }}
-                                  className="w-full text-left px-3 py-1.5 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-white !bg-transparent !border-0"
-                                >
-                                  {t("proj.shareAll")}
-                                </button>
-                              )}
-                              <button
-                                onClick={() => {
-                                  setActiveMenuId(null);
-                                  onDeleteProject(p);
-                                }}
-                                className="w-full text-left px-3 py-1.5 text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-500/10 !bg-transparent !border-0"
-                              >
-                                {t("proj.delete")}
-                              </button>
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            );
-          })}
+        {/* Other settings */}
+        <div className="pt-2 border-t border-[var(--simprint-border)] space-y-1">
+          {!collapsed && (
+            <div className="px-3 py-1 text-xs font-semibold uppercase tracking-wider text-slate-500">
+              {t("app.otherSettings")}
+            </div>
+          )}
+          <button
+            onClick={onSettings}
+            title={collapsed ? t("app.settings") : undefined}
+            className={`flex items-center rounded-xl font-medium transition-all duration-150 cursor-pointer ${
+              collapsed
+                ? "w-10 h-10 mx-auto justify-center"
+                : "w-full justify-between px-3 py-2 text-sm"
+            } text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 hover:bg-slate-200/60 dark:hover:bg-slate-800/50 !bg-transparent !border-0`}
+          >
+            <div className={`flex items-center ${collapsed ? "justify-center" : "gap-3"}`}>
+              <SettingsIcon size={collapsed ? 19 : 18} className="text-slate-500 dark:text-slate-400" />
+              {!collapsed && <span>{t("app.settings")}</span>}
+            </div>
+          </button>
         </div>
       </nav>
 

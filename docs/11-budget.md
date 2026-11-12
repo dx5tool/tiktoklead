@@ -39,7 +39,7 @@
 Технически распространять неподписанное можно: пользователь снимает карантин вручную.
 
 ```bash
-xattr -dr com.apple.quarantine /Applications/Fury.app
+xattr -dr com.apple.quarantine /Applications/XChange.app
 ```
 
 Но для антидетект-браузера это плохо вдвойне: инструкция «отключите защиту macOS
