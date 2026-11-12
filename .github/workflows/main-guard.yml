@@ -1,0 +1,35 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright 2026 Bogdan Shapovalov and the XChange authors
+#
+# The server-side half of the free-tier guard on main. GitHub Free will not
+# enforce a ruleset on a private repository, so a direct push cannot be refused
+# before it lands; this job makes it visible instead: it fails when the pushed
+# commit did not arrive through a merged pull request. .githooks/pre-push is the
+# half that refuses the push locally in the first place.
+name: main-guard
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  guard:
+    name: main only moves through a pull request
+    runs-on: ubuntu-latest
+    steps:
+      - name: require a merged pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          merged=$(gh api "repos/${{ github.repository }}/commits/${{ github.sha }}/pulls" \
+                     --jq '[.[] | select(.merged_at != null)] | length')
+          if [ "$merged" -eq 0 ]; then
+            echo "::error::Direct push to main. Open a pull request instead."
+            exit 1
+          fi
+          echo "ok: this commit reached main through a merged pull request"

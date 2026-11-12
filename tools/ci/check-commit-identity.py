@@ -55,11 +55,11 @@ import sys
 # What the project commits as. A GitHub noreply address, deliberately: the
 # author does not want a personal email address in a public history, and once
 # published there is no taking it back.
-EXPECTED = "furyteamtop@users.noreply.github.com"
+EXPECTED = "63643270+dx5tool@users.noreply.github.com"
 
 # The names the project's author commits under. A commit carrying one of these
 # with an address other than EXPECTED is the slip the docstring describes.
-OWN_NAMES = {"Bogdan Shapovalov", "furyteamtop"}
+OWN_NAMES = {"dx5tool"}
 
 # The shapes a machine-derived address takes. `.local` is what macOS appends to
 # a hostname; `.lan`, `.home` and `.internal` are the common router defaults;
@@ -99,7 +99,7 @@ def main() -> int:
             print(f"                          {why}", file=sys.stderr)
         print(
             "\n!! Set it, so it cannot depend on whatever is configured globally:\n"
-            f'!!     git config --local user.name "Bogdan Shapovalov"\n'
+            f'!!     git config --local user.name "dx5tool"\n'
             f'!!     git config --local user.email "{EXPECTED}"\n'
             "!!\n"
             "!! Then rewrite the offending commits — while they are still local,\n"

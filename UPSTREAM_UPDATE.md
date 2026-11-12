@@ -25,7 +25,7 @@ Dự án này sử dụng kiến trúc phân tầng module hóa **"Ruột XChang
 | Đường dẫn dò core | `agent/src/main.rs` (`core_leaves`), `widevine.rs`, `dock.rs` | `Fury.app/Contents/MacOS/Fury`, `Fury/chrome.exe`, `Fury/fury.exe`. Tên thật bên trong archive core |
 | Bundle id core | `agent/src/dock.rs`, docs | `dev.fury.core` — nằm trong Info.plist đã ký |
 | Sản phẩm khác | `site/index.html`, `desktop/src/components/Settings.tsx` | `SEO Fury` / `seo-fury.com` — sản phẩm khác của cùng tác giả |
-| Danh tính git | `tools/ci/check-commit-identity.py` | `furyteamtop@users.noreply.github.com` — tài khoản GitHub thật |
+| Danh tính git | `tools/ci/check-commit-identity.py` | `63643270+dx5tool@users.noreply.github.com` — tài khoản GitHub thật |
 
 **Kiểm chứng sau mỗi lần rebase:**
 ```bash
