@@ -139,7 +139,7 @@
     },
     "iframe:cross-origin": {
       "__absent": true,
-      "why": "no second origin for furybrowser.dev"
+      "why": "no second origin for xchange.dev"
     },
     "iframe:same-origin": {
       "availHeight": 704,
@@ -346,7 +346,7 @@
       "webdriver": false
     },
     "errorMessage": "Cannot read properties of null (reading 'f')",
-    "errorStackShape": "TypeError: Cannot read properties of null (reading 'f') |     at https://furybrowser.dev/probe/probe.js:L:C",
+    "errorStackShape": "TypeError: Cannot read properties of null (reading 'f') |     at https://xchange.dev/probe/probe.js:L:C",
     "hasCaptureStackTrace": true,
     "jsHeapSizeLimit": 3140000000,
     "mathSinh": "1.1752011936438014",

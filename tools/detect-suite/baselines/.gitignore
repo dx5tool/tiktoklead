@@ -5,7 +5,7 @@
 #
 # To commit a reference baseline, redact it first and the name must say so:
 #
-#   cargo run -p fury-detect -- redact \\
+#   cargo run -p xchange-detect -- redact \\
 #     baselines/chrome-150-macos-arm64.json \\
 #     baselines/chrome-150-macos-arm64-redacted.json
 #
