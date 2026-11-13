@@ -16,6 +16,8 @@ dist-win/
 # A built Windows core staged for packing into a release. 490 MB unpacked; the
 # archive is what goes on the release page, never the directory.
 xchange-core-*/
+# Core archives are release assets, never tracked files.
+*-core-*.tar.xz
 
 # Tauri
 desktop/src-tauri/target/
