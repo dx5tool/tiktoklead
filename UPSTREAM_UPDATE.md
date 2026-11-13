@@ -22,7 +22,7 @@ Dự án này sử dụng kiến trúc phân tầng module hóa **"Ruột XChang
 | Crypto / định dạng dữ liệu | `shared-rs/src/keys.rs`, `agent/src/vault.rs`, `desktop/src-tauri/src/crypto.rs` | `fury-seal-v1`, `fury-profile-v1`, `fury-oscrypt-v1`, `fury-oscrypt-id-v1`, `fury:ork1:`, `fury:v1:`, `fury verify code v1`. Đổi → **toàn bộ dữ liệu đã mã hoá không mở được** |
 | Magic number file | `agent/src/bundle.rs` (`FURY-BN1`), `agent/src/transfer.rs` (`FURY-EX1/EX2`) | Định dạng bundle và file export. Đổi → file cũ không đọc được |
 | Dụng cụ đo fingerprint | `tools/detect-suite/probe.js`, `sw-probe.js`, `probe.html` | Chữ `'Fury <canvas> …'` vẽ lên canvas quyết định `canvasHash`/`textMetrics`/`clientRects`. Đổi → **lệch toàn bộ baseline đã commit, gate CI đỏ** |
-| Đường dẫn dò core | `agent/src/main.rs` (`core_leaves`), `widevine.rs`, `dock.rs` | `Fury.app/Contents/MacOS/Fury`, `Fury/chrome.exe`, `Fury/fury.exe`. Tên thật bên trong archive core |
+| Đường dẫn dò core | `agent/src/main.rs` (`core_leaves`), `widevine.rs`, `dock.rs` | macOS: `Fury.app/Contents/MacOS/Fury` (giữ nguyên). Windows: `XChange/chrome.exe`, `XChange/xchange.exe`; `Fury/chrome.exe` chỉ còn là fallback cho bản cài trước 1.4.22 và được `migrate_brand_dir` đổi tên. |
 | Bundle id core | `agent/src/dock.rs`, docs | `dev.fury.core` — nằm trong Info.plist đã ký |
 | Sản phẩm khác | `site/index.html`, `desktop/src/components/Settings.tsx` | `SEO Fury` / `seo-fury.com` — sản phẩm khác của cùng tác giả |
 | Danh tính git | `tools/ci/check-commit-identity.py` | `63643270+dx5tool@users.noreply.github.com` — tài khoản GitHub thật |

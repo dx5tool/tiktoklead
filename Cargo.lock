@@ -7054,7 +7054,7 @@ dependencies = [
 
 [[package]]
 name = "xchange-agent"
-version = "1.4.21"
+version = "1.4.22"
 dependencies = [
  "aes-gcm",
  "anyhow",
@@ -7092,7 +7092,7 @@ dependencies = [
 
 [[package]]
 name = "xchange-desktop"
-version = "1.4.21"
+version = "1.4.22"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -7122,7 +7122,7 @@ dependencies = [
 
 [[package]]
 name = "xchange-detect"
-version = "1.4.21"
+version = "1.4.22"
 dependencies = [
  "anyhow",
  "serde",
@@ -7133,7 +7133,7 @@ dependencies = [
 
 [[package]]
 name = "xchange-platform"
-version = "1.4.21"
+version = "1.4.22"
 dependencies = [
  "libc",
  "sha2",
@@ -7143,7 +7143,7 @@ dependencies = [
 
 [[package]]
 name = "xchange-server"
-version = "1.4.21"
+version = "1.4.22"
 dependencies = [
  "anyhow",
  "argon2",
@@ -7168,7 +7168,7 @@ dependencies = [
 
 [[package]]
 name = "xchange-shared"
-version = "1.4.21"
+version = "1.4.22"
 dependencies = [
  "argon2",
  "chacha20poly1305",

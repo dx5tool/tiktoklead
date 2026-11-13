@@ -120,14 +120,14 @@ for f in "${files[@]}"; do
 done
 [ "$missing" = 0 ] || exit 1
 
-# Staged under a directory named "Fury" so the archive expands to one folder
+# Staged under a directory named "XChange" so the archive expands to one folder
 # with a name, the same shape the macOS tarball has.
-rm -rf "$here/dist-core" && mkdir -p "$here/dist-core/Fury"
-cp "${files[@]}" "$here/dist-core/Fury/"
-for d in "${dirs[@]}"; do [ -d "$d" ] && cp -r "$d" "$here/dist-core/Fury/"; done
+rm -rf "$here/dist-core" && mkdir -p "$here/dist-core/XChange"
+cp "${files[@]}" "$here/dist-core/XChange/"
+for d in "${dirs[@]}"; do [ -d "$d" ] && cp -r "$d" "$here/dist-core/XChange/"; done
 
 echo "== staged"
-du -sh "$here/dist-core/Fury" | cut -f1
+du -sh "$here/dist-core/XChange" | cut -f1
 
 # No --version check here. chrome.exe is a GUI-subsystem binary: it writes
 # nothing to a console and its exit code says nothing useful, so "it did not
@@ -136,5 +136,5 @@ du -sh "$here/dist-core/Fury" | cut -f1
 
 echo "== packing"
 mkdir -p "$dist"
-tar -cJf "$dist/xchange-core-windows.tar.xz" -C "$here/dist-core" Fury
+tar -cJf "$dist/xchange-core-windows.tar.xz" -C "$here/dist-core" XChange
 ls -la "$dist/xchange-core-windows.tar.xz" | awk '{printf "   %.0f MB\n", $5/1000000}'

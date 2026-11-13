@@ -47,6 +47,27 @@ pub fn migrate_legacy_dir() {
     }
 }
 
+/// Renames `core.bundle/Fury` to `core.bundle/XChange`.
+///
+/// The archive published from 1.4.22 puts its files under `XChange/`; an
+/// installation made before that still has `Fury/`. `core_leaves` accepts both,
+/// so a failure here is not fatal: a browser holding its own files open only
+/// postpones the rename to the next start.
+pub fn migrate_brand_dir() {
+    let dir = crate::paths::core_dir();
+    let (old, new) = (dir.join("Fury"), dir.join("XChange"));
+    if !old.is_dir() || new.exists() {
+        return;
+    }
+    match std::fs::rename(&old, &new) {
+        Ok(()) => tracing::info!(
+            from = %old.display(), to = %new.display(),
+            "renamed the installed core directory"
+        ),
+        Err(e) => tracing::warn!(error = %e, "could not rename {}", old.display()),
+    }
+}
+
 /// Installs a core from `src`, which may be a `.tar.xz`/`.tar.gz` archive, a
 /// `.app` bundle, or the directory one was unpacked into.
 pub fn install(src: &Path) -> Result<PathBuf> {

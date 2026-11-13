@@ -30,7 +30,7 @@ enable_hangout_services_extension = false
 # build with this off still answers requestMediaKeySystemAccess correctly once
 # agent/src/widevine.rs has staged the blob. On Windows it does not.
 #
-# The staging works: 22,970,008 bytes land in core.bundle/Fury/WidevineCdm from
+# The staging works: 22,970,008 bytes land in core.bundle/XChange/WidevineCdm from
 # the Chrome installed on the machine. The browser still refuses. Asked through
 # a profile launched by the agent, with that CDM in place:
 #

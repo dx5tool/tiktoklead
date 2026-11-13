@@ -541,10 +541,11 @@ pub fn core_outdated(exe: &std::path::Path) -> Option<String> {
 /// 0.4.12 rebuilt both: what demo.fingerprint.com named tampering -- client
 /// rects off the layout grid (0033), WebGL extensions out of Chrome's order
 /// (0031) -- and Chrome's own Google voices (0042).
-/// 1.4.21 packaged the Windows core for the fork's `tiktoklead` release. The
-/// macOS/Linux constant stays at the last published core: no new macOS core is
-/// part of this release, so a Mac must not be told to download one that is not
-/// there.
+/// 1.4.21 packaged the Windows core for the fork's `tiktoklead` release, and
+/// 1.4.22 renamed the container inside that archive from `Fury/` to
+/// `XChange/`. The core build itself is still 1.4.21. The macOS/Linux constant
+/// stays at the last published core: no new macOS core is part of this release,
+/// so a Mac must not be told to download one that is not there.
 #[cfg(windows)]
 pub const CORE_BUILD: &str = "1.4.21";
 #[cfg(not(windows))]
@@ -703,6 +704,7 @@ pub fn core_binary() -> Option<std::path::PathBuf> {
     // installed before that has to be brought along, or it silently stops
     // being found.
     crate::install_core::migrate_legacy_dir();
+    crate::install_core::migrate_brand_dir();
     let dir = crate::paths::core_dir();
     core_leaves().iter().map(|l| dir.join(l)).find(|p| p.exists())
 }
@@ -840,7 +842,14 @@ fn core_leaves() -> &'static [&'static str] {
         // The bare names stay last, for a build directory handed over with
         // FURY_CORE and for anything installed before the archive gained its
         // top-level directory.
+        //
+        // `Fury/` is the container the archive used before 1.4.22. It stays as
+        // a fallback for an installation that has not been renamed yet; the
+        // rename itself is install_core::migrate_brand_dir, which runs before
+        // this list is consulted.
         &[
+            "XChange/chrome.exe",
+            "XChange/xchange.exe",
             "Fury/chrome.exe",
             "Fury/fury.exe",
             "xchange.exe",
