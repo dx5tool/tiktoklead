@@ -541,8 +541,12 @@ pub fn core_outdated(exe: &std::path::Path) -> Option<String> {
 /// 0.4.12 rebuilt both: what demo.fingerprint.com named tampering -- client
 /// rects off the layout grid (0033), WebGL extensions out of Chrome's order
 /// (0031) -- and Chrome's own Google voices (0042).
+/// 1.4.21 packaged the Windows core for the fork's `tiktoklead` release. The
+/// macOS/Linux constant stays at the last published core: no new macOS core is
+/// part of this release, so a Mac must not be told to download one that is not
+/// there.
 #[cfg(windows)]
-pub const CORE_BUILD: &str = "0.4.14";
+pub const CORE_BUILD: &str = "1.4.21";
 #[cfg(not(windows))]
 pub const CORE_BUILD: &str = "0.4.14";
 
