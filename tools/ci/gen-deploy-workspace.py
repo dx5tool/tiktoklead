@@ -64,7 +64,7 @@ def section(text: str, name: str) -> str:
 
 
 def render() -> str:
-    src = SOURCE.read_text()
+    src = SOURCE.read_text(encoding="utf-8")
     members = "\n".join(f'    "{m}",' for m in MEMBERS)
     return (
         f"{HEADER}\n"
@@ -78,7 +78,7 @@ def render() -> str:
 def main() -> int:
     want = render()
     if "--check" in sys.argv:
-        have = TARGET.read_text() if TARGET.exists() else ""
+        have = TARGET.read_text(encoding="utf-8") if TARGET.exists() else ""
         if have != want:
             print(
                 f"!! {TARGET.relative_to(ROOT)} is out of date — run "
@@ -89,7 +89,7 @@ def main() -> int:
         print(f"{TARGET.relative_to(ROOT)} matches the workspace manifest")
         return 0
 
-    TARGET.write_text(want)
+    TARGET.write_text(want, encoding="utf-8", newline="\n")
     print(f"wrote {TARGET.relative_to(ROOT)}")
     return 0
 
